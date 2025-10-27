@@ -5,22 +5,26 @@ Deterministic Chess Engine Analysis Module
 Provides Stockfish-based position analysis and text formatting utilities.
 """
 
-from typing import Any
+from collections.abc import Sequence
 
 import chess
 import chess.engine
 import click
+from chess.engine import InfoDict
 
 STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
 
 
 def format_score(score: chess.engine.PovScore) -> str:
-    return f"{score.relative.score()/100:+.2f}" if score.relative.score() is not None else "0.00"
+    score_value = score.relative.score()
+    if score_value is not None:
+        return f"{score_value/100:+.2f}"
+    return "0.00"
 
 
 def analyze_position(
     board: chess.Board, stockfish_path: str = STOCKFISH_PATH, num_lines: int = 5, depth: int = 20
-) -> list[dict[str, Any]]:
+) -> Sequence[InfoDict]:
     if num_lines == 0:
         return []
 
@@ -30,8 +34,8 @@ def analyze_position(
     return analysis_results
 
 
-def format_as_text(board: chess.Board, analysis_results: list[dict[str, Any]]) -> str:
-    lines = []
+def format_as_text(board: chess.Board, analysis_results: Sequence[InfoDict]) -> str:
+    lines: list[str] = []
     lines.append("POSITION:")
     lines.append(str(board))
     lines.append(f"\nFEN: {board.fen()}")
@@ -46,13 +50,14 @@ def format_as_text(board: chess.Board, analysis_results: list[dict[str, Any]]) -
             depth = info.get("depth", "?")
 
             temp_board = board.copy()
-            san_moves = []
+            san_moves: list[str] = []
             for move in pv[:8]:
                 san_moves.append(temp_board.san(move))
                 temp_board.push(move)
             move_sequence = " ".join(san_moves)
 
-            lines.append(f"Line {i} (Depth {depth}): Eval {format_score(score)}")
+            eval_str = format_score(score) if score is not None else "N/A"
+            lines.append(f"Line {i} (Depth {depth}): Eval {eval_str}")
             lines.append(f"  Moves: {move_sequence}")
             if len(pv) > 8:
                 lines.append(f"  ... and {len(pv) - 8} more moves")
