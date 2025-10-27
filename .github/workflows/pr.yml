@@ -27,4 +27,4 @@ jobs:
       - name: Build Docker image
         run: docker build -t chess-sandbox:test .
       - name: Run integration tests in Docker
-        run: docker run --rm chess-sandbox:test /app/.venv/bin/python -m pytest /app/chess_sandbox/engine_analysis.py -v
+        run: docker run --rm chess-sandbox:test /app/.venv/bin/python -m pytest -m integration -v

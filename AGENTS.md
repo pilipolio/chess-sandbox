@@ -1,5 +1,7 @@
 # AI Agent Instructions
 
+## Coding standards
+
 ## Pre-commit Checks
 
 Run all checks before committing:

@@ -20,6 +20,15 @@ class PrincipalVariation(BaseModel):
 
 
 def info_to_pv(info: InfoDict, board: chess.Board) -> PrincipalVariation | None:
+    """Convert engine InfoDict to PrincipalVariation with SAN moves.
+
+    >>> import chess.engine
+    >>> board = chess.Board()
+    >>> # Simulate engine info for e2e4
+    >>> info = {'pv': [chess.Move.from_uci('e2e4')], 'score': chess.engine.PovScore(chess.engine.Cp(17), chess.WHITE)}
+    >>> info_to_pv(info, board)
+    PrincipalVariation(score=0.17, san_moves=['e4'])
+    """
     score = info.get("score")
 
     pv = info.get("pv", [])
@@ -38,10 +47,13 @@ def info_to_pv(info: InfoDict, board: chess.Board) -> PrincipalVariation | None:
 def analyze_position(board: chess.Board, num_lines: int = 5, depth: int = 20) -> list[PrincipalVariation]:
     """Analyze position with Stockfish, returning top principal variations.
 
-    >>> board = chess.Board()  # Starting position
-    >>> results = analyze_position(board, num_lines=1, depth=1)
-    >>> results
-    [PrincipalVariation(score=0.17, san_moves=['e4'])]
+    Args:
+        board: Chess board position to analyze
+        num_lines: Number of principal variations to return (default: 5)
+        depth: Search depth for the engine (default: 20)
+
+    Returns:
+        List of PrincipalVariation objects with scores and move sequences
     """
     if num_lines == 0:
         return []
