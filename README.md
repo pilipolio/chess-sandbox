@@ -5,13 +5,54 @@ Experimenting with chess engines and LLMs.
 ## Features
 
 - **Chess Engine Analysis**: Analyze chess positions using Stockfish
-- **Configurable Engine Path**: Works across different platforms (macOS, Linux, Docker)
-- **Docker Support**: Self-contained Docker image with Stockfish pre-compiled
-- **CLI Tool**: Analyze positions from the command line
+
+```
+ ▐▛███▜▌   Claude Code v2.0.27
+▝▜█████▛▘  Sonnet 4.5 · Claude Max
+  ▘▘ ▝▝    /Users/guillaumeallain/D/chess-sandbox
+
+> Analyze this chess position 8/8/2K5/p1p5/P1P5/1k6/8/8 w - -
+0 58
+
+⏺ I'll analyze this chess position for you using the
+  chess-analysis skill.
+
+> The "chess-analysis" skill is running
+
+⏺ I'll analyze this endgame position for you.
+
+⏺ Bash(uv run python -m chess_sandbox.engine_analysis
+      "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58")
+  ⎿  POSITION:
+     . . . . . . . .
+     . . . . . . . .
+     … +31 lines (ctrl+o to expand)
+
+⏺ Position Analysis
+
+  . . . . . . . .
+  . . . . . . . .
+  . . K . . . . .
+  p . p . . . . .
+  P . P . . . . .
+  . k . . . . . .
+  . . . . . . . .
+  . . . . . . . .
+
+  Position Assessment: This is a critical king and pawn
+  endgame. White has one winning move (Kb5), but the position
+  is a dead draw with any other move. The evaluation swings
+  dramatically from +13.35 (winning) to 0.00 (draw) or even
+  -13.35 (losing) depending on White's choice.
+
+  Best Move: Kb5!
+
+  ...
+  ```
 
 ## Tech stack
 
- * Project scaffolding based off https://github.com/carderne/postmodern-python
+ * Project scaffolding templated from https://github.com/carderne/postmodern-python
 
 ## Quick Start
 
