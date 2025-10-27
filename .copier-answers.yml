@@ -1,0 +1,10 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: ecc4a53
+_src_path: https://github.com/carderne/postmodern-python
+description: Experimenting with chess engines and LLMs
+include_dockerfile: true
+module_name: chess_sandbox
+project_name: chess-sandbox
+python_version: '3.13'
+user_email: guillaume.allain@gmail.com
+user_name: Guillaume Allain
