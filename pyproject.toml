@@ -15,12 +15,12 @@ all = [ {ref="fmt"}, {ref="lint"}, {ref="check"}, {ref="test"} ]
 [project]
 name = "chess_sandbox"
 version = "0.1.0"
-description = "Experimenting with chess engines and LLMs"
+description = "Chess commentary generation using LLMs and Stockfish"
 readme = "README.md"
 authors = [
     { name = "Guillaume Allain", email = "guillaume.allain@gmail.com" }
 ]
-keywords = ["chess", "stockfish", "analysis"]
+keywords = ["chess", "stockfish", "llm", "openai", "claude", "commentary", "analysis"]
 
 # Public libraries should be more lenient
 # Internal stuff should enforce ~=3.13!

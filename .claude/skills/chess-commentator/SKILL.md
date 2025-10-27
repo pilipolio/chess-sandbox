@@ -1,9 +1,9 @@
 ---
-name: chess-analysis
+name: chess-commentator
 description: This skill should be used when analyzing chess positions. Automatically triggers when users provide FEN positions for analysis or ask about specific chess positions. Provides engine-powered analysis with natural language explanations of best moves, key variations, and strategic/tactical themes.
 ---
 
-# ChessAnalysis
+# Chess Commentator
 
 ## Overview
 
