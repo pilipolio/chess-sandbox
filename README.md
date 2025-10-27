@@ -4,20 +4,8 @@ Chess commentary generation using LLMs and Stockfish engine analysis.
 
 ## Features
 
-### Two Approaches to Chess Commentary
-
-This project demonstrates two distinct approaches to generating natural language chess commentary:
-
-1. **Claude Skill (Interactive)** - Claude Code skill for interactive position analysis with human-in-the-loop commentary
-2. **OpenAI Commentator (Automated)** - End-to-end automated commentary pipeline using OpenAI models
-
-Both approaches combine Stockfish engine analysis with LLM reasoning to explain chess positions.
-
-### Additional Capabilities
-
-- **Engine Analysis Foundation** - Stockfish-based position evaluation and principal variation analysis
-- **Data Collection Pipeline** - Scrape chess positions with themes from HTML blogs
-- **Evaluation System** - Batch evaluation and benchmarking of LLM commentary quality using LLM judges
+1. **Chess Commentator Skill** - A Claude [Skill](https://www.anthropic.com/news/skills) providing Stockfish chess engine as a tool for interactive position analysis with human-in-the-loop commentary
+2. **Chess Commentator LLM Workflow** - Commentary generation pipeline using OpenAI models
 
 ## Quick Start
 
@@ -46,24 +34,24 @@ cp .env.example .env
 
 ## Usage
 
-### Approach 1: Claude Skill (Interactive Analysis)
+### Approach 1: Claude Skill
 
-The Claude Code skill provides interactive chess analysis directly in your conversation with Claude.
+The Claude Code skill provides interactive chess analysis directly in your conversation with Claude Code or Claude.AI
 
 **Example:**
 ```
 > Analyze this chess position 8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58
 ```
 
-Claude will automatically use the `chess-analysis` skill to:
+Claude will automatically use the `chess-commentator` skill to:
 1. Run Stockfish analysis on the position
 2. Provide natural language commentary on best moves
 3. Explain strategic/tactical themes
 4. Present key variations with annotations
 
-The skill is located in `.claude/skills/chess-analysis/` and automatically triggers when you provide FEN positions or ask for position analysis.
+The skill is located in `.claude/skills/chess-commentator/` and automatically triggers when you provide FEN positions or ask for position analysis.
 
-### Approach 2: OpenAI Commentator (Automated Pipeline)
+### Approach 2: LLM Workflow
 
 Run automated commentary generation using OpenAI models:
 
@@ -72,72 +60,11 @@ Run automated commentary generation using OpenAI models:
 uv run python -m chess_sandbox.commentator
 ```
 
-The commentator combines:
-- Stockfish engine analysis (configurable depth and lines)
-- OpenAI LLM reasoning (supports GPT-4o, GPT-5-mini, reasoning models)
-- Structured output with themes, variations, and best moves
-
-**Configuration example:**
-```python
-params = {
-    "engine": {"depth": 20, "num_lines": 5},
-    "llm": {"model": "gpt-4o", "reasoning_effort": "low"}
-}
-```
-
-### Engine Analysis (Foundation)
-
-Both commentary approaches build on the engine analysis module:
-
-```bash
-# Analyze starting position
-export STOCKFISH_PATH=/opt/homebrew/bin/stockfish
-uv run python -m chess_sandbox.engine_analysis "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-
-# Analyze position after a specific move
-uv run python -m chess_sandbox.engine_analysis "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58" --next-move Kb5
-
-# Custom depth and number of lines
-uv run python -m chess_sandbox.engine_analysis "<FEN>" --depth 25 --num-lines 3
-```
-
-## Advanced Usage
-
-### Data Collection
-
-Scrape chess positions with ground truth themes from chess blog HTML:
-
-```bash
-# Process HTML files from data/raw/ and output to data/processed/
-uv run python -m chess_sandbox.data_scraper
-```
-
-This extracts:
-- Chess positions in FEN format
-- Associated strategic/tactical themes
-- Outputs structured JSONL data for evaluation
-
-### Batch Evaluation
-
-Evaluate commentary quality using LLM judges:
+Batch evaluation using LLM as judges:
 
 ```bash
 uv run python -m chess_sandbox.evaluation
 ```
-
-The evaluation pipeline:
-1. Loads ground truth positions and themes
-2. Generates commentary using different configurations
-3. Uses GPT-4o-mini as a judge to score theme predictions (0-100)
-4. Produces evaluation reports with average scores and rationale
-
-**Evaluation configurations** can compare:
-- Different LLM models (GPT-4o vs GPT-5-mini)
-- Reasoning effort levels (low, medium, high)
-- With/without engine analysis input
-- Different engine depths and line counts
-
-Results are saved to `data/results/` as JSONL files.
 
 ## Project Structure
 
@@ -149,19 +76,19 @@ chess_sandbox/
 ├── evaluation.py         # Batch evaluation with LLM judges
 └── config.py            # Settings management
 
-.claude/skills/chess-analysis/  # Claude Code skill for interactive analysis
+.claude/skills/chess-commentator/  # Chess Commentator skill for interactive analysis
 ```
 
 ## Tech Stack
 
+Project scaffolding templated from [postmodern-python](https://github.com/carderne/postmodern-python)
+
+- **Package Management:** uv
+- **Type Safety:** Pydantic models with strict type checking (pyright)
+- **Code Quality:** ruff (formatting + linting), pytest (testing)
 - **Chess Engine:** [Stockfish](https://stockfishchess.org/)
 - **LLM Providers:** OpenAI (GPT-4o, GPT-5-mini), Claude (via Claude Code)
 - **Chess Library:** [python-chess](https://python-chess.readthedocs.io/)
-- **Type Safety:** Pydantic models with strict type checking (pyright)
-- **Code Quality:** ruff (formatting + linting), pytest (testing)
-- **Package Management:** uv
-
-Project scaffolding templated from [postmodern-python](https://github.com/carderne/postmodern-python)
 
 ## Development
 
@@ -195,14 +122,13 @@ docker run --rm chess-sandbox \
   "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 # Run tests
-docker run --rm chess-sandbox \
-  /app/.venv/bin/python -m pytest /app/chess_sandbox/engine_analysis.py -v
+docker run --rm chess-sandbox:test /app/.venv/bin/python -m pytest -m integration -v
 ```
 
 ## CI/CD
 
 GitHub Actions workflows:
-- **PR Checks** ([.github/workflows/pr.yml](.github/workflows/pr.yml)): Formatting, linting, type checking, and tests
+- **PR Checks** ([.github/workflows/pr.yml](.github/workflows/pr.yml)): Formatting, linting, type checking, and unit/integration tests
 
 ## License
 
