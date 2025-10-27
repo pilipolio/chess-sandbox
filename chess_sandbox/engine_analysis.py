@@ -5,6 +5,7 @@ Deterministic Chess Engine Analysis Module
 Provides Stockfish-based position analysis and text formatting utilities.
 """
 
+import os
 from collections.abc import Sequence
 
 import chess
@@ -12,7 +13,23 @@ import chess.engine
 import click
 from chess.engine import InfoDict
 
-STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+
+def get_stockfish_path() -> str:
+    """Get Stockfish path from environment variable.
+    TODO - replace with dotenv or pydantic settings
+
+    Returns:
+        Path to Stockfish binary
+
+    Raises:
+        RuntimeError: If STOCKFISH_PATH environment variable is not set
+    """
+    path = os.environ.get("STOCKFISH_PATH")
+    if not path:
+        raise RuntimeError(
+            "STOCKFISH_PATH environment variable not set. " "Please set it to the path of your Stockfish binary."
+        )
+    return path
 
 
 def format_score(score: chess.engine.PovScore) -> str:
@@ -23,10 +40,13 @@ def format_score(score: chess.engine.PovScore) -> str:
 
 
 def analyze_position(
-    board: chess.Board, stockfish_path: str = STOCKFISH_PATH, num_lines: int = 5, depth: int = 20
+    board: chess.Board, stockfish_path: str | None = None, num_lines: int = 5, depth: int = 20
 ) -> Sequence[InfoDict]:
     if num_lines == 0:
         return []
+
+    if stockfish_path is None:
+        stockfish_path = get_stockfish_path()
 
     engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
     analysis_results = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=num_lines)
@@ -71,8 +91,8 @@ def format_as_text(board: chess.Board, analysis_results: Sequence[InfoDict]) -> 
 @click.option("--next-move", required=False)
 @click.option("--depth", default=20, help="Analysis depth (default: 20)")
 @click.option("--num-lines", default=5, help="Number of lines to analyze (default: 5)")
-@click.option("--stockfish-path", default=STOCKFISH_PATH, help="Path to Stockfish binary")
-def main(fen: str, next_move: str, depth: int, num_lines: int, stockfish_path: str):
+@click.option("--stockfish-path", default=None, help="Path to Stockfish binary (defaults to STOCKFISH_PATH env var)")
+def main(fen: str, next_move: str, depth: int, num_lines: int, stockfish_path: str | None):
     """Analyze a chess position given in FEN notation."""
     board = chess.Board(fen)
 
@@ -85,3 +105,32 @@ def main(fen: str, next_move: str, depth: int, num_lines: int, stockfish_path: s
 
 if __name__ == "__main__":
     main()
+
+
+# --- Tests ---
+
+
+def test_analyze_starting_position():
+    """Test that Stockfish can analyze the starting position.
+
+    This is a happy path test that verifies:
+    - Stockfish binary is accessible via STOCKFISH_PATH
+    - Engine communication works
+    - Analysis returns expected data structure
+    """
+    board = chess.Board()  # Starting position
+
+    results = analyze_position(board, num_lines=3, depth=15)
+
+    # Should return 3 lines of analysis
+    assert len(results) == 3
+
+    # Each result should have core fields
+    for info in results:
+        assert "score" in info
+        assert "pv" in info  # Principal variation (move sequence)
+        assert "depth" in info
+        assert info["depth"] >= 15  # Should reach requested depth
+
+        # PV should be non-empty
+        assert len(info["pv"]) > 0

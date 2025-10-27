@@ -18,6 +18,7 @@ readme = "README.md"
 authors = [
     { name = "Guillaume Allain", email = "guillaume.allain@gmail.com" }
 ]
+keywords = ["chess", "stockfish", "analysis"]
 
 # Public libraries should be more lenient
 # Internal stuff should enforce ~=3.13!
