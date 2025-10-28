@@ -6,6 +6,7 @@ Chess commentary generation using LLMs and Stockfish engine analysis.
 
 1. **Chess Commentator Skill** - A Claude [Skill](https://www.anthropic.com/news/skills) providing Stockfish chess engine as a tool for interactive position analysis with human-in-the-loop commentary
 2. **Chess Commentator LLM Workflow** - Commentary generation pipeline using OpenAI models
+3. **Concept Labeling Pipeline** - Extract and label chess positions with tactical/strategic concepts from annotated PGN files
 
 ## Quick Start
 
@@ -66,15 +67,53 @@ Batch evaluation using LLM as judges:
 uv run python -m chess_sandbox.evaluation
 ```
 
+### Approach 3: Concept Labeling Pipeline
+
+Build a dataset of chess positions labeled with tactical and strategic concepts.
+
+**Download the dataset:**
+```bash
+# Download annotated PGN files from Hugging Face
+wget -P data/raw https://huggingface.co/datasets/Waterhorse/chess_data/resolve/main/chessclip_data/annotated_pgn/annotated_pgn_free.tar.gz
+
+# Extract the archive
+tar -xzf data/raw/annotated_pgn_free.tar.gz -C data/raw
+```
+
+**Process the dataset:**
+```bash
+# Parse PGN files and label positions with detected concepts
+uv run python -m chess_sandbox.concept_labelling.pipeline \
+  --input-dir data/raw/annotated_pgn_free/gameknot \
+  --output data/processed/concept_labelling/positions_labeled.jsonl \
+  --stats data/processed/concept_labelling/concept_stats.json \
+  --limit 5  # Optional: process only first N files
+
+# Export samples to Lichess-compatible PGN format
+uv run python -m chess_sandbox.concept_labelling.lichess_export \
+  --input data/processed/concept_labelling/positions_labeled.jsonl \
+  --output-pgn data/exports/lichess_study_sample.pgn \
+  --n-samples 64
+```
+
+Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and strategic themes (passed pawn, outpost, weak square, zugzwang). See [docs/plans/concept-labelling-pipeline.md](docs/plans/concept-labelling-pipeline.md) for details.
+
 ## Project Structure
 
 ```
 chess_sandbox/
-├── engine_analysis.py    # Stockfish analysis foundation
-├── commentator.py        # OpenAI-based automated commentary
-├── data_scraper.py       # HTML scraping for ground truth data
-├── evaluation.py         # Batch evaluation with LLM judges
-└── config.py            # Settings management
+├── engine_analysis.py       # Stockfish analysis foundation
+├── commentator.py           # OpenAI-based automated commentary
+├── data_scraper.py          # HTML scraping for ground truth data
+├── evaluation.py            # Batch evaluation with LLM judges
+├── config.py               # Settings management
+└── concept_labelling/      # Position labeling pipeline
+    ├── models.py           # Data models
+    ├── patterns.py         # Concept regex patterns
+    ├── parser.py           # PGN parsing
+    ├── labeller.py         # Concept detection
+    ├── pipeline.py         # Main CLI
+    └── lichess_export.py   # PGN export
 
 .claude/skills/chess-commentator/  # Chess Commentator skill for interactive analysis
 ```

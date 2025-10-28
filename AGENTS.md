@@ -2,6 +2,8 @@
 
 ## Coding standards
 
+ * code should be self documenting with self-explanatory variable and method names. Only use comment to highlight complexity or non obvious patterns.
+
 ## Pre-commit Checks
 
 Run all checks before committing:

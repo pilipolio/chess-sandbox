@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     STOCKFISH_PATH: str = "/usr/local/bin/stockfish"
+    LICHESS_API_TOKEN: str = ""
 
 
 load_dotenv()
