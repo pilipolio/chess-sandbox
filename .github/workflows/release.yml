@@ -2,6 +2,9 @@ name: release
 on:
   release:
     types: [published]
+  push:
+    branches:
+      - main
 jobs:
   deploy-modal:
     runs-on: ubuntu-latest
@@ -10,8 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install Modal
-        run: pip install modal
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync
       - name: Deploy to Modal
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
