@@ -21,20 +21,20 @@ def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
     >>> data1 = {
     ...     "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     ...     "move_number": 1, "side_to_move": "white", "comment": "Pin",
-    ...     "game_id": "g1", "concepts": ["pin"]
+    ...     "game_id": "g1", "concepts": [{"name": "pin", "validated_by": None, "temporal": None}]
     ... }
     >>> data2 = {
     ...     "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     ...     "move_number": 2, "side_to_move": "black", "comment": "Fork",
-    ...     "game_id": "g2", "concepts": ["fork"]
+    ...     "game_id": "g2", "concepts": [{"name": "fork", "validated_by": None, "temporal": None}]
     ... }
     >>> with temp_file.open('w') as f:
     ...     _ = f.write(json.dumps(data1) + '\\n' + json.dumps(data2) + '\\n')
     >>> positions = load_labeled_positions(temp_file)
     >>> len(positions)
     2
-    >>> positions[0].concepts
-    ['pin']
+    >>> positions[0].concepts[0].name
+    'pin'
     >>> temp_file.unlink()
     """
     positions: list[LabelledPosition] = []
@@ -47,16 +47,25 @@ def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
 
 
 def sample_positions(
-    positions: list[LabelledPosition], n_samples: int, strategy: str = "balanced"
+    positions: list[LabelledPosition],
+    n_samples: int,
+    strategy: str = "balanced",
+    use_validated: bool = False,
 ) -> list[LabelledPosition]:
     """Sample positions from labeled dataset.
 
-    >>> from chess_sandbox.concept_labelling.models import LabelledPosition
+    Args:
+        positions: List of labeled positions
+        n_samples: Number of samples to select
+        strategy: "balanced" (equal per concept) or "random"
+        use_validated: If True, use only validated concepts
+
+    >>> from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
     >>> positions = [
-    ...     LabelledPosition("fen1", 1, "white", "pin1", "g1", ["pin"]),
-    ...     LabelledPosition("fen2", 2, "white", "pin2", "g2", ["pin"]),
-    ...     LabelledPosition("fen3", 3, "white", "fork1", "g3", ["fork"]),
-    ...     LabelledPosition("fen4", 4, "white", "fork2", "g4", ["fork"]),
+    ...     LabelledPosition("fen1", 1, "white", "pin1", "g1", [Concept(name="pin")]),
+    ...     LabelledPosition("fen2", 2, "white", "pin2", "g2", [Concept(name="pin")]),
+    ...     LabelledPosition("fen3", 3, "white", "fork1", "g3", [Concept(name="fork")]),
+    ...     LabelledPosition("fen4", 4, "white", "fork2", "g4", [Concept(name="fork")]),
     ... ]
     >>> random.seed(42)
     >>> sampled = sample_positions(positions, 2, strategy="balanced")
@@ -70,8 +79,9 @@ def sample_positions(
         # Group by concepts
         by_concept: dict[str, list[LabelledPosition]] = defaultdict(list)
         for pos in positions:
-            for concept in pos.concepts:
-                by_concept[concept].append(pos)
+            concepts = pos.validated_concepts if use_validated else pos.concepts
+            for concept in concepts:
+                by_concept[concept.name].append(pos)
 
         # Sample evenly from each concept
         sampled: list[LabelledPosition] = []
@@ -91,22 +101,29 @@ def sample_positions(
 
         return sampled[:n_samples]
     else:  # random strategy
-        labeled_positions = [p for p in positions if p.concepts]
+        if use_validated:
+            labeled_positions = [p for p in positions if p.validated_concepts]
+        else:
+            labeled_positions = [p for p in positions if p.concepts]
         n = min(n_samples, len(labeled_positions))
         return random.sample(labeled_positions, n)
 
 
-def position_to_pgn(position: LabelledPosition) -> str:
+def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> str:
     """Convert a labeled position to PGN format with tags and comment.
 
-    >>> from chess_sandbox.concept_labelling.models import LabelledPosition
+    Args:
+        position: The labeled position to convert
+        use_validated: If True, use only validated concepts and include temporal context
+
+    >>> from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
     >>> pos = LabelledPosition(
     ...     fen="r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
     ...     move_number=3,
     ...     side_to_move="white",
     ...     comment="Pin that knight",
     ...     game_id="gameknot_1160",
-    ...     concepts=["pin"]
+    ...     concepts=[Concept(name="pin")]
     ... )
     >>> pgn = position_to_pgn(pos)
     >>> '[Event "Concept: pin"]' in pgn
@@ -118,7 +135,15 @@ def position_to_pgn(position: LabelledPosition) -> str:
     >>> '{ Pin that knight }' in pgn
     True
     """
-    concepts_str = ", ".join(position.concepts) if position.concepts else "unlabeled"
+    # Choose which concepts to display
+    if use_validated:
+        concepts = position.validated_concepts
+        # Add temporal context to event name
+        concepts_with_temporal = [f"{c.name} ({c.temporal})" if c.temporal else c.name for c in concepts]
+        concepts_str = ", ".join(concepts_with_temporal) if concepts_with_temporal else "unlabeled"
+    else:
+        concepts_str = ", ".join(c.name for c in position.concepts) if position.concepts else "unlabeled"
+
     pgn_lines = [
         f'[Event "Concept: {concepts_str}"]',
         f'[Site "{position.game_id}"]',
@@ -189,35 +214,85 @@ def import_pgn_to_lichess(study_id: str, pgn_content: str) -> dict[str, str]:
     default=None,
     help="Random seed for reproducible sampling",
 )
+@click.option(
+    "--use-validated",
+    is_flag=True,
+    default=False,
+    help="Use LLM-validated concepts (concepts_validated) instead of regex concepts",
+)
+@click.option(
+    "--filter-temporal",
+    type=click.Choice(["actual", "threat", "hypothetical", "past"]),
+    default=None,
+    help="Filter to positions with specific temporal context (requires --use-validated)",
+)
 def main(
     input_path: Path,
     study_id: str,
     n_samples: int,
     strategy: str,
     seed: int | None,
+    use_validated: bool,
+    filter_temporal: str | None,
 ) -> None:
     """Export labeled positions directly to Lichess study via API.
 
     Requires LICHESS_API_TOKEN to be set in environment.
+
+    Examples:
+        # Export regex-labeled positions
+        python -m chess_sandbox.concept_labelling.lichess_export \\
+            --input positions.jsonl --study-id ABC123 --n-samples 64
+
+        # Export only LLM-validated positions with temporal context
+        python -m chess_sandbox.concept_labelling.lichess_export \\
+            --input positions_refined.jsonl --study-id ABC123 \\
+            --use-validated --n-samples 32
+
+        # Export only positions where concepts ACTUALLY exist (not threats)
+        python -m chess_sandbox.concept_labelling.lichess_export \\
+            --input positions_refined.jsonl --study-id ABC123 \\
+            --use-validated --filter-temporal actual --n-samples 16
     """
     if seed is not None:
         random.seed(seed)
+
+    if filter_temporal and not use_validated:
+        click.echo("Error: --filter-temporal requires --use-validated", err=True)
+        raise SystemExit(1)
 
     click.echo(f"Loading positions from: {input_path}")
     positions = load_labeled_positions(input_path)
     click.echo(f"Loaded {len(positions)} total positions")
 
-    labeled_positions = [p for p in positions if p.concepts]
-    click.echo(f"Found {len(labeled_positions)} positions with concept labels")
+    # Filter positions based on flags
+    if use_validated:
+        labeled_positions = [p for p in positions if p.validated_concepts]
+        click.echo(f"Found {len(labeled_positions)} positions with validated concept labels")
+
+        if filter_temporal:
+            # Filter to positions where at least one concept has the specified temporal context
+            filtered = [
+                p for p in labeled_positions if any(c.temporal == filter_temporal for c in p.validated_concepts)
+            ]
+            click.echo(f"Filtered to {len(filtered)} positions with temporal context: {filter_temporal}")
+            labeled_positions = filtered
+    else:
+        labeled_positions = [p for p in positions if p.concepts]
+        click.echo(f"Found {len(labeled_positions)} positions with concept labels")
+
+    if not labeled_positions:
+        click.echo("No positions match the criteria", err=True)
+        raise SystemExit(1)
 
     click.echo(f"Sampling {n_samples} positions using {strategy} strategy")
-    sampled = sample_positions(labeled_positions, n_samples, strategy)
+    sampled = sample_positions(labeled_positions, n_samples, strategy, use_validated)
     click.echo(f"Sampled {len(sampled)} positions")
 
     # Convert to PGN
     pgn_content = ""
     for position in sampled:
-        pgn = position_to_pgn(position)
+        pgn = position_to_pgn(position, use_validated)
         pgn_content += pgn + "\n"
 
     # Upload to Lichess
