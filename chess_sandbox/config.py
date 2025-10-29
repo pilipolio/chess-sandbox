@@ -2,8 +2,14 @@
 Configuration module for chess_sandbox.
 """
 
-from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
 
 
 class Settings(BaseSettings):
@@ -12,7 +18,5 @@ class Settings(BaseSettings):
     MAIA_WEIGHTS_PATH: str = "data/raw/maia-1500.pb.gz"
     LICHESS_API_TOKEN: str = ""
 
-
-load_dotenv()
 
 settings = Settings()

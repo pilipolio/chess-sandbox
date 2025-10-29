@@ -3,7 +3,7 @@
 import chess
 import pytest
 
-from chess_sandbox.engine_analysis import EngineConfig, analyze_variations
+from chess_sandbox.engine.analyse import EngineConfig, analyze_variations
 
 
 @pytest.mark.integration
