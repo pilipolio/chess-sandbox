@@ -58,6 +58,21 @@ class EngineConfig(BaseModel):
         )
 
 
+def validate_fen(fen: str) -> None:
+    """Validate FEN notation.
+
+    Args:
+        fen: Position in FEN notation
+
+    Raises:
+        ValueError: If FEN notation is invalid
+    """
+    try:
+        chess.Board(fen)
+    except ValueError as e:
+        raise ValueError(f"Invalid FEN notation: {e}") from e
+
+
 def info_to_pv(info: InfoDict, board: chess.Board) -> PrincipalVariation | None:
     """Convert engine InfoDict to PrincipalVariation with SAN moves.
 
@@ -195,15 +210,27 @@ def format_as_text(
     return "\n".join(lines)
 
 
-@click.command()
-@click.argument("fen")
-@click.option("--next-move", required=False)
-@click.option("--depth", default=20, help="Analysis depth for Stockfish (default: 20)")
-@click.option("--num-lines", default=5, help="Number of lines to analyze (default: 5)")
-@click.option("--with-maia", is_flag=True, help="Also analyze with Lc0/Maia for human-like evaluation")
-@click.option("--maia-nodes", default=1, help="Number of nodes for Lc0/Maia analysis (default: 1)")
-def main(fen: str, next_move: str, depth: int, num_lines: int, with_maia: bool, maia_nodes: int):
-    """Analyze a chess position given in FEN notation."""
+def main(
+    fen: str,
+    next_move: str | None = None,
+    depth: int = 20,
+    num_lines: int = 5,
+    with_maia: bool = False,
+    maia_nodes: int = 1,
+) -> str:
+    """Analyze a chess position given in FEN notation.
+
+    Args:
+        fen: Position in FEN notation
+        next_move: Optional next move in SAN notation to analyze after making it
+        depth: Analysis depth for Stockfish (default: 20)
+        num_lines: Number of lines to analyze (default: 5)
+        with_maia: Also analyze with Lc0/Maia for human-like evaluation
+        maia_nodes: Number of nodes for Lc0/Maia analysis (default: 1)
+
+    Returns:
+        Formatted text analysis output
+    """
     board = chess.Board(fen)
 
     if next_move:
@@ -221,8 +248,21 @@ def main(fen: str, next_move: str, depth: int, num_lines: int, with_maia: bool, 
         # TODO: understand if that's possible to return policy network probabilities instead of pseudo eval
         human_moves = analyze_moves(board, maia_config, candidate_moves)
 
-    print(format_as_text(board, stockfish_variations, human_moves=human_moves))
+    return format_as_text(board, stockfish_variations, human_moves=human_moves)
+
+
+@click.command()
+@click.argument("fen")
+@click.option("--next-move", required=False)
+@click.option("--depth", default=20, help="Analysis depth for Stockfish (default: 20)")
+@click.option("--num-lines", default=5, help="Number of lines to analyze (default: 5)")
+@click.option("--with-maia", is_flag=True, help="Also analyze with Lc0/Maia for human-like evaluation")
+@click.option("--maia-nodes", default=1, help="Number of nodes for Lc0/Maia analysis (default: 1)")
+def cli(fen: str, next_move: str | None, depth: int, num_lines: int, with_maia: bool, maia_nodes: int):
+    """Analyze a chess position given in FEN notation."""
+    result = main(fen, next_move, depth, num_lines, with_maia, maia_nodes)
+    print(result)
 
 
 if __name__ == "__main__":
-    main()
+    cli()
