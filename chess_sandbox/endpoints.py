@@ -1,6 +1,6 @@
 import modal
 
-from chess_sandbox.engine.position_analysis import analyze_position
+from chess_sandbox.engine.position_analysis import PositionAnalysis, analyze_position
 
 image = (
     modal.Image.debian_slim()
@@ -16,7 +16,7 @@ app = modal.App(name="chess-analysis", image=image)
 
 @app.function()  # type: ignore
 @modal.fastapi_endpoint(method="GET")  # type: ignore
-def analyze(fen: str, depth: int = 20, num_lines: int = 5) -> str:
+def analyze(fen: str, depth: int = 20, num_lines: int = 5) -> PositionAnalysis:
     """
     Analyze a chess position using Stockfish.
 
@@ -26,10 +26,14 @@ def analyze(fen: str, depth: int = 20, num_lines: int = 5) -> str:
         num_lines: Number of principal variations (default=5)
 
     Returns:
-        Formatted text analysis output
+        PositionAnalysis object with structured data including:
+        - fen: Input position
+        - next_move: Next move if provided
+        - principal_variations: List of variations with scores and SAN moves
+        - human_moves: Maia human-like moves (if enabled)
 
     Raises:
         ValueError: Invalid FEN notation
         RuntimeError: Engine analysis error
     """
-    return analyze_position(fen=fen, depth=depth, num_lines=num_lines).formatted_text
+    return analyze_position(fen=fen, depth=depth, num_lines=num_lines)

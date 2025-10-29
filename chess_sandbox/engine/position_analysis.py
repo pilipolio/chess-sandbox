@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import chess
 import click
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from chess_sandbox.engine.analyse import (
     CandidateMove,
@@ -18,6 +18,7 @@ class PositionAnalysis(BaseModel):
     principal_variations: list[PrincipalVariation]
     human_moves: list[CandidateMove] | None
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def formatted_text(self) -> str:
         return self.format_as_text()
