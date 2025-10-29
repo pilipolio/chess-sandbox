@@ -102,18 +102,18 @@ Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and str
 
 ```
 chess_sandbox/
-├── engine_analysis.py       # Stockfish analysis foundation
-├── commentator.py           # OpenAI-based automated commentary
-├── data_scraper.py          # HTML scraping for ground truth data
-├── evaluation.py            # Batch evaluation with LLM judges
 ├── config.py               # Settings management
+├── engine                  # Wrapper around stockfish/lc0 engines
+    ├── ...
+├── commentator.py          # OpenAI-based automated commentary
+├── data_scraper.py         # HTML scraping for ground truth data
+├── evaluation.py           # Batch evaluation with LLM judges
 └── concept_labelling/      # Position labeling pipeline
-    ├── models.py           # Data models
-    ├── patterns.py         # Concept regex patterns
-    ├── parser.py           # PGN parsing
-    ├── labeller.py         # Concept detection
-    ├── pipeline.py         # Main CLI
-    └── lichess_export.py   # PGN export
+    ├── ...
+
+docs
+├── adrs                    # Architectural Decision Records based on [madr](https://adr.github.io/adr-templates/#markdown-architectural-decision-records-madr) template
+└── plans                   # LLM generated/implemented plans, for references
 
 .claude/skills/chess-commentator/  # Chess Commentator skill for interactive analysis
 ```
@@ -128,6 +128,7 @@ Project scaffolding templated from [postmodern-python](https://github.com/carder
 - **Chess Engine:** [Stockfish](https://stockfishchess.org/)
 - **LLM Providers:** OpenAI (GPT-4o, GPT-5-mini), Claude (via Claude Code)
 - **Chess Library:** [python-chess](https://python-chess.readthedocs.io/)
+- **Modal Based Serverless deployment** See [docs/adrs/20251029-use-modal-for-serverless-endpoints.md](docs/adrs/20251029-use-modal-for-serverless-endpoints.md) for rationale.
 
 ## Development
 
@@ -148,22 +149,6 @@ uv run poe test    # pytest (unit tests)
 
 See `CLAUDE.md` for AI agent instructions and `pyproject.toml` for tool configurations.
 
-## Docker
-
-Build and run using Docker:
-
-```bash
-docker build -t chess-sandbox .
-
-# Run engine analysis
-docker run --rm chess-sandbox \
-  /app/.venv/bin/python -m chess_sandbox.engine_analysis \
-  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-
-# Run tests
-docker run --rm chess-sandbox:test /app/.venv/bin/python -m pytest -m integration -v
-```
-
 ## Modal API Deployment
 
 Deploy the chess analysis endpoint as a serverless API using Modal:
@@ -172,13 +157,11 @@ Deploy the chess analysis endpoint as a serverless API using Modal:
 
 1. Create a Modal account at https://modal.com
 2. Generate API token at https://modal.com/settings/tokens
-3. Install Modal CLI: `pip install modal`
-4. Authenticate: `modal token set --token-id <ID> --token-secret <SECRET>`
+3. Authenticate: `modal token set --token-id <ID> --token-secret <SECRET>`
 
 ### Local Testing
 
 ```bash
-# Start dev server
 modal serve chess_sandbox/endpoints.py
 
 # Test endpoint
@@ -193,10 +176,23 @@ modal deploy chess_sandbox/endpoints.py
 
 # Automatic deployment on GitHub releases
 # Configured in .github/workflows/release.yml
-# Requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET secrets
 ```
 
-See [docs/plans/modal-api-endpoint.md](docs/plans/modal-api-endpoint.md) for implementation details.
+## Integration tests
+
+Build and run using Docker. To replace with Modal at some point
+
+```bash
+docker build -t chess-sandbox .
+
+# Run engine analysis
+docker run --rm chess-sandbox \
+  /app/.venv/bin/python -m chess_sandbox.engine_analysis \
+  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+# Run tests
+docker run --rm chess-sandbox:test /app/.venv/bin/python -m pytest -m integration -v
+```
 
 ## CI/CD
 
