@@ -4,7 +4,7 @@ Chess commentary generation using LLMs and Stockfish engine analysis.
 
 ## Features
 
-1. **Chess Commentator Skill** - A Claude [Skill](https://www.anthropic.com/news/skills) providing Stockfish chess engine as a tool for interactive position analysis with human-in-the-loop commentary
+1. **Chess Commentator Skill** - A [Skill](https://www.anthropic.com/news/skills) to augment claude.ai or Claude Code with a chess engine tool for interactive position analysis and discussion.
 2. **Chess Commentator LLM Workflow** - Commentary generation pipeline using OpenAI models
 3. **Concept Labeling Pipeline** - Extract and label chess positions with tactical/strategic concepts from annotated PGN files
 
