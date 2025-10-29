@@ -17,7 +17,7 @@ from openai.types.shared.reasoning_effort import ReasoningEffort
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import BaseModel, Field
 
-from .engine_analysis import analyze_position, format_as_text
+from .engine_analysis import EngineConfig, analyze_position, format_as_text
 
 
 class ChessPositionExplanation(BaseModel):
@@ -76,7 +76,8 @@ class Commentator:
         )
 
     def analyze(self, board: chess.Board) -> ChessPositionExplanationWithInput:
-        analysis_results = analyze_position(board, num_lines=self.engine_num_lines, depth=self.engine_depth)
+        config = EngineConfig.stockfish(num_lines=self.engine_num_lines, depth=self.engine_depth)
+        analysis_results = analyze_position(board, config)
         analysis_text = format_as_text(board, analysis_results)
 
         prompt = self.PROMPT.format(analysis_text=analysis_text)

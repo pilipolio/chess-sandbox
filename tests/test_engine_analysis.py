@@ -3,14 +3,15 @@
 import chess
 import pytest
 
-from chess_sandbox.engine_analysis import analyze_position
+from chess_sandbox.engine_analysis import EngineConfig, analyze_position
 
 
 @pytest.mark.integration
 def test_analyze_starting_position():
     """Test analysis of starting chess position with Stockfish."""
-    board = chess.Board()  # Starting position
-    results = analyze_position(board, num_lines=1, depth=1)
+    board = chess.Board()
+    config = EngineConfig.stockfish(num_lines=1, depth=1)
+    results = analyze_position(board, config)
 
     assert len(results) == 1
     assert results[0].score == 0.17
@@ -21,7 +22,8 @@ def test_analyze_starting_position():
 def test_analyze_position_multiple_lines():
     """Test analysis with multiple principal variations."""
     board = chess.Board()
-    results = analyze_position(board, num_lines=3, depth=1)
+    config = EngineConfig.stockfish(num_lines=3, depth=1)
+    results = analyze_position(board, config)
 
     assert len(results) == 3
     # All results should have scores and moves
@@ -34,6 +36,7 @@ def test_analyze_position_multiple_lines():
 def test_analyze_position_zero_lines():
     """Test that num_lines=0 returns empty list."""
     board = chess.Board()
-    results = analyze_position(board, num_lines=0, depth=1)
+    config = EngineConfig.stockfish(num_lines=0)
+    results = analyze_position(board, config)
 
     assert results == []
