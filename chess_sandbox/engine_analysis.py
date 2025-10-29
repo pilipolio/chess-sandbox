@@ -21,6 +21,11 @@ class PrincipalVariation(BaseModel):
     san_moves: list[str]
 
 
+class CandidateMove(BaseModel):
+    san_move: str
+    score: float | None
+
+
 class EngineConfig(BaseModel):
     engine_path: str
     weights_path: str | None = None
@@ -78,7 +83,49 @@ def info_to_pv(info: InfoDict, board: chess.Board) -> PrincipalVariation | None:
     return PrincipalVariation(score=score_value / 100 if score_value is not None else None, san_moves=san_moves)
 
 
-def analyze_position(board: chess.Board, config: EngineConfig) -> list[PrincipalVariation]:
+def analyze_moves(board: chess.Board, config: EngineConfig, moves: list[chess.Move]) -> list[CandidateMove]:
+    """Analyze specific candidate moves by evaluating positions after each move.
+
+    For each move, makes the move and analyzes the resulting position with multipv=1,
+    then returns the evaluation from the original side's perspective.
+
+    Args:
+        board: Current position
+        config: Engine configuration
+        moves: List of candidate moves to evaluate
+
+    Returns:
+        List of CandidateMove objects with move and score
+    """
+    if len(moves) == 0:
+        return []
+
+    engine = chess.engine.SimpleEngine.popen_uci(config.engine_path, stderr=subprocess.DEVNULL)
+    if config.weights_path is not None:
+        engine.configure({"WeightsFile": config.weights_path, "UCI_ShowWDL": True})
+
+    candidate_moves: list[CandidateMove] = []
+
+    for move in moves:
+        board_after = board.copy()
+        board_after.push(move)
+
+        result = engine.analyse(board_after, limit=config.limit)
+        score = result.get("score")
+
+        score_value = None
+        if score:
+            score_value = score.white().score()
+            if score_value is not None:
+                score_value = score_value / 100.0
+
+        candidate_moves.append(CandidateMove(san_move=board.san(move), score=score_value))
+
+    engine.quit()
+    return candidate_moves
+
+
+def analyze_variations(board: chess.Board, config: EngineConfig) -> list[PrincipalVariation]:
     """Analyze position with configured engine, returning top principal variations.
 
     Args:
@@ -91,13 +138,12 @@ def analyze_position(board: chess.Board, config: EngineConfig) -> list[Principal
     if config.num_lines == 0:
         return []
 
-    # TODO: completely encapsulate the engine mechanics inside an analyse(board) function
     engine = chess.engine.SimpleEngine.popen_uci(config.engine_path, stderr=subprocess.DEVNULL)
+
     if config.weights_path is not None:
-        engine.configure({"WeightsFile": config.weights_path})
+        engine.configure({"WeightsFile": config.weights_path, "UCI_ShowWDL": True})
 
     analysis_results = engine.analyse(board, config.limit, multipv=config.num_lines)
-    engine.quit()
 
     principal_variations: list[PrincipalVariation] = []
     for info in analysis_results:
@@ -105,6 +151,7 @@ def analyze_position(board: chess.Board, config: EngineConfig) -> list[Principal
         if pv is not None:
             principal_variations.append(pv)
 
+    engine.quit()
     return principal_variations
 
 
@@ -112,7 +159,7 @@ def format_as_text(
     board: chess.Board,
     principal_variations: list[PrincipalVariation],
     max_display_moves: int = 8,
-    human_variations: list[PrincipalVariation] | None = None,
+    human_moves: list[CandidateMove] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("POSITION:")
@@ -136,20 +183,14 @@ def format_as_text(
                 lines.append(f"  ... and {len(pv.san_moves) - max_display_moves} more moves")
             lines.append("")
 
-    if human_variations is not None and len(human_variations) > 0:
-        lines.append("HUMAN-LIKE VARIATIONS (Maia):\n")
+    if human_moves is not None and len(human_moves) > 0:
+        lines.append("HUMAN-LIKE MOVES (Maia):\n")
 
-        for i, pv in enumerate[PrincipalVariation](human_variations, 1):
-            eval_str = f"{pv.score:+.2f}" if pv.score is not None else "N/A"
-            displayed_moves = pv.san_moves[:max_display_moves]
-            move_sequence = " ".join(displayed_moves)
+        for i, candidate in enumerate(human_moves, 1):
+            eval_str = f"{candidate.score:+.2f}" if candidate.score is not None else "N/A"
+            lines.append(f"Rank {i}: {candidate.san_move} (Eval {eval_str})")
 
-            lines.append(f"Line {i}: Eval {eval_str}")
-            lines.append(f"  Moves: {move_sequence}")
-
-            if len(pv.san_moves) > max_display_moves:
-                lines.append(f"  ... and {len(pv.san_moves) - max_display_moves} more moves")
-            lines.append("")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -168,13 +209,19 @@ def main(fen: str, next_move: str, depth: int, num_lines: int, with_maia: bool, 
     if next_move:
         board.push_san(next_move)
 
-    stockfish_variations = analyze_position(board, config=EngineConfig.stockfish(num_lines=num_lines, depth=depth))
+    stockfish_variations = analyze_variations(board, config=EngineConfig.stockfish(num_lines=num_lines, depth=depth))
 
-    human_variations = None
+    human_moves = None
     if with_maia:
-        human_variations = analyze_position(board, config=EngineConfig.maia(num_lines=num_lines, nodes=maia_nodes))
+        maia_config = EngineConfig.maia(num_lines=num_lines, nodes=maia_nodes)
+        maia_variations = analyze_variations(board, config=maia_config)
+        candidate_moves = [board.parse_san(pv.san_moves[0]) for pv in maia_variations if pv.san_moves]
 
-    print(format_as_text(board, stockfish_variations, human_variations=human_variations))
+        # Maia variations from multipv analysis have all the same score, so we need to analyze each move individually
+        # TODO: understand if that's possible to return policy network probabilities instead of pseudo eval
+        human_moves = analyze_moves(board, maia_config, candidate_moves)
+
+    print(format_as_text(board, stockfish_variations, human_moves=human_moves))
 
 
 if __name__ == "__main__":
