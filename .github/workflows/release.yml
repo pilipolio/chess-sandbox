@@ -3,15 +3,17 @@ on:
   release:
     types: [published]
 jobs:
-  publish:
-    environment: release       # needed for PyPI OIDC
+  deploy-modal:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
         with:
-          version: "0.5.14"
-      - run: uv build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          python-version: "3.13"
+      - name: Install Modal
+        run: pip install modal
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy chess_sandbox/endpoints.py

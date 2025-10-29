@@ -164,10 +164,45 @@ docker run --rm chess-sandbox \
 docker run --rm chess-sandbox:test /app/.venv/bin/python -m pytest -m integration -v
 ```
 
+## Modal API Deployment
+
+Deploy the chess analysis endpoint as a serverless API using Modal:
+
+### Prerequisites
+
+1. Create a Modal account at https://modal.com
+2. Generate API token at https://modal.com/settings/tokens
+3. Install Modal CLI: `pip install modal`
+4. Authenticate: `modal token set --token-id <ID> --token-secret <SECRET>`
+
+### Local Testing
+
+```bash
+# Start dev server
+modal serve chess_sandbox/endpoints.py
+
+# Test endpoint
+curl "http://localhost:8000/analyze?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
+```
+
+### Production Deployment
+
+```bash
+# Manual deployment
+modal deploy chess_sandbox/endpoints.py
+
+# Automatic deployment on GitHub releases
+# Configured in .github/workflows/release.yml
+# Requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET secrets
+```
+
+See [docs/plans/modal-api-endpoint.md](docs/plans/modal-api-endpoint.md) for implementation details.
+
 ## CI/CD
 
 GitHub Actions workflows:
 - **PR Checks** ([.github/workflows/pr.yml](.github/workflows/pr.yml)): Formatting, linting, type checking, and unit/integration tests
+- **Release** ([.github/workflows/release.yml](.github/workflows/release.yml)): Automatic Modal deployment on GitHub releases
 
 ## License
 
