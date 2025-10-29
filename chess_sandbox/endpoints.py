@@ -1,6 +1,6 @@
 import modal
 
-from chess_sandbox.engine_analysis import main
+from chess_sandbox.engine.position_analysis import analyze_position
 
 image = (
     modal.Image.debian_slim()
@@ -32,4 +32,4 @@ def analyze(fen: str, depth: int = 20, num_lines: int = 5) -> str:
         ValueError: Invalid FEN notation
         RuntimeError: Engine analysis error
     """
-    return main(fen=fen, depth=depth, num_lines=num_lines)
+    return analyze_position(fen=fen, depth=depth, num_lines=num_lines).formatted_text
