@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import click
-import requests
+import httpx
 
 from chess_sandbox.config import settings
 
@@ -196,7 +196,7 @@ def import_pgn_to_lichess(study_id: str, pgn_content: str) -> dict[str, str]:
         Response from Lichess API
 
     Raises:
-        requests.HTTPError: If the API request fails
+        httpx.HTTPStatusError: If the API request fails
     """
     if not settings.LICHESS_API_TOKEN:
         msg = "LICHESS_API_TOKEN not set in environment"
@@ -206,7 +206,7 @@ def import_pgn_to_lichess(study_id: str, pgn_content: str) -> dict[str, str]:
     headers = {"Authorization": f"Bearer {settings.LICHESS_API_TOKEN}"}
     data = {"pgn": pgn_content}
 
-    response = requests.post(url, headers=headers, data=data, timeout=30)
+    response = httpx.post(url, headers=headers, data=data, timeout=30)
     response.raise_for_status()
 
     return response.json()
@@ -335,7 +335,7 @@ def main(
         click.echo(f"Error: {e}", err=True)
         click.echo("Please set LICHESS_API_TOKEN in your .env file", err=True)
         raise SystemExit(1) from e
-    except requests.HTTPError as e:
+    except httpx.HTTPStatusError as e:
         click.echo(f"Lichess API error: {e}", err=True)
         click.echo(f"Response: {e.response.text if e.response else 'N/A'}", err=True)
         raise SystemExit(1) from e
