@@ -63,6 +63,8 @@ class Refiner:
         ...     side_to_move="white",
         ...     comment="...a4 is now a target and the a & b pawns can eventually be nasty passed pawns.....",
         ...     game_id="game_10000",
+        ...     move_san="a4",
+        ...     previous_fen="6k1/p1r1qpp1/1p2pn2/3r4/4n3/3B3R/1B2QPPP/3R2K1 b - - 2 26",
         ...     concepts=[Concept(name="passed_pawn")]
         ... )
         >>> refinement = refiner.refine(position)  # doctest: +SKIP

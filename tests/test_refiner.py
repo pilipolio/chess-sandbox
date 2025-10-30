@@ -40,6 +40,8 @@ def test_refiner_actual_position(refiner: Refiner) -> None:
         side_to_move="white",
         comment="I cannot play f3 because of the pin from the bishop",
         game_id="test_game_1",
+        move_san="Ng5",
+        previous_fen="r2q1r2/ppp1k1pp/2Bp1n2/2b1p3/4P1b1/8/PPPP1PPP/RNBQ1RK1 b - - 0 8",
         concepts=[Concept(name="pin")],
     )
 
@@ -69,6 +71,8 @@ def test_refiner_threat_position(refiner: Refiner) -> None:
         side_to_move="white",
         comment="The a & b pawns can eventually be nasty passed pawns",
         game_id="test_game_2",
+        move_san="a4",
+        previous_fen="6k1/p1r1qpp1/1p2pn2/3r4/4n3/3B3R/1B2QPPP/3R2K1 b - - 2 26",
         concepts=[Concept(name="passed_pawn")],
     )
 
@@ -91,6 +95,8 @@ def test_refiner_false_positive(refiner: Refiner) -> None:
         side_to_move="white",
         comment="This leaves a straightforward material exchange",
         game_id="test_game_3",
+        move_san="Nd5",
+        previous_fen="r1bqkb1r/p1pn1k2/1p3npp/4pB2/4P3/1P3N2/P1P2PPP/R1BQK2R b KQ - 0 11",
         concepts=[Concept(name="mating_threat")],  # "material" wrongly matched as "mate"
     )
 

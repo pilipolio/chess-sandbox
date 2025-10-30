@@ -49,6 +49,8 @@ def label_positions(positions: list[LabelledPosition]) -> list[LabelledPosition]
     ...     side_to_move="white",
     ...     comment="Pin the knight",
     ...     game_id="game1",
+    ...     move_san="e4",
+    ...     previous_fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     ...     concepts=[]
     ... )
     >>> pos2 = LabelledPosition(
@@ -57,6 +59,8 @@ def label_positions(positions: list[LabelledPosition]) -> list[LabelledPosition]
     ...     side_to_move="black",
     ...     comment="Fork with the knight",
     ...     game_id="game1",
+    ...     move_san="Nf3",
+    ...     previous_fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     ...     concepts=[]
     ... )
     >>> labeled = label_positions([pos1, pos2])
@@ -74,6 +78,8 @@ def label_positions(positions: list[LabelledPosition]) -> list[LabelledPosition]
             side_to_move=position.side_to_move,
             comment=position.comment,
             game_id=position.game_id,
+            move_san=position.move_san,
+            previous_fen=position.previous_fen,
             concepts=concepts,
         )
         labeled.append(labeled_position)

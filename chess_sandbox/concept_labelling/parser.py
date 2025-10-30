@@ -59,15 +59,23 @@ def extract_positions(game: chess.pgn.Game, game_id: str) -> list[LabelledPositi
     'French defense'
     >>> positions[0].move_number
     2
+    >>> positions[0].move_san
+    'e5'
+    >>> positions[0].previous_fen
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
     >>> positions[1].comment
     'Developing'
     >>> positions[1].move_number
     2
+    >>> positions[1].move_san
+    'Nf3'
     """
     positions: list[LabelledPosition] = []
     board = game.board()
 
     for node in game.mainline():
+        previous_fen = board.fen()
+        move_san = board.san(node.move)
         board.push(node.move)
         comment = node.comment.strip()
 
@@ -78,6 +86,8 @@ def extract_positions(game: chess.pgn.Game, game_id: str) -> list[LabelledPositi
                 side_to_move="white" if board.turn == chess.WHITE else "black",
                 comment=comment,
                 game_id=game_id,
+                move_san=move_san,
+                previous_fen=previous_fen,
                 concepts=[],
             )
             positions.append(position)

@@ -73,12 +73,16 @@ class LabelledPosition:
     ...     side_to_move="white",
     ...     comment="Starting position",
     ...     game_id="test_game_1",
+    ...     move_san="e4",
+    ...     previous_fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     ...     concepts=[]
     ... )
     >>> pos.fen
     'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
     >>> pos.side_to_move
     'white'
+    >>> pos.move_san
+    'e4'
     >>> pos.concepts
     []
     >>> pos.validated_concepts
@@ -90,6 +94,8 @@ class LabelledPosition:
     side_to_move: str
     comment: str
     game_id: str
+    move_san: str
+    previous_fen: str
     concepts: list[Concept] = field(default_factory=list)
 
     @property
@@ -102,6 +108,8 @@ class LabelledPosition:
         ...     side_to_move="white",
         ...     comment="Pin that knight",
         ...     game_id="test_game_1",
+        ...     move_san="Nf3",
+        ...     previous_fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         ...     concepts=[
         ...         Concept(name="pin"),
         ...         Concept(name="fork", validated_by="llm", temporal="actual")
@@ -124,6 +132,8 @@ class LabelledPosition:
         ...     side_to_move="white",
         ...     comment="Pin that knight",
         ...     game_id="test_game_1",
+        ...     move_san="Nf3",
+        ...     previous_fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         ...     concepts=[
         ...         Concept(name="pin", validated_by="llm", temporal="actual"),
         ...         Concept(name="fork", validated_by="llm", temporal="threat")
@@ -145,11 +155,17 @@ class LabelledPosition:
         ...     side_to_move="white",
         ...     comment="Pin that knight",
         ...     game_id="gameknot_1160",
+        ...     move_san="Nc6",
+        ...     previous_fen="r1bqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
         ...     concepts=[Concept(name="pin")]
         ... )
         >>> d = pos.to_dict()
         >>> d['fen']
         'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3'
+        >>> d['move_san']
+        'Nc6'
+        >>> d['previous_fen']
+        'r1bqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2'
         >>> len(d['concepts'])
         1
         >>> d['concepts'][0]['name']
@@ -161,6 +177,8 @@ class LabelledPosition:
             "side_to_move": self.side_to_move,
             "comment": self.comment,
             "game_id": self.game_id,
+            "move_san": self.move_san,
+            "previous_fen": self.previous_fen,
             "concepts": [c.to_dict() for c in self.concepts],
         }
 
@@ -174,11 +192,15 @@ class LabelledPosition:
         ...     "side_to_move": "white",
         ...     "comment": "Initial position",
         ...     "game_id": "test_1",
+        ...     "move_san": "e4",
+        ...     "previous_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         ...     "concepts": [{"name": "opening", "validated_by": None, "temporal": None}]
         ... }
         >>> pos = LabelledPosition.from_dict(data)
         >>> pos.game_id
         'test_1'
+        >>> pos.move_san
+        'e4'
         >>> len(pos.concepts)
         1
         >>> pos.concepts[0].name
@@ -190,6 +212,8 @@ class LabelledPosition:
         ...     "side_to_move": "white",
         ...     "comment": "There is a pin here",
         ...     "game_id": "test_2",
+        ...     "move_san": "Nf3",
+        ...     "previous_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         ...     "concepts": [{"name": "pin", "validated_by": "llm", "temporal": "actual"}]
         ... }
         >>> pos2 = LabelledPosition.from_dict(data_with_validation)
@@ -209,5 +233,7 @@ class LabelledPosition:
             side_to_move=str(data["side_to_move"]),
             comment=str(data["comment"]),
             game_id=str(data["game_id"]),
+            move_san=str(data["move_san"]),
+            previous_fen=str(data["previous_fen"]),
             concepts=concepts,
         )
