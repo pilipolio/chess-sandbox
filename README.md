@@ -128,6 +128,8 @@ Project scaffolding templated from [postmodern-python](https://github.com/carder
 - **Chess Engine:** [Stockfish](https://stockfishchess.org/)
 - **LLM Providers:** OpenAI (GPT-4o, GPT-5-mini), Claude (via Claude Code)
 - **Chess Library:** [python-chess](https://python-chess.readthedocs.io/)
+- **HTTP Client:** httpx (modern async/sync HTTP client)
+- **Testing:** respx (HTTP mocking for httpx)
 - **Modal Based Serverless deployment** See [docs/adrs/20251029-use-modal-for-serverless-endpoints.md](docs/adrs/20251029-use-modal-for-serverless-endpoints.md) for rationale.
 
 ## Development
