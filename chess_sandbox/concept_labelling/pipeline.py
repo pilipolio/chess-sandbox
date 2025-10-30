@@ -82,14 +82,15 @@ def main(input_dir: Path, output: Path, limit: int | None, refine_with_llm: bool
         with click.progressbar(positions_to_refine, label="Refining") as bar:
             for position in bar:
                 try:
-                    refinement = refiner.refine(position)
-                    # refine() now updates position directly
+                    # Functional approach: get new concepts list
+                    position.concepts = refiner.refine(position)
 
-                    for fp in refinement.false_positives:
-                        false_positive_counts[fp] += 1
-
-                    for ct in refinement.validated_concepts:
-                        temporal_counts[ct.temporal] += 1
+                    # Collect statistics from refined concepts
+                    for concept in position.concepts:
+                        if concept.validated_by is None:
+                            false_positive_counts[concept.name] += 1
+                        elif concept.temporal:
+                            temporal_counts[concept.temporal] += 1
 
                 except Exception as e:
                     click.echo(f"\nWarning: Failed to refine position {position.game_id}: {e}", err=True)

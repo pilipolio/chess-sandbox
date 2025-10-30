@@ -26,6 +26,7 @@ class Concept:
     name: str
     validated_by: Literal["llm", "human"] | None = None
     temporal: Literal["actual", "threat", "hypothetical", "past"] | None = None
+    reasoning: str | None = None
 
     def to_dict(self) -> dict[str, str | None]:
         """Convert to dictionary for JSON serialization.
@@ -39,7 +40,12 @@ class Concept:
         >>> d["temporal"]
         'actual'
         """
-        return {"name": self.name, "validated_by": self.validated_by, "temporal": self.temporal}
+        return {
+            "name": self.name,
+            "validated_by": self.validated_by,
+            "temporal": self.temporal,
+            "reasoning": self.reasoning,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, str | None]) -> "Concept":
@@ -56,6 +62,7 @@ class Concept:
             name=str(data["name"]),
             validated_by=data.get("validated_by"),  # type: ignore
             temporal=data.get("temporal"),  # type: ignore
+            reasoning=data.get("reasoning"),  # type: ignore
         )
 
 
