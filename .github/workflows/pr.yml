@@ -18,6 +18,7 @@ jobs:
       - run: uv run poe ci:fmt             # check formatting is correct
       - run: uv run poe ci:lint            # and linting
       - run: uv run poe check              # typecheck too
+      - run: cp .env.ci .env               # setup dummy env vars for tests
       - run: uv run poe test               # then run your tests!
 
   docker-integration-test:
