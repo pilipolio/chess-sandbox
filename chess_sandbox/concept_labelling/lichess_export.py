@@ -16,6 +16,9 @@ from .models import LabelledPosition
 def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
     """Load labeled positions from JSONL file.
 
+    Handles both old format (concepts_validated, temporal_context) and new format
+    (concepts with Concept objects).
+
     >>> import tempfile
     >>> temp_file = Path(tempfile.mktemp(suffix='.jsonl'))
     >>> data1 = {
@@ -41,6 +44,24 @@ def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
     with jsonl_path.open() as f:
         for line in f:
             data = json.loads(line)
+
+            # Convert old format to new format if needed
+            if "concepts" in data and data["concepts"] and isinstance(data["concepts"][0], str):
+                # Old format: concepts is list of strings
+                concept_names = data["concepts"]
+                concepts_validated = set(data.get("concepts_validated", []))
+                temporal_context = data.get("temporal_context", {})
+
+                # Convert to new format
+                data["concepts"] = [
+                    {
+                        "name": name,
+                        "validated_by": "llm" if name in concepts_validated else None,
+                        "temporal": temporal_context.get(name),
+                    }
+                    for name in concept_names
+                ]
+
             position = LabelledPosition.from_dict(data)
             positions.append(position)
     return positions
@@ -123,35 +144,41 @@ def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> 
     ...     side_to_move="white",
     ...     comment="Pin that knight",
     ...     game_id="gameknot_1160",
-    ...     concepts=[Concept(name="pin")]
+    ...     concepts=[Concept(name="pin", validated_by="llm", temporal="actual")]
     ... )
     >>> pgn = position_to_pgn(pos)
-    >>> '[Event "Concept: pin"]' in pgn
+    >>> '[Event "pin"]' in pgn
     True
     >>> '[Site "gameknot_1160"]' in pgn
     True
-    >>> '[FEN "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"]' in pgn
+    >>> '{ Original: Pin that knight }' in pgn
     True
-    >>> '{ Pin that knight }' in pgn
+    >>> '{ Concept: pin [validated: yes, temporal: actual] }' in pgn
     True
     """
-    # Choose which concepts to display
-    if use_validated:
-        concepts = position.validated_concepts
-        # Add temporal context to event name
-        concepts_with_temporal = [f"{c.name} ({c.temporal})" if c.temporal else c.name for c in concepts]
-        concepts_str = ", ".join(concepts_with_temporal) if concepts_with_temporal else "unlabeled"
-    else:
-        concepts_str = ", ".join(c.name for c in position.concepts) if position.concepts else "unlabeled"
+    # Always show all concepts for diversity, regardless of validation status
+    concepts = position.concepts
+    concepts_str = ", ".join(c.name for c in concepts) if concepts else "unlabeled"
 
+    # Build PGN header
     pgn_lines = [
-        f'[Event "Concept: {concepts_str}"]',
+        f'[Event "{concepts_str}"]',
         f'[Site "{position.game_id}"]',
         f'[FEN "{position.fen}"]',
         "",
-        f"{{ {position.comment} }}",
-        "",
     ]
+
+    # Add original comment
+    if position.comment:
+        pgn_lines.append(f"{{ Original: {position.comment} }}")
+
+    # Add concept details with validation and temporal info
+    for concept in concepts:
+        validated = "yes" if concept.validated_by else "no"
+        temporal = concept.temporal if concept.temporal else "none"
+        pgn_lines.append(f"{{ Concept: {concept.name} [validated: {validated}, temporal: {temporal}] }}")
+
+    pgn_lines.append("")
     return "\n".join(pgn_lines)
 
 
