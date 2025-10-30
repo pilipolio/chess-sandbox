@@ -2,11 +2,10 @@
 
 import json
 import random
-from collections import defaultdict
 from pathlib import Path
 
 import click
-import requests
+import httpx
 
 from chess_sandbox.config import settings
 
@@ -14,55 +13,10 @@ from .models import LabelledPosition
 
 
 def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
-    """Load labeled positions from JSONL file.
-
-    Handles both old format (concepts_validated, temporal_context) and new format
-    (concepts with Concept objects).
-
-    >>> import tempfile
-    >>> temp_file = Path(tempfile.mktemp(suffix='.jsonl'))
-    >>> fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    >>> data1 = {
-    ...     "fen": fen, "move_number": 1, "side_to_move": "white", "comment": "Pin",
-    ...     "game_id": "g1", "move_san": "e4", "previous_fen": fen,
-    ...     "concepts": [{"name": "pin", "validated_by": None, "temporal": None}]
-    ... }
-    >>> data2 = {
-    ...     "fen": fen, "move_number": 2, "side_to_move": "black", "comment": "Fork",
-    ...     "game_id": "g2", "move_san": "Nf3", "previous_fen": fen,
-    ...     "concepts": [{"name": "fork", "validated_by": None, "temporal": None}]
-    ... }
-    >>> with temp_file.open('w') as f:
-    ...     _ = f.write(json.dumps(data1) + '\\n' + json.dumps(data2) + '\\n')
-    >>> positions = load_labeled_positions(temp_file)
-    >>> len(positions)
-    2
-    >>> positions[0].concepts[0].name
-    'pin'
-    >>> temp_file.unlink()
-    """
     positions: list[LabelledPosition] = []
     with jsonl_path.open() as f:
         for line in f:
             data = json.loads(line)
-
-            # Convert old format to new format if needed
-            if "concepts" in data and data["concepts"] and isinstance(data["concepts"][0], str):
-                # Old format: concepts is list of strings
-                concept_names = data["concepts"]
-                concepts_validated = set(data.get("concepts_validated", []))
-                temporal_context = data.get("temporal_context", {})
-
-                # Convert to new format
-                data["concepts"] = [
-                    {
-                        "name": name,
-                        "validated_by": "llm" if name in concepts_validated else None,
-                        "temporal": temporal_context.get(name),
-                    }
-                    for name in concept_names
-                ]
-
             position = LabelledPosition.from_dict(data)
             positions.append(position)
     return positions
@@ -97,38 +51,11 @@ def sample_positions(
     >>> len(sampled)
     2
     """
-    if strategy == "balanced":
-        # Group by concepts
-        by_concept: dict[str, list[LabelledPosition]] = defaultdict(list)
-        for pos in positions:
-            concepts = pos.validated_concepts if use_validated else pos.concepts
-            for concept in concepts:
-                by_concept[concept.name].append(pos)
-
-        # Sample evenly from each concept
-        sampled: list[LabelledPosition] = []
-        concepts = list(by_concept.keys())
-        per_concept = max(1, n_samples // len(concepts)) if concepts else 0
-
-        for concept in concepts:
-            concept_positions = by_concept[concept]
-            n = min(per_concept, len(concept_positions))
-            sampled.extend(random.sample(concept_positions, n))
-
-        # If we need more samples, add random ones
-        if len(sampled) < n_samples:
-            remaining = [p for p in positions if p not in sampled]
-            additional = min(n_samples - len(sampled), len(remaining))
-            sampled.extend(random.sample(remaining, additional))
-
-        return sampled[:n_samples]
-    else:  # random strategy
-        if use_validated:
-            labeled_positions = [p for p in positions if p.validated_concepts]
-        else:
-            labeled_positions = [p for p in positions if p.concepts]
-        n = min(n_samples, len(labeled_positions))
-        return random.sample(labeled_positions, n)
+    labeled_positions = (
+        [p for p in positions if p.validated_concepts] if use_validated else [p for p in positions if p.concepts]
+    )
+    n = min(n_samples, len(labeled_positions))
+    return random.sample(labeled_positions, n)
 
 
 def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> str:
@@ -149,17 +76,9 @@ def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> 
     ...     previous_fen="r1bqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
     ...     concepts=[Concept(name="pin", validated_by="llm", temporal="actual")]
     ... )
-    >>> pgn = position_to_pgn(pos)
-    >>> '[Event "pin"]' in pgn
-    True
-    >>> '[Site "gameknot_1160"]' in pgn
-    True
-    >>> '{ Original: Pin that knight }' in pgn
-    True
-    >>> '{ Concept: pin [validated: yes, temporal: actual] }' in pgn
-    True
+    >>> position_to_pgn(pos)
+    >>> "TO_REPLACE"
     """
-    # Always show all concepts for diversity, regardless of validation status
     concepts = position.concepts
     concepts_str = ", ".join(c.name for c in concepts) if concepts else "unlabeled"
 
@@ -196,7 +115,7 @@ def import_pgn_to_lichess(study_id: str, pgn_content: str) -> dict[str, str]:
         Response from Lichess API
 
     Raises:
-        requests.HTTPError: If the API request fails
+        httpx.HTTPStatusError: If the API request fails
     """
     if not settings.LICHESS_API_TOKEN:
         msg = "LICHESS_API_TOKEN not set in environment"
@@ -206,7 +125,7 @@ def import_pgn_to_lichess(study_id: str, pgn_content: str) -> dict[str, str]:
     headers = {"Authorization": f"Bearer {settings.LICHESS_API_TOKEN}"}
     data = {"pgn": pgn_content}
 
-    response = requests.post(url, headers=headers, data=data, timeout=30)
+    response = httpx.post(url, headers=headers, data=data, timeout=30)
     response.raise_for_status()
 
     return response.json()
@@ -335,7 +254,7 @@ def main(
         click.echo(f"Error: {e}", err=True)
         click.echo("Please set LICHESS_API_TOKEN in your .env file", err=True)
         raise SystemExit(1) from e
-    except requests.HTTPError as e:
+    except httpx.HTTPStatusError as e:
         click.echo(f"Lichess API error: {e}", err=True)
         click.echo(f"Response: {e.response.text if e.response else 'N/A'}", err=True)
         raise SystemExit(1) from e

@@ -1,19 +1,56 @@
 """Tests for LLM-based concept refinement."""
 
-import os
 from collections.abc import Generator
+from typing import Any
 
+import httpx
 import pytest
+import respx
 
 from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
 from chess_sandbox.concept_labelling.refiner import ConceptRefinement, ConceptValidation, Refiner
 
 
+def create_mock_response(
+    validated_concepts: list[dict[str, str]], false_positives: list[str], reasoning: str
+) -> dict[str, Any]:
+    """Create a mock OpenAI API response for the Reasoning API.
+
+    The response structure mimics what client.responses.parse() returns.
+    The 'text' field must be a JSON string that can be parsed into ConceptRefinement.
+    """
+    import json
+
+    refinement_data = {
+        "validated_concepts": validated_concepts,
+        "false_positives": false_positives,
+        "reasoning": reasoning,
+    }
+
+    return {
+        "id": "response_123",
+        "object": "response",
+        "created": 1234567890,
+        "model": "gpt-4o-mini",
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(refinement_data),  # SDK will parse this JSON to create the 'parsed' field
+                    }
+                ],
+            }
+        ],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+    }
+
+
 @pytest.fixture
 def refiner() -> Generator[Refiner, None, None]:
-    """Create a Refiner instance (requires OPENAI_API_KEY)."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY not set")
+    """Create a Refiner instance with mocked OpenAI client."""
     yield Refiner.create({"llm_model": "gpt-4o-mini"})
 
 
@@ -32,8 +69,18 @@ def test_concept_refinement_model() -> None:
     assert "pin" in refinement.reasoning
 
 
+@respx.mock
 def test_refiner_actual_position(refiner: Refiner) -> None:
     """Test refinement of position with actual concept."""
+    # Mock the OpenAI API response
+    mock_response = create_mock_response(
+        validated_concepts=[{"concept": "pin", "temporal": "actual"}],
+        false_positives=[],
+        reasoning="The comment explicitly mentions a pin preventing f3, which exists in the current position.",
+    )
+
+    respx.post("https://api.openai.com/v1/responses").mock(return_value=httpx.Response(200, json=mock_response))
+
     position = LabelledPosition(
         fen="r2q1r2/ppp1k1pp/2Bp1n2/2b1p1N1/4P1b1/8/PPPP1PPP/RNBQ1RK1 w - - 1 9",
         move_number=9,
@@ -63,8 +110,18 @@ def test_refiner_actual_position(refiner: Refiner) -> None:
     assert len(refinement.false_positives) == 0
 
 
+@respx.mock
 def test_refiner_threat_position(refiner: Refiner) -> None:
     """Test refinement of position with threatened concept."""
+    # Mock the OpenAI API response
+    mock_response = create_mock_response(
+        validated_concepts=[{"concept": "passed_pawn", "temporal": "threat"}],
+        false_positives=[],
+        reasoning="The comment refers to pawns that can EVENTUALLY become passed pawns, indicating a future threat.",
+    )
+
+    respx.post("https://api.openai.com/v1/responses").mock(return_value=httpx.Response(200, json=mock_response))
+
     position = LabelledPosition(
         fen="6k1/p1r1qpp1/1p2pn2/3r4/P2n4/3B3R/1B2QPPP/3R2K1 w - - 3 27",
         move_number=27,
@@ -87,8 +144,18 @@ def test_refiner_threat_position(refiner: Refiner) -> None:
         assert passed_pawn_concept.temporal in ["threat", "hypothetical"]
 
 
+@respx.mock
 def test_refiner_false_positive(refiner: Refiner) -> None:
     """Test refinement detects false positives (e.g., 'material' as 'mate')."""
+    # Mock the OpenAI API response - marking mating_threat as false positive
+    mock_response = create_mock_response(
+        validated_concepts=[],
+        false_positives=["mating_threat"],
+        reasoning="The comment mentions 'material exchange', not a mating threat. This is a false positive.",
+    )
+
+    respx.post("https://api.openai.com/v1/responses").mock(return_value=httpx.Response(200, json=mock_response))
+
     position = LabelledPosition(
         fen="r1bqkb1r/p1pn1k2/1p3npp/3NpB2/4P3/1P3N2/P1P2PPP/R1BQK2R w KQ - 0 12",
         move_number=12,
