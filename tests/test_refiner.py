@@ -52,8 +52,9 @@ def refiner() -> Generator[Refiner, None, None]:
     yield Refiner.create({"llm_model": "gpt-4o-mini"})
 
 
+@pytest.mark.asyncio
 @respx.mock
-def test_refiner_actual_position(refiner: Refiner) -> None:
+async def test_refiner_actual_position(refiner: Refiner) -> None:
     """Test refinement of position with validated concept."""
     # Mock the OpenAI API response for a valid concept
     mock_response = create_mock_response(
@@ -76,7 +77,7 @@ def test_refiner_actual_position(refiner: Refiner) -> None:
     )
 
     # Functional approach: get new concepts
-    refined_concepts = refiner.refine(position)
+    refined_concepts = await refiner.refine(position)
 
     # Verify we got one refined concept back
     assert len(refined_concepts) == 1
@@ -92,8 +93,9 @@ def test_refiner_actual_position(refiner: Refiner) -> None:
     )
 
 
+@pytest.mark.asyncio
 @respx.mock
-def test_refiner_false_positive(refiner: Refiner) -> None:
+async def test_refiner_false_positive(refiner: Refiner) -> None:
     """Test refinement detects false positives (e.g., 'material' wrongly matched as 'mate')."""
     # Mock the OpenAI API response - marking concept as invalid
     mock_response = create_mock_response(
@@ -116,7 +118,7 @@ def test_refiner_false_positive(refiner: Refiner) -> None:
     )
 
     # Functional approach: get new concepts
-    refined_concepts = refiner.refine(position)
+    refined_concepts = await refiner.refine(position)
 
     # Verify we got one refined concept back
     assert len(refined_concepts) == 1

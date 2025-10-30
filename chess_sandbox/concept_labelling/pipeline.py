@@ -1,5 +1,6 @@
 """Main CLI pipeline for parsing PGNs and labeling concepts."""
 
+import asyncio
 import json
 import os
 from collections import Counter
@@ -8,8 +9,47 @@ from pathlib import Path
 import click
 
 from .labeller import label_positions
+from .models import LabelledPosition
 from .parser import parse_pgn_directory
 from .refiner import Refiner
+
+
+async def refine_positions_parallel(
+    positions_to_refine: list[LabelledPosition],
+    refiner: Refiner,
+    semaphore_limit: int = 10,
+) -> tuple[list[LabelledPosition], Counter[str], Counter[str]]:
+    """Refine positions in parallel with semaphore-based rate limiting.
+
+    Args:
+        positions_to_refine: List of LabelledPosition objects with concepts to validate
+        refiner: Refiner instance for validation
+        semaphore_limit: Maximum concurrent API calls (default: 10)
+
+    Returns:
+        Tuple of (refined_positions, false_positive_counts, temporal_counts)
+    """
+    semaphore = asyncio.Semaphore(semaphore_limit)
+    false_positive_counts = Counter[str]()
+    temporal_counts = Counter[str]()
+
+    async def refine_with_semaphore(position: LabelledPosition) -> None:
+        async with semaphore:
+            try:
+                position.concepts = await refiner.refine(position)
+
+                for concept in position.concepts:
+                    if concept.validated_by is None:
+                        false_positive_counts[concept.name] += 1
+                    elif concept.temporal:
+                        temporal_counts[concept.temporal] += 1
+
+            except Exception as e:
+                click.echo(f"\nWarning: Failed to refine position {position.game_id}: {e}", err=True)
+
+    await asyncio.gather(*[refine_with_semaphore(p) for p in positions_to_refine])
+
+    return positions_to_refine, false_positive_counts, temporal_counts
 
 
 @click.command()
@@ -74,26 +114,9 @@ def main(input_dir: Path, output: Path, limit: int | None, refine_with_llm: bool
         refiner = Refiner.create({"llm_model": llm_model})
 
         positions_to_refine = [p for p in labeled_positions if p.concepts]
-        click.echo(f"Refining {len(positions_to_refine)} positions with detected concepts...")
+        click.echo(f"Refining {len(positions_to_refine)} positions with detected concepts (parallel processing)...")
 
-        false_positive_counts = Counter[str]()
-        temporal_counts = Counter[str]()
-
-        with click.progressbar(positions_to_refine, label="Refining") as bar:
-            for position in bar:
-                try:
-                    # Functional approach: get new concepts list
-                    position.concepts = refiner.refine(position)
-
-                    # Collect statistics from refined concepts
-                    for concept in position.concepts:
-                        if concept.validated_by is None:
-                            false_positive_counts[concept.name] += 1
-                        elif concept.temporal:
-                            temporal_counts[concept.temporal] += 1
-
-                except Exception as e:
-                    click.echo(f"\nWarning: Failed to refine position {position.game_id}: {e}", err=True)
+        _, false_positive_counts, temporal_counts = asyncio.run(refine_positions_parallel(positions_to_refine, refiner))
 
         click.echo("\nRefinement results:")
         validated_count = sum(1 for p in labeled_positions if p.validated_concepts)
