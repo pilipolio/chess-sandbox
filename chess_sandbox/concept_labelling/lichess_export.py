@@ -21,15 +21,16 @@ def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
 
     >>> import tempfile
     >>> temp_file = Path(tempfile.mktemp(suffix='.jsonl'))
+    >>> fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     >>> data1 = {
-    ...     "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-    ...     "move_number": 1, "side_to_move": "white", "comment": "Pin",
-    ...     "game_id": "g1", "concepts": [{"name": "pin", "validated_by": None, "temporal": None}]
+    ...     "fen": fen, "move_number": 1, "side_to_move": "white", "comment": "Pin",
+    ...     "game_id": "g1", "move_san": "e4", "previous_fen": fen,
+    ...     "concepts": [{"name": "pin", "validated_by": None, "temporal": None}]
     ... }
     >>> data2 = {
-    ...     "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-    ...     "move_number": 2, "side_to_move": "black", "comment": "Fork",
-    ...     "game_id": "g2", "concepts": [{"name": "fork", "validated_by": None, "temporal": None}]
+    ...     "fen": fen, "move_number": 2, "side_to_move": "black", "comment": "Fork",
+    ...     "game_id": "g2", "move_san": "Nf3", "previous_fen": fen,
+    ...     "concepts": [{"name": "fork", "validated_by": None, "temporal": None}]
     ... }
     >>> with temp_file.open('w') as f:
     ...     _ = f.write(json.dumps(data1) + '\\n' + json.dumps(data2) + '\\n')
@@ -83,10 +84,10 @@ def sample_positions(
 
     >>> from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
     >>> positions = [
-    ...     LabelledPosition("fen1", 1, "white", "pin1", "g1", [Concept(name="pin")]),
-    ...     LabelledPosition("fen2", 2, "white", "pin2", "g2", [Concept(name="pin")]),
-    ...     LabelledPosition("fen3", 3, "white", "fork1", "g3", [Concept(name="fork")]),
-    ...     LabelledPosition("fen4", 4, "white", "fork2", "g4", [Concept(name="fork")]),
+    ...     LabelledPosition("fen1", 1, "white", "pin1", "g1", "e4", "fen0", [Concept(name="pin")]),
+    ...     LabelledPosition("fen2", 2, "white", "pin2", "g2", "e5", "fen1", [Concept(name="pin")]),
+    ...     LabelledPosition("fen3", 3, "white", "fork1", "g3", "Nf3", "fen2", [Concept(name="fork")]),
+    ...     LabelledPosition("fen4", 4, "white", "fork2", "g4", "Nc6", "fen3", [Concept(name="fork")]),
     ... ]
     >>> random.seed(42)
     >>> sampled = sample_positions(positions, 2, strategy="balanced")
@@ -144,6 +145,8 @@ def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> 
     ...     side_to_move="white",
     ...     comment="Pin that knight",
     ...     game_id="gameknot_1160",
+    ...     move_san="Nc6",
+    ...     previous_fen="r1bqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
     ...     concepts=[Concept(name="pin", validated_by="llm", temporal="actual")]
     ... )
     >>> pgn = position_to_pgn(pos)
