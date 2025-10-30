@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from textwrap import dedent
 from typing import Literal
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from .models import Concept, LabelledPosition
@@ -62,7 +62,7 @@ class Refiner:
     """).strip()
 
     llm_model: str
-    client: OpenAI
+    client: AsyncOpenAI
 
     @classmethod
     def create(cls, params: dict[str, str]) -> "Refiner":
@@ -76,10 +76,10 @@ class Refiner:
         """
         return cls(
             llm_model=params.get("llm_model", "gpt-4o-mini"),
-            client=OpenAI(api_key=os.environ.get("OPENAI_API_KEY")),
+            client=AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY")),
         )
 
-    def refine(self, position: LabelledPosition) -> list[Concept]:
+    async def refine(self, position: LabelledPosition) -> list[Concept]:
         """Validate and refine concept labels for a single position.
 
         Processes each concept individually with focused LLM calls to determine
@@ -101,7 +101,7 @@ class Refiner:
                 concept_name=concept.name,
             )
 
-            response = self.client.responses.parse(
+            response = await self.client.responses.parse(
                 model=self.llm_model,
                 input=prompt,
                 text_format=ConceptValidation,
