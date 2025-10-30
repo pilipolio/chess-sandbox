@@ -9,7 +9,7 @@ class Concept:
     """A chess concept label with validation metadata.
 
     All concepts originate from regex detection. Validation and temporal
-    context are added later by LLM or human review.
+    context are added later by LLM, probe, or human review.
 
     >>> c = Concept(name="pin")
     >>> c.validated_by is None
@@ -21,10 +21,13 @@ class Concept:
     'llm'
     >>> c2.temporal
     'actual'
+    >>> c3 = Concept(name="pin", validated_by="probe", temporal="actual")
+    >>> c3.validated_by
+    'probe'
     """
 
     name: str
-    validated_by: Literal["llm", "human"] | None = None
+    validated_by: Literal["llm", "human", "probe"] | None = None
     temporal: Literal["actual", "future", "hypothetical", "past"] | None = None
     reasoning: str | None = None
 
