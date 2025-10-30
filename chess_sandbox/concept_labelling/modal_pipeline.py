@@ -1,20 +1,13 @@
 """Modal ephemeral app for chess concept labeling pipeline.
 
-This module wraps the existing Click CLI pipeline for execution on Modal,
-enabling serverless batch processing of PGN files with LLM-based concept validation.
-
-Implementation approach (Option 2 - Tactical):
-- Uses Click's CliRunner to invoke existing pipeline.main()
-- Zero changes to existing pipeline code
-- Fast validation of Modal integration
-- Can migrate to extracted core logic (Option 1) later
-
 Usage:
     modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \\
         --input-subdir pgn_inputs/gameknot \\
         --output-filename output.jsonl \\
         --limit 10 \\
         --refine-with-llm
+
+Setup and detailed instructions: docs/plans/modal-pipeline-execution.md
 """
 
 import modal
