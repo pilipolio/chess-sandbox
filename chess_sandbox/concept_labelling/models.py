@@ -25,7 +25,7 @@ class Concept:
 
     name: str
     validated_by: Literal["llm", "human"] | None = None
-    temporal: Literal["actual", "threat", "hypothetical", "past"] | None = None
+    temporal: Literal["actual", "future", "hypothetical", "past"] | None = None
     reasoning: str | None = None
 
     def to_dict(self) -> dict[str, str | None]:
@@ -143,7 +143,7 @@ class LabelledPosition:
         ...     previous_fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         ...     concepts=[
         ...         Concept(name="pin", validated_by="llm", temporal="actual"),
-        ...         Concept(name="fork", validated_by="llm", temporal="threat")
+        ...         Concept(name="fork", validated_by="llm", temporal="future")
         ...     ]
         ... )
         >>> len(pos.actual_concepts)

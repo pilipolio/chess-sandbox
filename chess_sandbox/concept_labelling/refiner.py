@@ -3,24 +3,21 @@
 import os
 from dataclasses import dataclass
 from textwrap import dedent
+from typing import Literal
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from .models import Concept, LabelledPosition
 
+Temporal = Literal["actual", "future", "hypothetical", "past"]
 
-class SingleConceptRefinement(BaseModel):
-    """LLM validation result for a single concept.
 
-    This model is used for structured output from the LLM to validate
-    one regex-detected concept and extract temporal context.
-    """
-
+class ConceptValidation(BaseModel):
     is_valid: bool = Field(description="Whether the concept is truly discussed in the comment (not a false positive)")
-    temporal: str | None = Field(
+    temporal: Temporal | None = Field(
         description=(
-            "Temporal context if valid: 'actual' (exists NOW), 'threat' (future), "
+            "Temporal context if valid: 'actual' (exists NOW), 'future' (a threat or possible future scenario), "
             "'hypothetical' (if/could/would), 'past' (already happened). None if invalid."
         )
     )
@@ -34,14 +31,14 @@ class Refiner:
     Uses GPT-4o-mini or similar model to:
     1. Process each concept individually with focused LLM calls
     2. Filter false positives from regex matches
-    3. Extract temporal context (actual vs threat vs hypothetical)
+    3. Extract temporal context (actual vs future vs hypothetical)
     4. Return new Concept objects with validation metadata and reasoning
     """
 
     PROMPT = dedent("""
-        You are a chess expert validating a single concept label extracted from a game annotation.
+        You are a chess expert validating whether a concept applies to a game annotation comment.
 
-        POSITION: Move {move_number}, {side_to_move} to move
+        POSITION: {side_to_move} to move
         COMMENT: "{comment}"
         CONCEPT TO VALIDATE: "{concept_name}"
 
@@ -53,8 +50,8 @@ class Refiner:
 
         2. **If VALID, what is the TEMPORAL CONTEXT?**
            - 'actual': Concept exists in the current position NOW
-             (e.g., "there is a pin", "has a fork", "is a passed pawn")
-           - 'threat': Concept is threatened/possible in future moves
+             (e.g., "there is a pin", "A fork, ...", "is a passed pawn")
+           - 'future': Concept is threatened/possible in future moves
              (e.g., "threatening mate", "can fork", "will be passed pawns")
            - 'hypothetical': Discussing "if/could/would" scenarios
              (e.g., "if black plays Nf6 then there would be a pin")
@@ -95,7 +92,6 @@ class Refiner:
             List of new Concept objects with validation metadata and reasoning
         """
         refined_concepts: list[Concept] = []
-        valid_temporal_values = {"actual", "threat", "hypothetical", "past"}
 
         for concept in position.concepts:
             prompt = self.PROMPT.format(
@@ -108,7 +104,7 @@ class Refiner:
             response = self.client.responses.parse(
                 model=self.llm_model,
                 input=prompt,
-                text_format=SingleConceptRefinement,
+                text_format=ConceptValidation,
             )
 
             # Extract parsed output from response
@@ -124,18 +120,17 @@ class Refiner:
             if not text.parsed:  # type: ignore
                 raise ValueError("Could not parse LLM response into SingleConceptRefinement")
 
-            refinement: SingleConceptRefinement = text.parsed  # type: ignore
+            refinement: ConceptValidation = text.parsed  # type: ignore
 
             # Build new Concept object with refinement metadata
-            if refinement.is_valid and refinement.temporal in valid_temporal_values:
+            if refinement.is_valid and refinement.temporal is not None:
                 refined_concept = Concept(
                     name=concept.name,
                     validated_by="llm",
-                    temporal=refinement.temporal,  # type: ignore
+                    temporal=refinement.temporal,
                     reasoning=refinement.reasoning,
                 )
             else:
-                # Keep concept but mark as unvalidated with reasoning explaining why
                 refined_concept = Concept(
                     name=concept.name,
                     validated_by=None,

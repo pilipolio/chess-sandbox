@@ -35,13 +35,13 @@ from .refiner import Refiner
     "--refine-with-llm",
     is_flag=True,
     default=False,
-    help="Use LLM (gpt-4o-mini) to validate concepts and extract temporal context",
+    help="Use LLM to validate concepts and extract temporal context",
 )
 @click.option(
     "--llm-model",
     type=str,
-    default="gpt-4o-mini",
-    help="LLM model to use for refinement (default: gpt-4o-mini)",
+    default="gpt-5-nano",
+    help="LLM model to use for refinement",
 )
 def main(input_dir: Path, output: Path, limit: int | None, refine_with_llm: bool, llm_model: str) -> None:
     """Parse PGN files and label chess positions with detected concepts.
