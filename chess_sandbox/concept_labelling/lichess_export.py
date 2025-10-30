@@ -76,23 +76,38 @@ def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> 
     ...     previous_fen="r1bqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
     ...     concepts=[Concept(name="pin", validated_by="llm", temporal="actual")]
     ... )
-    >>> position_to_pgn(pos)
-    >>> "TO_REPLACE"
+    >>> pgn = position_to_pgn(pos)
+    >>> '2... Nc6' in pgn
+    True
+    >>> 'Pin that knight' in pgn
+    True
     """
     concepts = position.concepts
     concepts_str = ", ".join(c.name for c in concepts) if concepts else "unlabeled"
 
-    # Build PGN header
+    # Build PGN header - use previous_fen as starting position
     pgn_lines = [
         f'[Event "{concepts_str}"]',
         f'[Site "{position.game_id}"]',
-        f'[FEN "{position.fen}"]',
+        f'[FEN "{position.previous_fen}"]',
         "",
     ]
 
+    # Add the move with comment
+    # side_to_move indicates who moves NEXT, not who just moved
+    # If white is to move, black just moved on previous move number
+    # If black is to move, white just moved on current move number
+    if position.side_to_move == "white":
+        move_prefix = f"{position.move_number - 1}..."
+    else:
+        move_prefix = f"{position.move_number}."
+    move_line = f"{move_prefix} {position.move_san}"
+
     # Add original comment
     if position.comment:
-        pgn_lines.append(f"{{ Original: {position.comment} }}")
+        move_line += f" {{ {position.comment} }}"
+
+    pgn_lines.append(move_line)
 
     # Add concept details with validation and temporal info
     for concept in concepts:
