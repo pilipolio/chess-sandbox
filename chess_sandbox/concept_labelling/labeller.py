@@ -1,30 +1,39 @@
 """Concept detection and labeling for chess positions."""
 
-from .models import LabelledPosition
+from .models import Concept, LabelledPosition
 from .patterns import CONCEPT_PATTERNS
 
 
-def detect_concepts(comment: str) -> list[str]:
+def detect_concepts(comment: str) -> list[Concept]:
     """Detect chess concepts mentioned in a comment.
 
-    >>> detect_concepts("Pin that knight to the bishop")
-    ['pin']
-    >>> detect_concepts("The knight forks the king and rook")
-    ['fork']
-    >>> sorted(detect_concepts("A sacrifice leads to a mating threat"))
+    >>> concepts = detect_concepts("Pin that knight to the bishop")
+    >>> len(concepts)
+    1
+    >>> concepts[0].name
+    'pin'
+    >>> concepts[0].validated_by is None
+    True
+    >>> concepts = detect_concepts("The knight forks the king and rook")
+    >>> concepts[0].name
+    'fork'
+    >>> concepts = detect_concepts("A sacrifice leads to a mating threat")
+    >>> concept_names = sorted([c.name for c in concepts])
+    >>> concept_names
     ['mating_threat', 'sacrifice']
     >>> detect_concepts("Just a normal move")
     []
-    >>> detect_concepts("Zugzwang!")
-    ['zugzwang']
+    >>> concepts = detect_concepts("Zugzwang!")
+    >>> concepts[0].name
+    'zugzwang'
     """
-    detected: list[str] = []
+    detected: list[Concept] = []
     comment_lower = comment.lower()
 
     for concept_name, patterns in CONCEPT_PATTERNS.items():
         for pattern in patterns:
             if pattern.search(comment_lower):
-                detected.append(concept_name)
+                detected.append(Concept(name=concept_name))
                 break  # Only add each concept once
 
     return detected
@@ -51,10 +60,10 @@ def label_positions(positions: list[LabelledPosition]) -> list[LabelledPosition]
     ...     concepts=[]
     ... )
     >>> labeled = label_positions([pos1, pos2])
-    >>> labeled[0].concepts
-    ['pin']
-    >>> labeled[1].concepts
-    ['fork']
+    >>> labeled[0].concepts[0].name
+    'pin'
+    >>> labeled[1].concepts[0].name
+    'fork'
     """
     labeled: list[LabelledPosition] = []
     for position in positions:
