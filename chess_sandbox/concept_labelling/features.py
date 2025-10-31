@@ -13,8 +13,8 @@ from typing import Any
 import numpy as np
 import torch
 from lczerolens import LczeroBoard  # type: ignore[import-untyped]
-from lczerolens import LczeroModel as _LczeroModel
-from tqdm import tqdm  # type: ignore[import-untyped]
+from lczerolens import LczeroModel as _LczeroModel  # type: ignore[import-untyped]
+from tqdm import tqdm
 
 
 class LczeroModel:

@@ -129,7 +129,7 @@ class ConceptProbe:
                 concepts.append(
                     Concept(
                         name=concept_name,
-                        validated_by="probe",  # type: ignore[arg-type]
+                        validated_by="probe",
                         temporal="actual",
                     )
                 )
@@ -168,7 +168,7 @@ class ConceptProbe:
                     concepts.append(
                         Concept(
                             name=concept_name,
-                            validated_by="probe",  # type: ignore[arg-type]
+                            validated_by="probe",
                             temporal="actual",
                         )
                     )

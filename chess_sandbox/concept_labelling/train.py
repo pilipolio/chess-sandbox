@@ -12,12 +12,12 @@ from typing import Any
 
 import click
 import numpy as np
-from sklearn.dummy import DummyClassifier  # type: ignore[import-untyped]
-from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyped]
-from sklearn.metrics import accuracy_score, f1_score, hamming_loss  # type: ignore[import-untyped]
-from sklearn.model_selection import train_test_split  # type: ignore[import-untyped]
-from sklearn.multiclass import OneVsRestClassifier  # type: ignore[import-untyped]
-from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer  # type: ignore[import-untyped]
+from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, hamming_loss
+from sklearn.model_selection import train_test_split
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
 from .features import extract_features_batch
 from .inference import create_probe
@@ -100,7 +100,7 @@ def load_training_data(
 
 def evaluate_classifier(
     clf: Any,
-    X_test: np.ndarray,  # noqa: N803 (sklearn convention)
+    X_test: np.ndarray,
     y_test: np.ndarray,
     concept_list: list[str],
     name: str = "Classifier",
@@ -208,6 +208,202 @@ def evaluate_classifier(
         }
 
 
+def train_multiclass(
+    data_path: Path,
+    model_path: Path,
+    layer_name: str,
+    output: Path,
+    test_split: float,
+    random_seed: int,
+    model_version: str,
+    batch_size: int,
+) -> None:
+    """Train multi-class concept probe (one concept per position)."""
+    print("\n[1/6] Loading data...")
+    positions, labels_union, concept_list = load_training_data(data_path, mode="multi-class")
+    labels: list[str] = labels_union  # type: ignore[assignment]
+
+    if not labels:
+        print("\nWARNING: No validated concepts found! Cannot train without labels.")
+        return
+
+    print("\n[2/6] Extracting activations...")
+    fens = [p["fen"] for p in positions]
+    activations = extract_features_batch(
+        fens,
+        model_path,
+        layer_name,
+        batch_size=batch_size,
+    )
+    print(f"Activation matrix shape: {activations.shape}")
+
+    print("\n[3/6] Encoding labels...")
+    encoder = LabelEncoder()
+    label_matrix = encoder.fit_transform(labels).reshape(-1, 1)
+    print(f"Label encoder classes: {encoder.classes_}")
+    print(f"Encoded labels shape: {label_matrix.shape}")
+
+    print("\n[4/6] Splitting data...")
+    X_train, X_test, y_train, y_test = train_test_split(
+        activations, label_matrix, test_size=test_split, random_state=random_seed
+    )
+    print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
+
+    print("\n[5/6] Training probe...")
+    clf = LogisticRegression(max_iter=10000, random_state=random_seed)
+    y_train_fit = y_train.ravel()
+    print(f"Training multi-class classifier with {len(encoder.classes_)} classes")
+
+    clf.fit(X_train, y_train_fit)
+    print("Training complete!")
+
+    print("\n[6/6] Evaluating...")
+    baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
+    baseline.fit(X_train, y_train_fit)
+
+    baseline_metrics = evaluate_classifier(
+        baseline, X_test, y_test, concept_list, "Random Baseline", mode="multi-class"
+    )
+    probe_metrics = evaluate_classifier(clf, X_test, y_test, concept_list, "Trained Probe", mode="multi-class")
+
+    print(f"\n{'=' * 70}")
+    print("SUMMARY")
+    print(f"{'=' * 70}")
+
+    print(f"Baseline Accuracy:    {baseline_metrics['accuracy']:.1%}")
+    print(f"Probe Accuracy:       {probe_metrics['accuracy']:.1%}")
+    improvement = probe_metrics["accuracy"] / (baseline_metrics["accuracy"] + 1e-10)
+    print(f"Improvement:          {improvement:.1f}x")
+    print()
+    print(f"Baseline F1 (macro):  {baseline_metrics['f1_macro']:.1%}")
+    print(f"Probe F1 (macro):     {probe_metrics['f1_macro']:.1%}")
+    print()
+    print(f"Baseline F1 (wtd):    {baseline_metrics['f1_weighted']:.1%}")
+    print(f"Probe F1 (wtd):       {probe_metrics['f1_weighted']:.1%}")
+
+    print(f"\nSaving to {output}...")
+    probe = create_probe(
+        classifier=clf,
+        concept_list=concept_list,
+        layer_name=layer_name,
+        training_metrics={
+            "baseline": baseline_metrics,
+            "probe": probe_metrics,
+            "training_samples": X_train.shape[0],
+            "test_samples": X_test.shape[0],
+            "test_split": test_split,
+            "random_seed": random_seed,
+            "data_path": str(data_path),
+            "model_path": str(model_path),
+            "mode": "multi-class",
+        },
+        model_version=model_version,
+        label_encoder=encoder,
+    )
+    probe.save(output)
+
+    print("Done!")
+
+
+def train_multilabel(
+    data_path: Path,
+    model_path: Path,
+    layer_name: str,
+    output: Path,
+    test_split: float,
+    random_seed: int,
+    model_version: str,
+    batch_size: int,
+) -> None:
+    """Train multi-label concept probe (multiple concepts per position)."""
+    print("\n[1/6] Loading data...")
+    positions, labels_union, concept_list = load_training_data(data_path, mode="multi-label")
+    labels: list[list[str]] = labels_union  # type: ignore[assignment]
+
+    if not labels:
+        print("\nWARNING: No validated concepts found! Cannot train without labels.")
+        return
+
+    print("\n[2/6] Extracting activations...")
+    fens = [p["fen"] for p in positions]
+    activations = extract_features_batch(
+        fens,
+        model_path,
+        layer_name,
+        batch_size=batch_size,
+    )
+    print(f"Activation matrix shape: {activations.shape}")
+
+    print("\n[3/6] Encoding labels...")
+    encoder = MultiLabelBinarizer()
+    label_matrix = encoder.fit_transform(labels)
+    print(f"Multi-label binarizer classes: {encoder.classes_}")
+    print(f"Binary label matrix shape: {label_matrix.shape}")
+    print(f"Total labels: {label_matrix.sum()} ({label_matrix.sum() / label_matrix.size * 100:.1f}% density)")
+
+    print("\n[4/6] Splitting data...")
+    X_train, X_test, y_train, y_test = train_test_split(
+        activations, label_matrix, test_size=test_split, random_state=random_seed
+    )
+    print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
+
+    print("\n[5/6] Training probe...")
+    base_clf = LogisticRegression(max_iter=10000, random_state=random_seed)
+    clf = OneVsRestClassifier(base_clf)
+    print(f"Training multi-label classifier with {len(encoder.classes_)} concepts")
+
+    clf.fit(X_train, y_train)
+    print("Training complete!")
+
+    print("\n[6/6] Evaluating...")
+    baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
+    baseline.fit(X_train, y_train)
+
+    baseline_metrics = evaluate_classifier(
+        baseline, X_test, y_test, concept_list, "Random Baseline", mode="multi-label"
+    )
+    probe_metrics = evaluate_classifier(clf, X_test, y_test, concept_list, "Trained Probe", mode="multi-label")
+
+    print(f"\n{'=' * 70}")
+    print("SUMMARY")
+    print(f"{'=' * 70}")
+
+    print(f"Baseline Exact Match: {baseline_metrics['exact_match']:.1%}")
+    print(f"Probe Exact Match:    {probe_metrics['exact_match']:.1%}")
+    improvement = probe_metrics["exact_match"] / (baseline_metrics["exact_match"] + 1e-10)
+    print(f"Improvement:          {improvement:.1f}x")
+    print()
+    print(f"Baseline Hamming:     {baseline_metrics['hamming_loss']:.1%}")
+    print(f"Probe Hamming:        {probe_metrics['hamming_loss']:.1%}")
+    error_reduction = (baseline_metrics["hamming_loss"] - probe_metrics["hamming_loss"]) / baseline_metrics[
+        "hamming_loss"
+    ]
+    print(f"Error Reduction:      {error_reduction:.1%}")
+
+    print(f"\nSaving to {output}...")
+    probe = create_probe(
+        classifier=clf,
+        concept_list=concept_list,
+        layer_name=layer_name,
+        training_metrics={
+            "baseline": baseline_metrics,
+            "probe": probe_metrics,
+            "training_samples": X_train.shape[0],
+            "test_samples": X_test.shape[0],
+            "test_split": test_split,
+            "random_seed": random_seed,
+            "data_path": str(data_path),
+            "model_path": str(model_path),
+            "mode": "multi-label",
+        },
+        model_version=model_version,
+        label_encoder=encoder,
+    )
+    probe.save(output)
+
+    print("Done!")
+
+
 @click.command()
 @click.option(
     "--data-path",
@@ -288,121 +484,28 @@ def train(
     print(f"  Mode: {mode}")
     print(f"  Output: {output}")
 
-    print("\n[1/6] Loading data...")
-    positions, labels, concept_list = load_training_data(data_path, mode=mode)
-
-    if not labels:
-        print("\nWARNING: No validated concepts found! Cannot train without labels.")
-        return
-
-    print("\n[2/6] Extracting activations...")
-    fens = [p["fen"] for p in positions]
-    activations = extract_features_batch(
-        fens,
-        model_path,
-        layer_name,
-        batch_size=batch_size,
-    )
-    print(f"Activation matrix shape: {activations.shape}")
-
-    print("\n[3/6] Encoding labels...")
-    encoder: LabelEncoder | MultiLabelBinarizer
-    label_matrix: np.ndarray
-
     if mode == "multi-class":
-        encoder = LabelEncoder()
-        label_matrix = encoder.fit_transform(labels).reshape(-1, 1)  # type: ignore[arg-type]
-        print(f"Label encoder classes: {encoder.classes_}")  # type: ignore[reportUnknownMemberType]
-        print(f"Encoded labels shape: {label_matrix.shape}")  # type: ignore[reportUnknownMemberType]
+        train_multiclass(
+            data_path=data_path,
+            model_path=model_path,
+            layer_name=layer_name,
+            output=output,
+            test_split=test_split,
+            random_seed=random_seed,
+            model_version=model_version,
+            batch_size=batch_size,
+        )
     else:
-        encoder = MultiLabelBinarizer()
-        label_matrix = encoder.fit_transform(labels)  # type: ignore[arg-type]
-        print(f"Multi-label binarizer classes: {encoder.classes_}")
-        print(f"Binary label matrix shape: {label_matrix.shape}")
-        print(f"Total labels: {label_matrix.sum()} ({label_matrix.sum() / label_matrix.size * 100:.1f}% density)")
-
-    print("\n[4/6] Splitting data...")
-    X_train: Any  # noqa: N806 (sklearn convention)
-    X_test: Any  # noqa: N806 (sklearn convention)
-    y_train: Any
-    y_test: Any
-    X_train, X_test, y_train, y_test = train_test_split(  # noqa: N806 (sklearn convention)
-        activations, label_matrix, test_size=test_split, random_state=random_seed
-    )
-    print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
-
-    print("\n[5/6] Training probe...")
-    base_clf = LogisticRegression(max_iter=10000, random_state=random_seed)
-
-    if mode == "multi-class":
-        clf: Any = base_clf
-        y_train_fit = y_train.ravel()
-        print(f"Training multi-class classifier with {len(encoder.classes_)} classes")  # type: ignore[attr-defined]
-    else:
-        clf = OneVsRestClassifier(base_clf)
-        y_train_fit = y_train
-        print(f"Training multi-label classifier with {len(encoder.classes_)} concepts")  # type: ignore[attr-defined]
-
-    clf.fit(X_train, y_train_fit)
-    print("Training complete!")
-
-    print("\n[6/6] Evaluating...")
-    baseline: Any = DummyClassifier(strategy="stratified", random_state=random_seed)
-    baseline.fit(X_train, y_train_fit)
-
-    baseline_metrics = evaluate_classifier(baseline, X_test, y_test, concept_list, "Random Baseline", mode=mode)
-    probe_metrics = evaluate_classifier(clf, X_test, y_test, concept_list, "Trained Probe", mode=mode)
-
-    print(f"\n{'=' * 70}")
-    print("SUMMARY")
-    print(f"{'=' * 70}")
-
-    if mode == "multi-class":
-        print(f"Baseline Accuracy:    {baseline_metrics['accuracy']:.1%}")
-        print(f"Probe Accuracy:       {probe_metrics['accuracy']:.1%}")
-        improvement = probe_metrics["accuracy"] / (baseline_metrics["accuracy"] + 1e-10)
-        print(f"Improvement:          {improvement:.1f}x")
-        print()
-        print(f"Baseline F1 (macro):  {baseline_metrics['f1_macro']:.1%}")
-        print(f"Probe F1 (macro):     {probe_metrics['f1_macro']:.1%}")
-        print()
-        print(f"Baseline F1 (wtd):    {baseline_metrics['f1_weighted']:.1%}")
-        print(f"Probe F1 (wtd):       {probe_metrics['f1_weighted']:.1%}")
-    else:
-        print(f"Baseline Exact Match: {baseline_metrics['exact_match']:.1%}")
-        print(f"Probe Exact Match:    {probe_metrics['exact_match']:.1%}")
-        improvement = probe_metrics["exact_match"] / (baseline_metrics["exact_match"] + 1e-10)
-        print(f"Improvement:          {improvement:.1f}x")
-        print()
-        print(f"Baseline Hamming:     {baseline_metrics['hamming_loss']:.1%}")
-        print(f"Probe Hamming:        {probe_metrics['hamming_loss']:.1%}")
-        error_reduction = (baseline_metrics["hamming_loss"] - probe_metrics["hamming_loss"]) / baseline_metrics[
-            "hamming_loss"
-        ]
-        print(f"Error Reduction:      {error_reduction:.1%}")
-
-    print(f"\nSaving to {output}...")
-    probe = create_probe(
-        classifier=clf,
-        concept_list=concept_list,
-        layer_name=layer_name,
-        training_metrics={
-            "baseline": baseline_metrics,
-            "probe": probe_metrics,
-            "training_samples": X_train.shape[0],
-            "test_samples": X_test.shape[0],
-            "test_split": test_split,
-            "random_seed": random_seed,
-            "data_path": str(data_path),
-            "model_path": str(model_path),
-            "mode": mode,
-        },
-        model_version=model_version,
-        label_encoder=encoder,
-    )
-    probe.save(output)
-
-    print("Done!")
+        train_multilabel(
+            data_path=data_path,
+            model_path=model_path,
+            layer_name=layer_name,
+            output=output,
+            test_split=test_split,
+            random_seed=random_seed,
+            model_version=model_version,
+            batch_size=batch_size,
+        )
 
 
 if __name__ == "__main__":

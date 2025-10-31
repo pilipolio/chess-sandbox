@@ -22,8 +22,6 @@ authors = [
 ]
 keywords = ["chess", "stockfish", "llm", "openai", "claude", "commentary", "analysis"]
 
-# Public libraries should be more lenient
-# Internal stuff should enforce ~=3.13!
 requires-python = ">=3.13"
 dependencies = [
     "chess>=1.11.2",
@@ -49,6 +47,7 @@ dev = [
     "pytest-asyncio>=0.25.3",
     "respx>=0.21.0",
     "ruff>=0.8.5",
+    "types-tqdm>=4.67.0.20250809",
 ]
 
 [tool.uv]
@@ -82,7 +81,10 @@ select = [
 # if you're feeling confident you can do:
 # select = ["ALL"]
 # and then manually ignore annoying ones:
-# ignore = [...]
+ignore = [
+  "N803",  # Allow uppercase argument names (sklearn convention: X_train, X_test)
+  "N806",  # Allow uppercase variable names in functions (sklearn convention: X_train, X_test)
+]
 
 [tool.ruff.lint.isort]
 # so it knows to group first-party stuff last
@@ -91,8 +93,11 @@ known-first-party = ["chess_sandbox"]
 [tool.pyright]
 venvPath = "."          # uv installs the venv in the current dir
 venv = ".venv"          #       in a folder called `.venv`
-strict = ["**/*.py"]    # use 'strict' checking on all files
 pythonVersion = "3.13"  # if library, specify the _lowest_ you support
+include = ["chess_sandbox", "tests"]
+strict = ["**/*.py"]    # use 'strict' checking on most files
+exclude = ["**/concept_labelling/train.py"]  # exclude ML training code using sklearn (partial types)
+reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --ignore=chess_sandbox/endpoints.py"
