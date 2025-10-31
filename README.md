@@ -98,6 +98,8 @@ uv run python -m chess_sandbox.concept_labelling.lichess_export \
 
 Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and strategic themes (passed pawn, outpost, weak square, zugzwang). See [docs/plans/concept-labelling-pipeline.md](docs/plans/concept-labelling-pipeline.md) for details.
 
+**Running on Modal (serverless):** For batch processing on serverless infrastructure, see `chess_sandbox/concept_labelling/modal_pipeline.py` for usage instructions.
+
 ## Project Structure
 
 ```
