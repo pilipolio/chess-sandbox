@@ -176,6 +176,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyright" },
     { name = "python-dotenv" },
+    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -199,6 +200,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.11.0" },
     { name = "pyright", specifier = ">=1.1.391" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
 [package.metadata.requires-dev]
