@@ -13,7 +13,8 @@ from typing import Any
 import numpy as np
 import torch
 from lczerolens import LczeroBoard  # type: ignore[import-untyped]
-from lczerolens import LczeroModel as _LczeroModel  # type: ignore[import-untyped]
+from lczerolens import LczeroModel as _LczeroModel
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 
 class LczeroModel:
@@ -206,7 +207,6 @@ def extract_features_batch(
     model_path: str | Path,
     layer_name: str,
     batch_size: int = 32,
-    show_progress: bool = True,
 ) -> np.ndarray:
     """
     Extract flattened activation vectors from multiple chess positions.
@@ -227,14 +227,13 @@ def extract_features_batch(
         >>> features.shape  # doctest: +SKIP
         (10, 4096)
     """
-    if show_progress:
-        print(f"Extracting activations for {len(fens)} positions...")
+    print(f"Extracting activations for {len(fens)} positions...")
 
     results: list[np.ndarray] = []
     model = LczeroModel.from_path(str(model_path))
 
     with ActivationExtractor(model, [layer_name]) as extractor:
-        for i in range(0, len(fens), batch_size):
+        for i in tqdm(range(0, len(fens), batch_size)):
             batch_fens = fens[i : i + batch_size]
             boards = [LczeroBoard(fen) for fen in batch_fens]
             activations = extractor.extract_batch(boards)
@@ -243,9 +242,6 @@ def extract_features_batch(
             for j in range(len(batch_fens)):
                 flattened: np.ndarray = batch_activations[j].reshape(-1)
                 results.append(flattened)
-
-            if show_progress:
-                print(f"  Processed {min(i + batch_size, len(fens))}/{len(fens)}")
 
     return np.array(results)
 

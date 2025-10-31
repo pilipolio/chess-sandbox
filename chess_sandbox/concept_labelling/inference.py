@@ -21,8 +21,9 @@ class ConceptProbe:
     """
     Trained concept classifier with metadata.
 
-    Loads and applies sklearn multi-label classifiers to predict
-    chess concepts from activation vectors.
+    Loads and applies sklearn classifiers to predict chess concepts
+    from activation vectors. Supports both multi-class (one concept
+    per position) and multi-label (multiple concepts per position).
 
     Example:
         >>> probe = ConceptProbe.load("models/concept_probes/probe_v1.pkl")  # doctest: +SKIP
@@ -38,6 +39,7 @@ class ConceptProbe:
     training_metrics: dict[str, Any]
     training_date: str
     model_version: str
+    label_encoder: Any = None
 
     @classmethod
     def load(cls, path: str | Path) -> "ConceptProbe":
@@ -66,6 +68,7 @@ class ConceptProbe:
             training_metrics=data.get("training_metrics", {}),
             training_date=data.get("training_date", "unknown"),
             model_version=data.get("model_version", "unknown"),
+            label_encoder=data.get("label_encoder"),
         )
 
     def save(self, path: str | Path) -> None:
@@ -86,6 +89,7 @@ class ConceptProbe:
             "training_metrics": self.training_metrics,
             "training_date": self.training_date,
             "model_version": self.model_version,
+            "label_encoder": self.label_encoder,
         }
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -214,6 +218,7 @@ def create_probe(
     layer_name: str,
     training_metrics: dict[str, Any],
     model_version: str = "v1",
+    label_encoder: Any = None,
 ) -> ConceptProbe:
     """
     Create a new ConceptProbe instance.
@@ -224,6 +229,7 @@ def create_probe(
         layer_name: Layer used for feature extraction
         training_metrics: Performance metrics from training
         model_version: Version identifier
+        label_encoder: Label encoder (LabelEncoder or MultiLabelBinarizer)
 
     Returns:
         ConceptProbe instance ready for inference
@@ -247,4 +253,5 @@ def create_probe(
         training_metrics=training_metrics,
         training_date=datetime.now().isoformat(),
         model_version=model_version,
+        label_encoder=label_encoder,
     )
