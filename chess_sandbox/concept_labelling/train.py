@@ -226,7 +226,6 @@ def train(
         model_path,
         layer_name,
         batch_size=batch_size,
-        use_cache=True,
         show_progress=True,
     )
     print(f"Activation matrix shape: {activations.shape}")

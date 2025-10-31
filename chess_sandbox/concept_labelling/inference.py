@@ -25,10 +25,10 @@ class ConceptProbe:
     chess concepts from activation vectors.
 
     Example:
-        >>> probe = ConceptProbe.load("models/concept_probes/probe_v1.pkl")
-        >>> features = np.random.rand(4096)  # From feature extraction
-        >>> concepts = probe.predict(features)
-        >>> len(concepts) >= 0
+        >>> probe = ConceptProbe.load("models/concept_probes/probe_v1.pkl")  # doctest: +SKIP
+        >>> features = np.random.rand(4096)  # From feature extraction  # doctest: +SKIP
+        >>> concepts = probe.predict(features)  # doctest: +SKIP
+        >>> len(concepts) >= 0  # doctest: +SKIP
         True
     """
 

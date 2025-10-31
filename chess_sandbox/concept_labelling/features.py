@@ -7,29 +7,41 @@ internal layer activations from LC0 models using PyTorch hooks.
 Adapted from prototype implementations with minimal dependencies.
 """
 
-import hashlib
-import struct
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
-import chess
-import diskcache  # type: ignore[import-untyped]
 import numpy as np
 import torch
+from lczerolens import LczeroBoard  # type: ignore[import-untyped]
 from lczerolens import LczeroModel as _LczeroModel  # type: ignore[import-untyped]
 
 
 class LczeroModel:
-    """Wrapper around lczerolens.LczeroModel that handles PyTorch 2.6+ compatibility."""
+    """
+    Wrapper around lczerolens.LczeroModel for PyTorch 2.6+ compatibility.
+
+    PyTorch 2.6+ changed torch.load() to use weights_only=True by default for security.
+    LC0 models contain FX graph modules that aren't allowed under this restriction.
+    This wrapper temporarily patches torch.load to use weights_only=False.
+
+    TODO: Remove once lczerolens adds weights_only parameter support.
+    See: https://github.com/Xmaster6y/lczerolens/issues/XXX
+    """
 
     @classmethod
     def from_path(cls, model_path: str) -> Any:
         """
-        Load LC0 model with weights_only=False for PyTorch 2.6+ compatibility.
+        Load LC0 model with PyTorch 2.6+ compatibility.
 
-        PyTorch 2.6+ changed torch.load to use weights_only=True by default for security,
-        but LC0 models contain FX graph modules and other classes that aren't allowed.
-        We trust these model files, so we temporarily use the legacy loading behavior.
+        Args:
+            model_path: Path to LC0 model file (.pt or .onnx)
+
+        Returns:
+            Loaded LczeroModel instance
+
+        Note:
+            Temporarily uses weights_only=False for compatibility with FX graph modules.
+            Only use with trusted model files.
         """
         original_load = torch.load
 
@@ -44,189 +56,11 @@ class LczeroModel:
             torch.load = original_load  # type: ignore[assignment]
 
 
-_CACHE_DIR = Path(".cache/activations")
-_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-_cache: Any = diskcache.Cache(str(_CACHE_DIR))
-
-_FLAT_PLANES = [np.ones((8, 8), dtype=np.uint8) * i for i in range(256)]
-
-
-class _Lc0BoardData(NamedTuple):
-    plane_bytes: bytes
-    repetition: bool
-    transposition_key: int
-    us_ooo: int
-    us_oo: int
-    them_ooo: int
-    them_oo: int
-    side_to_move: int
-    rule50_count: int
-
-
-class Lc0BoardEncoder:
-    """
-    Encoder for converting chess positions to Leela Chess Zero's 112-plane format.
-
-    Maintains position history needed for LC0 encoding.
-
-    Example:
-        >>> board = Lc0BoardEncoder("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
-        >>> encoding = board.to_input_array()
-        >>> encoding.shape  # doctest: +SKIP
-        (112, 8, 8)
-    """
-
-    _plane_bytes_struct = struct.Struct(">Q")
-
-    def __init__(self, fen: str | None = None):
-        """
-        Initialize the board encoder.
-
-        Args:
-            fen: FEN string for initial position. If None, starts from standard position.
-        """
-        self._board = chess.Board() if fen is None else chess.Board(fen)
-        self._history_stack: list[_Lc0BoardData] = []
-        self._transposition_counter: dict[int, int] = {}
-        self._push_history()
-
-    @property
-    def turn(self) -> bool:
-        """Current player's turn (True=White, False=Black)"""
-        return self._board.turn
-
-    @property
-    def fen(self) -> str:
-        """Current position as FEN string"""
-        return self._board.fen()
-
-    def push(self, move: chess.Move) -> None:
-        """Make a move on the board."""
-        self._board.push(move)
-        self._push_history()
-
-    def push_uci(self, uci: str) -> None:
-        """Make a move from UCI string (e.g., 'e2e4', 'e7e8q')."""
-        self._board.push(chess.Move.from_uci(uci))
-        self._push_history()
-
-    def push_san(self, san: str) -> None:
-        """Make a move from SAN string (e.g., 'e4', 'Nf3', 'O-O')."""
-        self._board.push_san(san)
-        self._push_history()
-
-    def _get_plane_bytes(self) -> Any:
-        """Extract piece positions as packed bytes."""
-        pack = self._plane_bytes_struct.pack
-        pieces_mask = self._board.pieces_mask
-
-        for color in (True, False):
-            for piece_type in range(1, 7):
-                piece_mask = pieces_mask(piece_type, color)
-                yield pack(piece_mask)
-
-    def _push_history(self) -> None:
-        """Update history stack after a move."""
-        transposition_key: int = self._board._transposition_key()  # type: ignore[attr-defined]
-        self._transposition_counter[transposition_key] = self._transposition_counter.get(transposition_key, 0) + 1
-        repetitions = self._transposition_counter[transposition_key] - 1
-
-        side_to_move = 0 if self._board.turn else 1
-        rule50_count = self._board.halfmove_clock
-
-        if not side_to_move:
-            castling_rights = self._board.castling_rights
-            us_ooo = (castling_rights >> chess.A1) & 1
-            us_oo = (castling_rights >> chess.H1) & 1
-            them_ooo = (castling_rights >> chess.A8) & 1
-            them_oo = (castling_rights >> chess.H8) & 1
-        else:
-            castling_rights = self._board.castling_rights
-            us_ooo = (castling_rights >> chess.A8) & 1
-            us_oo = (castling_rights >> chess.H8) & 1
-            them_ooo = (castling_rights >> chess.A1) & 1
-            them_oo = (castling_rights >> chess.H1) & 1
-
-        plane_bytes = b"".join(self._get_plane_bytes())
-        repetition = repetitions >= 1
-
-        board_data = _Lc0BoardData(
-            plane_bytes=plane_bytes,
-            repetition=repetition,
-            transposition_key=transposition_key,
-            us_ooo=us_ooo,
-            us_oo=us_oo,
-            them_ooo=them_ooo,
-            them_oo=them_oo,
-            side_to_move=side_to_move,
-            rule50_count=rule50_count,
-        )
-
-        self._history_stack.append(board_data)
-
-    def to_input_array(self) -> np.ndarray:
-        """
-        Convert current board position to LC0's 112×8×8 input encoding.
-
-        Returns:
-            Array of shape (112, 8, 8) with dtype uint8.
-            Planes 0-103: 8 positions × 13 planes (pieces + repetition)
-            Planes 104-111: Metadata (castling, side to move, etc.)
-        """
-        planes_list: list[Any] = []
-        current_data = self._history_stack[-1]
-        planes_count = 0
-
-        for data in self._history_stack[-1:-9:-1]:
-            plane_bytes = data.plane_bytes
-
-            if not current_data.side_to_move:
-                planes: Any = np.unpackbits(np.frombuffer(plane_bytes, dtype=np.uint8))[::-1].reshape(12, 8, 8)[::-1]
-            else:
-                planes = (
-                    np.unpackbits(np.frombuffer(plane_bytes, dtype=np.uint8))[::-1]
-                    .reshape(12, 8, 8)[::-1]
-                    .reshape(2, 6, 8, 8)[::-1, :, ::-1]
-                    .reshape(12, 8, 8)
-                )
-
-            planes_list.append(planes)
-            planes_list.append([_FLAT_PLANES[int(data.repetition)]])
-            planes_count += 13
-
-        empty_planes_count = 104 - planes_count
-        if empty_planes_count > 0:
-            empty_planes: list[Any] = [_FLAT_PLANES[0] for _ in range(empty_planes_count)]
-            planes_list.append(empty_planes)
-
-        metadata_planes: list[Any] = [
-            _FLAT_PLANES[current_data.us_ooo],
-            _FLAT_PLANES[current_data.us_oo],
-            _FLAT_PLANES[current_data.them_ooo],
-            _FLAT_PLANES[current_data.them_oo],
-            _FLAT_PLANES[current_data.side_to_move],
-            _FLAT_PLANES[current_data.rule50_count],
-            _FLAT_PLANES[0],
-            _FLAT_PLANES[1],
-        ]
-        planes_list.append(metadata_planes)
-
-        return np.concatenate(planes_list)
-
-    def __repr__(self) -> str:
-        return f"Lc0BoardEncoder('{self.fen}')"
-
-
 class ActivationExtractor:
     """
     Extract activations from LC0 models using PyTorch forward hooks.
 
     Example:
-        >>> # model = LczeroModel.from_path("model.pt")  # doctest: +SKIP
-        >>> # extractor = ActivationExtractor(model, ["block3/conv2/relu"])  # doctest: +SKIP
-        >>> # board = Lc0BoardEncoder()  # doctest: +SKIP
-        >>> # activations = extractor.extract(board)  # doctest: +SKIP
-        >>> # activations["block3/conv2/relu"].shape  # doctest: +SKIP
         >>> True  # doctest: +SKIP
         True
     """
@@ -275,7 +109,7 @@ class ActivationExtractor:
 
         return hook
 
-    def extract(self, board: Lc0BoardEncoder) -> dict[str, torch.Tensor]:
+    def extract(self, board: LczeroBoard) -> dict[str, torch.Tensor]:
         """
         Extract activations for a single board position.
 
@@ -285,8 +119,7 @@ class ActivationExtractor:
         Returns:
             Dict mapping layer names to activation tensors
         """
-        encoding = board.to_input_array()
-        tensor = torch.from_numpy(encoding.astype(np.float32)).unsqueeze(0)  # type: ignore[call-arg]
+        tensor = board.to_input_tensor().unsqueeze(0)
         tensor = tensor.to(self.device)
 
         self.activations.clear()
@@ -297,7 +130,7 @@ class ActivationExtractor:
 
         return self.activations.copy()
 
-    def extract_batch(self, boards: list[Lc0BoardEncoder]) -> dict[str, torch.Tensor]:
+    def extract_batch(self, boards: list[LczeroBoard]) -> dict[str, torch.Tensor]:
         """
         Extract activations for multiple boards (batched).
 
@@ -307,8 +140,8 @@ class ActivationExtractor:
         Returns:
             Dict mapping layer names to batched activation tensors
         """
-        encodings = np.stack([b.to_input_array() for b in boards])
-        tensor = torch.from_numpy(encodings.astype(np.float32))  # type: ignore[call-arg]
+        tensors = [b.to_input_tensor() for b in boards]
+        tensor = torch.stack(tensors)
         tensor = tensor.to(self.device)
 
         self.activations.clear()
@@ -334,17 +167,10 @@ class ActivationExtractor:
         self.cleanup()
 
 
-def _cache_key(fen: str, model_path: str, layer_name: str) -> str:
-    """Generate cache key for activation."""
-    key_str = f"{fen}|{model_path}|{layer_name}"
-    return hashlib.sha256(key_str.encode()).hexdigest()
-
-
 def extract_features(
     fen: str,
     model_path: str | Path,
     layer_name: str,
-    use_cache: bool = True,
 ) -> np.ndarray:
     """
     Extract flattened activation vector from a chess position.
@@ -353,7 +179,6 @@ def extract_features(
         fen: Chess position in FEN notation
         model_path: Path to LC0 model file
         layer_name: Layer to extract from (e.g., "block3/conv2/relu")
-        use_cache: Whether to use cached activations
 
     Returns:
         Flattened activation vector (e.g., shape (4096,) for 64×8×8)
@@ -367,24 +192,13 @@ def extract_features(
         >>> features.shape  # doctest: +SKIP
         (4096,)
     """
-    model_path_str = str(model_path)
-    cache_key = _cache_key(fen, model_path_str, layer_name)
-
-    if use_cache and cache_key in _cache:
-        return _cache[cache_key]
-
-    model = LczeroModel.from_path(model_path_str)
+    model = LczeroModel.from_path(str(model_path))
     with ActivationExtractor(model, [layer_name]) as extractor:
-        board = Lc0BoardEncoder(fen)
+        board = LczeroBoard(fen)
         activations = extractor.extract(board)
 
     activation = activations[layer_name].cpu().numpy()
-    flattened = activation.reshape(-1)
-
-    if use_cache:
-        _cache[cache_key] = flattened
-
-    return flattened
+    return activation.reshape(-1)
 
 
 def extract_features_batch(
@@ -392,7 +206,6 @@ def extract_features_batch(
     model_path: str | Path,
     layer_name: str,
     batch_size: int = 32,
-    use_cache: bool = True,
     show_progress: bool = True,
 ) -> np.ndarray:
     """
@@ -403,7 +216,6 @@ def extract_features_batch(
         model_path: Path to LC0 model file
         layer_name: Layer to extract from
         batch_size: Number of positions to process at once
-        use_cache: Whether to use cached activations
         show_progress: Whether to print progress
 
     Returns:
@@ -415,43 +227,25 @@ def extract_features_batch(
         >>> features.shape  # doctest: +SKIP
         (10, 4096)
     """
-    model_path_str = str(model_path)
-    results: list[np.ndarray | None] = []
-    cache_misses: list[str] = []
-    cache_miss_indices: list[int] = []
+    if show_progress:
+        print(f"Extracting activations for {len(fens)} positions...")
 
-    for idx, fen in enumerate(fens):
-        cache_key = _cache_key(fen, model_path_str, layer_name)
-        if use_cache and cache_key in _cache:
-            results.append(_cache[cache_key])
-        else:
-            results.append(None)
-            cache_misses.append(fen)
-            cache_miss_indices.append(idx)
+    results: list[np.ndarray] = []
+    model = LczeroModel.from_path(str(model_path))
 
-    if cache_misses:
-        if show_progress:
-            print(f"Extracting activations for {len(cache_misses)}/{len(fens)} positions...")
+    with ActivationExtractor(model, [layer_name]) as extractor:
+        for i in range(0, len(fens), batch_size):
+            batch_fens = fens[i : i + batch_size]
+            boards = [LczeroBoard(fen) for fen in batch_fens]
+            activations = extractor.extract_batch(boards)
+            batch_activations: Any = activations[layer_name].cpu().numpy()
 
-        model = LczeroModel.from_path(model_path_str)
-        with ActivationExtractor(model, [layer_name]) as extractor:
-            for i in range(0, len(cache_misses), batch_size):
-                batch_fens = cache_misses[i : i + batch_size]
-                batch_indices = cache_miss_indices[i : i + batch_size]
-                boards = [Lc0BoardEncoder(fen) for fen in batch_fens]
-                activations = extractor.extract_batch(boards)
-                batch_activations: Any = activations[layer_name].cpu().numpy()
+            for j in range(len(batch_fens)):
+                flattened: np.ndarray = batch_activations[j].reshape(-1)
+                results.append(flattened)
 
-                for j, (fen, idx) in enumerate(zip(batch_fens, batch_indices, strict=True)):
-                    flattened: np.ndarray = batch_activations[j].reshape(-1)
-                    results[idx] = flattened
-
-                    if use_cache:
-                        cache_key = _cache_key(fen, model_path_str, layer_name)
-                        _cache[cache_key] = flattened
-
-                if show_progress:
-                    print(f"  Processed {min(i + batch_size, len(cache_misses))}/{len(cache_misses)}")
+            if show_progress:
+                print(f"  Processed {min(i + batch_size, len(fens))}/{len(fens)}")
 
     return np.array(results)
 
