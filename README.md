@@ -82,14 +82,12 @@ tar -xzf data/raw/annotated_pgn_free.tar.gz -C data/raw
 
 **Process the dataset:**
 ```bash
-# Parse PGN files and label positions with detected concepts
 uv run python -m chess_sandbox.concept_labelling.pipeline \
   --input-dir data/raw/annotated_pgn_free/gameknot \
   --output data/processed/concept_labelling/positions_labeled.jsonl \
   --stats data/processed/concept_labelling/concept_stats.json \
   --limit 5  # Optional: process only first N files
 
-# Export samples to Lichess-compatible PGN format
 uv run python -m chess_sandbox.concept_labelling.lichess_export \
   --input data/processed/concept_labelling/positions_labeled.jsonl \
   --output-pgn data/exports/lichess_study_sample.pgn \
@@ -98,7 +96,18 @@ uv run python -m chess_sandbox.concept_labelling.lichess_export \
 
 Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and strategic themes (passed pawn, outpost, weak square, zugzwang). See [docs/plans/concept-labelling-pipeline.md](docs/plans/concept-labelling-pipeline.md) for details.
 
-**Running on Modal (serverless):** For batch processing on serverless infrastructure, see `chess_sandbox/concept_labelling/modal_pipeline.py` for usage instructions.
+**Running on Modal (serverless):** 
+
+See  `chess_sandbox/concept_labelling/modal_pipeline.py` for pre-requisites, then run:
+
+```bash
+modal run --detach chess_sandbox/concept_labelling/modal_pipeline.py::process_pgn_batch \
+    --refine-with-llm --llm-model gpt-4.1-mini \
+    --output-filename gpt-4.1-mini_labeled_positions_all.jsonl
+
+modal volume get chess-pgn-data outputs/gpt-4.1-mini_labeled_positions_all.jsonl data/processed/concept_labelling/gpt-4.1-mini_label
+ed_positions_all.jsonl
+```
 
 ## Project Structure
 
