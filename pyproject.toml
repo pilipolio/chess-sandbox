@@ -38,6 +38,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "scikit-learn>=1.7.2",
     "torch>=2.9.0",
+    "scikit-learn-stubs>=0.0.3",
 ]
 
 [dependency-groups]

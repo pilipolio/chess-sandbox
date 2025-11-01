@@ -69,7 +69,8 @@ def test_full_training_pipeline_with_real_model(
     # Check expected output patterns in CLI output
     assert "Training concept probe..." in result.output
     assert f"Mode: {mode}" in result.output
-    assert "Loading data..." in result.output
+    assert "Loading LC0 model..." in result.output
+    assert "Loading training data..." in result.output
     assert "Extracting activations..." in result.output
     assert "Encoding labels..." in result.output
     assert "Splitting data..." in result.output

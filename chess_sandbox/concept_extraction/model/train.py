@@ -19,13 +19,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
-from .features import extract_features_batch
+from ..labelling.labeller import LabelledPosition
+from .features import LczeroModel, extract_features_batch
 from .inference import create_probe
 
 
 def load_training_data(
     data_path: Path, mode: str = "multi-label"
-) -> tuple[list[dict[str, Any]], list[str] | list[list[str]], list[str]]:
+) -> tuple[list[LabelledPosition], list[str] | list[list[str]]]:
     """
     Load positions and extract concept labels from JSONL file.
 
@@ -34,41 +35,28 @@ def load_training_data(
         mode: "multi-class" (one concept per position) or "multi-label" (multiple concepts per position)
 
     Returns:
-        Tuple of (positions, labels, concept_list)
+        Tuple of (positions, labels)
         - positions: List of position dictionaries
         - labels: list[str] for multi-class, list[list[str]] for multi-label
-        - concept_list: Sorted list of all unique concept names
     """
     if mode not in ("multi-class", "multi-label"):
         raise ValueError(f"Invalid mode: {mode}. Must be 'multi-class' or 'multi-label'")
 
-    all_positions: list[dict[str, Any]] = []
+    all_positions: list[LabelledPosition] = []
     with data_path.open() as f:
         for line in f:
-            all_positions.append(json.loads(line))
+            all_positions.append(LabelledPosition.from_dict(json.loads(line)))
 
-    positions_with_concepts = [p for p in all_positions if p.get("concepts")]
+    positions_with_concepts = [p for p in all_positions if p.concepts]
     print(f"Loaded {len(all_positions)} positions, kept {len(positions_with_concepts)} with concepts")
 
-    all_concepts: set[str] = set()
-    for pos in positions_with_concepts:
-        concepts_data: Any = pos["concepts"]
-        for concept_dict in concepts_data:
-            validated_by: Any = concept_dict.get("validated_by")
-            if validated_by is not None:
-                concept_name_str: str = str(concept_dict["name"])
-                all_concepts.add(concept_name_str)
-
-    concept_list = sorted(all_concepts)
-    print(f"Found {len(concept_list)} unique concepts: {concept_list}")
-
-    positions: list[dict[str, Any]] = []
+    positions: list[LabelledPosition] = []
     labels: list[str] | list[list[str]]
 
     if mode == "multi-class":
         labels_single: list[str] = []
         for pos in positions_with_concepts:
-            validated_concepts = [str(c["name"]) for c in pos["concepts"] if c.get("validated_by") is not None]
+            validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
             if len(validated_concepts) >= 1:
                 positions.append(pos)
                 labels_single.append(validated_concepts[0])
@@ -77,7 +65,7 @@ def load_training_data(
     else:
         labels_multi: list[list[str]] = []
         for pos in positions_with_concepts:
-            validated_concepts = [str(c["name"]) for c in pos["concepts"] if c.get("validated_by") is not None]
+            validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
             if validated_concepts:
                 positions.append(pos)
                 labels_multi.append(validated_concepts)
@@ -95,7 +83,7 @@ def load_training_data(
     for concept_name, count in label_counts.most_common():
         print(f"  {concept_name}: {count}")
 
-    return positions, labels, concept_list
+    return positions, labels
 
 
 def evaluate_classifier(
@@ -209,55 +197,61 @@ def evaluate_classifier(
 
 
 def train_multiclass(
-    data_path: Path,
-    model_path: Path,
+    positions: list[LabelledPosition],
+    labels: list[str],
+    activations: np.ndarray,
     layer_name: str,
     output: Path,
     test_split: float,
     random_seed: int,
     model_version: str,
-    batch_size: int,
+    data_path: Path,
+    verbose: bool = False,
+    n_jobs: int = -1,
 ) -> None:
-    """Train multi-class concept probe (one concept per position)."""
-    print("\n[1/6] Loading data...")
-    positions, labels_union, concept_list = load_training_data(data_path, mode="multi-class")
-    labels: list[str] = labels_union  # type: ignore[assignment]
+    """
+    Train multi-class concept probe (one concept per position).
 
-    if not labels:
-        print("\nWARNING: No validated concepts found! Cannot train without labels.")
-        return
-
-    print("\n[2/6] Extracting activations...")
-    fens = [p["fen"] for p in positions]
-    activations = extract_features_batch(
-        fens,
-        model_path,
-        layer_name,
-        batch_size=batch_size,
-    )
-    print(f"Activation matrix shape: {activations.shape}")
-
-    print("\n[3/6] Encoding labels...")
+    Args:
+        positions: List of position dictionaries
+        labels: List of concept labels (one per position)
+        activations: Pre-extracted activation features
+        layer_name: Layer name that activations were extracted from
+        output: Path to save trained probe
+        test_split: Fraction of data for testing
+        random_seed: Random seed for reproducibility
+        model_version: Version identifier for the probe
+        data_path: Path to original JSONL file (for metadata)
+        verbose: Enable sklearn training progress output
+        n_jobs: Number of parallel jobs (-1 = all cores)
+    """
+    print("\n[1/4] Encoding labels...")
     encoder = LabelEncoder()
     label_matrix = encoder.fit_transform(labels).reshape(-1, 1)
+    concept_list = list(encoder.classes_)
     print(f"Label encoder classes: {encoder.classes_}")
     print(f"Encoded labels shape: {label_matrix.shape}")
 
-    print("\n[4/6] Splitting data...")
+    print("\n[2/4] Splitting data...")
     X_train, X_test, y_train, y_test = train_test_split(
         activations, label_matrix, test_size=test_split, random_state=random_seed
     )
     print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
 
-    print("\n[5/6] Training probe...")
-    clf = LogisticRegression(max_iter=10000, random_state=random_seed)
+    print("\n[3/4] Training probe...")
+    clf = LogisticRegression(
+        max_iter=10000,
+        random_state=random_seed,
+        verbose=verbose,
+        n_jobs=n_jobs,
+    )
     y_train_fit = y_train.ravel()
     print(f"Training multi-class classifier with {len(encoder.classes_)} classes")
 
     clf.fit(X_train, y_train_fit)
     print("Training complete!")
 
-    print("\n[6/6] Evaluating...")
+    print("\n[4/4] Evaluating...")
     baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
     baseline.fit(X_train, y_train_fit)
 
@@ -294,8 +288,9 @@ def train_multiclass(
             "test_split": test_split,
             "random_seed": random_seed,
             "data_path": str(data_path),
-            "model_path": str(model_path),
             "mode": "multi-class",
+            "verbose": verbose,
+            "n_jobs": n_jobs,
         },
         model_version=model_version,
         label_encoder=encoder,
@@ -306,56 +301,65 @@ def train_multiclass(
 
 
 def train_multilabel(
-    data_path: Path,
-    model_path: Path,
+    positions: list[LabelledPosition],
+    labels: list[list[str]],
+    activations: np.ndarray,
     layer_name: str,
     output: Path,
     test_split: float,
     random_seed: int,
     model_version: str,
-    batch_size: int,
+    data_path: Path,
+    verbose: bool = False,
+    n_jobs: int = -1,
 ) -> None:
-    """Train multi-label concept probe (multiple concepts per position)."""
-    print("\n[1/6] Loading data...")
-    positions, labels_union, concept_list = load_training_data(data_path, mode="multi-label")
-    labels: list[list[str]] = labels_union  # type: ignore[assignment]
+    """
+    Train multi-label concept probe (multiple concepts per position).
 
+    Args:
+        positions: List of position dictionaries
+        labels: List of concept label lists (multiple per position)
+        activations: Pre-extracted activation features
+        layer_name: Layer name that activations were extracted from
+        output: Path to save trained probe
+        test_split: Fraction of data for testing
+        random_seed: Random seed for reproducibility
+        model_version: Version identifier for the probe
+        data_path: Path to original JSONL file (for metadata)
+        verbose: Enable sklearn training progress output
+        n_jobs: Number of parallel jobs (-1 = all cores)
+    """
     if not labels:
         print("\nWARNING: No validated concepts found! Cannot train without labels.")
         return
 
-    print("\n[2/6] Extracting activations...")
-    fens = [p["fen"] for p in positions]
-    activations = extract_features_batch(
-        fens,
-        model_path,
-        layer_name,
-        batch_size=batch_size,
-    )
-    print(f"Activation matrix shape: {activations.shape}")
-
-    print("\n[3/6] Encoding labels...")
+    print("\n[1/4] Encoding labels...")
     encoder = MultiLabelBinarizer()
     label_matrix = encoder.fit_transform(labels)
+    concept_list = list(encoder.classes_)
     print(f"Multi-label binarizer classes: {encoder.classes_}")
     print(f"Binary label matrix shape: {label_matrix.shape}")
     print(f"Total labels: {label_matrix.sum()} ({label_matrix.sum() / label_matrix.size * 100:.1f}% density)")
 
-    print("\n[4/6] Splitting data...")
+    print("\n[2/4] Splitting data...")
     X_train, X_test, y_train, y_test = train_test_split(
         activations, label_matrix, test_size=test_split, random_state=random_seed
     )
     print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
 
-    print("\n[5/6] Training probe...")
-    base_clf = LogisticRegression(max_iter=10000, random_state=random_seed)
-    clf = OneVsRestClassifier(base_clf)
+    print("\n[3/4] Training probe...")
+    base_clf = LogisticRegression(
+        max_iter=10000,
+        random_state=random_seed,
+        verbose=verbose,
+    )
+    clf = OneVsRestClassifier(base_clf, n_jobs=n_jobs, verbose=verbose)
     print(f"Training multi-label classifier with {len(encoder.classes_)} concepts")
 
     clf.fit(X_train, y_train)
     print("Training complete!")
 
-    print("\n[6/6] Evaluating...")
+    print("\n[4/4] Evaluating...")
     baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
     baseline.fit(X_train, y_train)
 
@@ -393,8 +397,9 @@ def train_multilabel(
             "test_split": test_split,
             "random_seed": random_seed,
             "data_path": str(data_path),
-            "model_path": str(model_path),
             "mode": "multi-label",
+            "verbose": verbose,
+            "n_jobs": n_jobs,
         },
         model_version=model_version,
         label_encoder=encoder,
@@ -457,6 +462,17 @@ def train_multilabel(
     type=click.Choice(["multi-class", "multi-label"]),
     help="Training mode: 'multi-class' (one concept per position) or 'multi-label' (multiple concepts)",
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Enable verbose output from sklearn models (shows training progress)",
+)
+@click.option(
+    "--n-jobs",
+    default=-1,
+    type=int,
+    help="Number of parallel jobs for sklearn (-1 uses all cores, -2 leaves one free)",
+)
 def train(
     data_path: Path,
     model_path: Path,
@@ -467,15 +483,18 @@ def train(
     model_version: str,
     batch_size: int,
     mode: str,
+    verbose: bool,
+    n_jobs: int,
 ) -> None:
     """
     Train concept probe from labeled positions.
 
     Example:
-        python -m chess_sandbox.concept_labelling.train \\
+        python -m chess_sandbox.concept_extraction.model.train \\
             --data-path data/positions.jsonl \\
             --model-path models/maia-1500.pt \\
-            --output models/concept_probes/probe_v1.pkl
+            --output models/concept_probes/probe_v1.pkl \\
+            --verbose --n-jobs -1
     """
     print("Training concept probe...")
     print(f"  Data: {data_path}")
@@ -483,28 +502,52 @@ def train(
     print(f"  Layer: {layer_name}")
     print(f"  Mode: {mode}")
     print(f"  Output: {output}")
+    print(f"  Parallel jobs (n_jobs): {n_jobs}")
+
+    print("\nLoading LC0 model...")
+    model = LczeroModel.from_path(str(model_path))
+    print("Model loaded successfully!")
+
+    print("\nLoading training data...")
+    positions, labels = load_training_data(data_path, mode=mode)
+
+    print("\nExtracting activations...")
+    fens = [p.fen for p in positions]
+    activations = extract_features_batch(
+        fens,
+        layer_name,
+        model=model,
+        batch_size=batch_size,
+    )
+    print(f"Activation matrix shape: {activations.shape}")
 
     if mode == "multi-class":
         train_multiclass(
-            data_path=data_path,
-            model_path=model_path,
+            positions=positions,
+            labels=labels,  # type: ignore[arg-type]
+            activations=activations,
             layer_name=layer_name,
             output=output,
             test_split=test_split,
             random_seed=random_seed,
             model_version=model_version,
-            batch_size=batch_size,
+            data_path=data_path,
+            verbose=verbose,
+            n_jobs=n_jobs,
         )
     else:
         train_multilabel(
-            data_path=data_path,
-            model_path=model_path,
+            positions=positions,
+            labels=labels,  # type: ignore[arg-type]
+            activations=activations,
             layer_name=layer_name,
             output=output,
             test_split=test_split,
             random_seed=random_seed,
             model_version=model_version,
-            batch_size=batch_size,
+            data_path=data_path,
+            verbose=verbose,
+            n_jobs=n_jobs,
         )
 
 

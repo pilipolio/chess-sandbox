@@ -204,8 +204,9 @@ def extract_features(
 
 def extract_features_batch(
     fens: list[str],
-    model_path: str | Path,
     layer_name: str,
+    model: Any | None = None,
+    model_path: str | Path | None = None,
     batch_size: int = 32,
 ) -> np.ndarray:
     """
@@ -213,24 +214,36 @@ def extract_features_batch(
 
     Args:
         fens: List of chess positions in FEN notation
-        model_path: Path to LC0 model file
         layer_name: Layer to extract from
+        model: Pre-loaded LC0 model (preferred for efficiency)
+        model_path: Path to LC0 model file (loaded if model not provided)
         batch_size: Number of positions to process at once
-        show_progress: Whether to print progress
 
     Returns:
         Array of shape (n_positions, n_features)
 
+    Note:
+        Provide either model or model_path. Using a pre-loaded model avoids
+        repeated loading overhead when processing multiple batches.
+
     Example:
         >>> fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"] * 10  # doctest: +SKIP
-        >>> features = extract_features_batch(fens, "models/maia-1500.pt", "block3/conv2/relu")  # doctest: +SKIP
+        >>> features = extract_features_batch(  # doctest: +SKIP
+        ...     fens, "block3/conv2/relu", model_path="models/maia-1500.pt"
+        ... )
         >>> features.shape  # doctest: +SKIP
         (10, 4096)
     """
+    if model is None and model_path is None:
+        raise ValueError("Must provide either model or model_path")
+    if model is not None and model_path is not None:
+        raise ValueError("Provide only one of model or model_path, not both")
+
     print(f"Extracting activations for {len(fens)} positions...")
 
     results: list[np.ndarray] = []
-    model = LczeroModel.from_path(str(model_path))
+    if model is None:
+        model = LczeroModel.from_path(str(model_path))
 
     with ActivationExtractor(model, [layer_name]) as extractor:
         for i in tqdm(range(0, len(fens), batch_size)):
