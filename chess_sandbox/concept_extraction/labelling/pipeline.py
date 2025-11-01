@@ -9,8 +9,7 @@ from pathlib import Path
 import click
 from tqdm.asyncio import tqdm
 
-from .labeller import label_positions
-from .models import LabelledPosition
+from .labeller import LabelledPosition, label_positions
 from .parser import parse_pgn_directory
 from .refiner import Refiner
 

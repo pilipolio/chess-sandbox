@@ -4,7 +4,7 @@ from pathlib import Path
 
 import chess.pgn
 
-from .models import LabelledPosition
+from .labeller import LabelledPosition
 
 
 def parse_pgn_file(pgn_path: Path) -> list[chess.pgn.Game]:

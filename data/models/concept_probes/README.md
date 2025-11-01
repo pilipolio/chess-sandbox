@@ -24,13 +24,13 @@ Each `.pkl` file contains:
 ## Usage
 
 ```python
-from chess_sandbox.concept_labelling.inference import ConceptProbe
+from chess_sandbox.concept_extraction.model.inference import ConceptProbe
 
 # Load trained probe
 probe = ConceptProbe.load("data/models/concept_probes/probe_v1.pkl")
 
 # Extract features from a position
-from chess_sandbox.concept_labelling.features import extract_features
+from chess_sandbox.concept_extraction.model.features import extract_features
 features = extract_features(fen, "data/models/maia-1500.pt", probe.layer_name)
 
 # Predict concepts
@@ -40,7 +40,7 @@ concepts = probe.predict(features)
 ## Training a New Probe
 
 ```bash
-python -m chess_sandbox.concept_labelling.train \
+python -m chess_sandbox.concept_extraction.model.train \
     --data-path data/processed/async_100_positions_llm_refined_concepts.jsonl \
     --model-path data/models/maia-1500.pt \
     --layer-name block3/conv2/relu \
