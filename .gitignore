@@ -16,3 +16,8 @@ wheels/
 # data
 data/raw
 data/processed
+
+# ML models and artifacts
+data/models/*.pt
+data/models/concept_probes/*.pkl
+.cache/
