@@ -97,7 +97,7 @@ venv = ".venv"          #       in a folder called `.venv`
 pythonVersion = "3.13"  # if library, specify the _lowest_ you support
 include = ["chess_sandbox", "tests"]
 strict = ["**/*.py"]    # use 'strict' checking on most files
-exclude = ["**/concept_labelling/train.py"]  # exclude ML training code using sklearn (partial types)
+exclude = ["**/concept_extraction/model/train.py"]  # exclude ML training code using sklearn (partial types)
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]

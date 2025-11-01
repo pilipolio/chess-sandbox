@@ -1,7 +1,7 @@
 """Modal ephemeral app for chess concept labeling pipeline.
 
 Usage:
-    modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \\
+    modal run chess_sandbox/concept_extraction/labelling/modal_pipeline.py::process_pgn_batch \\
         --input-subdir pgn_inputs/gameknot \\
         --output-filename output.jsonl \\
         --limit 10 \\
@@ -59,7 +59,7 @@ def process_pgn_batch(
         "run",
         "python",
         "-m",
-        "chess_sandbox.concept_labelling.pipeline",
+        "chess_sandbox.concept_extraction.labelling.pipeline",
         "--input-dir",
         input_dir,
         "--output",

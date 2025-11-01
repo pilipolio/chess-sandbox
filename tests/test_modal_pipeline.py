@@ -4,7 +4,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from chess_sandbox.concept_labelling.pipeline import main
+from chess_sandbox.concept_extraction.labelling.pipeline import main
 
 
 def test_cli_runner_integration(tmp_path: Path) -> None:

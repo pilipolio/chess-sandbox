@@ -10,7 +10,7 @@ import httpx
 
 from chess_sandbox.config import settings
 
-from .models import LabelledPosition
+from .labeller import LabelledPosition
 
 
 def load_labeled_positions(jsonl_path: Path) -> list[LabelledPosition]:
@@ -82,7 +82,7 @@ def sample_positions(
         strategy: "balanced" (equal per concept) or "random"
         use_validated: If True, use only validated concepts
 
-    >>> from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
+    >>> from chess_sandbox.concept_extraction.labelling.labeller import Concept, LabelledPosition
     >>> positions = [
     ...     LabelledPosition("fen1", 1, "white", "pin1", "g1", "e4", "fen0", [Concept(name="pin")]),
     ...     LabelledPosition("fen2", 2, "white", "pin2", "g2", "e5", "fen1", [Concept(name="pin")]),
@@ -138,7 +138,7 @@ def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> 
         position: The labeled position to convert
         use_validated: If True, use only validated concepts and include temporal context
 
-    >>> from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
+    >>> from chess_sandbox.concept_extraction.labelling.labeller import Concept, LabelledPosition
     >>> pos = LabelledPosition(
     ...     fen="r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
     ...     move_number=3,

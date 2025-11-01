@@ -7,8 +7,8 @@ import httpx
 import pytest
 import respx
 
-from chess_sandbox.concept_labelling.models import Concept, LabelledPosition
-from chess_sandbox.concept_labelling.refiner import Refiner
+from chess_sandbox.concept_extraction.labelling.labeller import Concept, LabelledPosition
+from chess_sandbox.concept_extraction.labelling.refiner import Refiner
 
 
 def create_mock_response(is_valid: bool, temporal: str | None, reasoning: str) -> dict[str, Any]:

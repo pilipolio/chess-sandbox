@@ -6,7 +6,7 @@ Chess commentary generation using LLMs and Stockfish engine analysis.
 
 1. **Chess Commentator Skill** - A [Skill](https://www.anthropic.com/news/skills) to augment claude.ai or Claude Code with a chess engine tool for interactive position analysis and discussion.
 2. **Chess Commentator LLM Workflow** - Commentary generation pipeline using OpenAI models
-3. **Concept Labeling Pipeline** - Extract and label chess positions with tactical/strategic concepts from annotated PGN files
+3. **Concept Extraction Pipeline** - Extract and label chess positions with tactical/strategic concepts from annotated PGN files using regex patterns, LLM validation, and ML-based concept probes
 
 ## Quick Start
 
@@ -67,9 +67,9 @@ Batch evaluation using LLM as judges:
 uv run python -m chess_sandbox.evaluation
 ```
 
-### Approach 3: Concept Labeling Pipeline
+### Approach 3: Concept Extraction Pipeline
 
-Build a dataset of chess positions labeled with tactical and strategic concepts.
+Build a dataset of chess positions labeled with tactical and strategic concepts using regex detection, LLM validation, and train ML probes.
 
 **Download the dataset:**
 ```bash
@@ -80,53 +80,72 @@ wget -P data/raw https://huggingface.co/datasets/Waterhorse/chess_data/resolve/m
 tar -xzf data/raw/annotated_pgn_free.tar.gz -C data/raw
 ```
 
-**Process the dataset:**
+**Label positions with regex + LLM:**
 ```bash
-uv run python -m chess_sandbox.concept_labelling.pipeline \
+uv run python -m chess_sandbox.concept_extraction.labelling.pipeline \
   --input-dir data/raw/annotated_pgn_free/gameknot \
-  --output data/processed/concept_labelling/positions_labeled.jsonl \
-  --stats data/processed/concept_labelling/concept_stats.json \
+  --output data/processed/concept_extraction/positions_labeled.jsonl \
   --limit 5  # Optional: process only first N files
+  --refine-with-llm  # Optional: validate with LLM
 
-uv run python -m chess_sandbox.concept_labelling.lichess_export \
-  --input data/processed/concept_labelling/positions_labeled.jsonl \
-  --output-pgn data/exports/lichess_study_sample.pgn \
+uv run python -m chess_sandbox.concept_extraction.labelling.lichess_export \
+  --input data/processed/concept_extraction/positions_labeled.jsonl \
+  --study-id YOUR_STUDY_ID \
   --n-samples 64
+```
+
+**Train ML concept probes:**
+```bash
+uv run python -m chess_sandbox.concept_extraction.model.train \
+  --data-path data/processed/concept_extraction/positions_labeled.jsonl \
+  --model-path models/maia-1500.pt \
+  --output models/concept_probes/probe_v1.pkl \
+  --mode multi-label
 ```
 
 Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and strategic themes (passed pawn, outpost, weak square, zugzwang). See [docs/plans/concept-labelling-pipeline.md](docs/plans/concept-labelling-pipeline.md) for details.
 
-**Running on Modal (serverless):** 
+**Running on Modal (serverless):**
 
-See  `chess_sandbox/concept_labelling/modal_pipeline.py` for pre-requisites, then run:
+See `chess_sandbox/concept_extraction/labelling/modal_pipeline.py` for pre-requisites, then run:
 
 ```bash
-modal run --detach chess_sandbox/concept_labelling/modal_pipeline.py::process_pgn_batch \
+modal run --detach chess_sandbox/concept_extraction/labelling/modal_pipeline.py::process_pgn_batch \
     --refine-with-llm --llm-model gpt-4.1-mini \
     --output-filename gpt-4.1-mini_labeled_positions_all.jsonl
 
-modal volume get chess-pgn-data outputs/gpt-4.1-mini_labeled_positions_all.jsonl data/processed/concept_labelling/gpt-4.1-mini_label
-ed_positions_all.jsonl
+modal volume get chess-pgn-data outputs/gpt-4.1-mini_labeled_positions_all.jsonl \
+  data/processed/concept_extraction/gpt-4.1-mini_labeled_positions_all.jsonl
 ```
 
 ## Project Structure
 
 ```
 chess_sandbox/
-├── config.py               # Settings management
-├── engine                  # Wrapper around stockfish/lc0 engines
-    ├── ...
-├── commentator.py          # OpenAI-based automated commentary
-├── data_scraper.py         # HTML scraping for ground truth data
-├── evaluation.py           # Batch evaluation with LLM judges
-└── concept_labelling/      # Position labeling pipeline
-    ├── ...
+├── config.py                  # Settings management
+├── engine/                    # Wrapper around stockfish/lc0 engines
+│   ├── ...
+├── commentator.py             # OpenAI-based automated commentary
+├── data_scraper.py            # HTML scraping for ground truth data
+├── evaluation.py              # Batch evaluation with LLM judges
+└── concept_extraction/        # Concept extraction pipeline
+    ├── labelling/             # Regex + LLM labeling
+    │   ├── labeller.py        # Core labeling (includes Concept, LabelledPosition models)
+    │   ├── parser.py          # PGN parsing
+    │   ├── patterns.py        # Regex patterns
+    │   ├── refiner.py         # LLM validation
+    │   ├── pipeline.py        # CLI for labeling
+    │   └── modal_pipeline.py  # Modal deployment
+    └── model/                 # ML-based concept detection
+        ├── features.py        # LC0 activation extraction
+        ├── train.py           # Training CLI
+        └── inference.py       # ConceptProbe, prediction
 
-docs
-├── adrs                    # Architectural Decision Records based on [madr](https://adr.github.io/adr-templates/#markdown-architectural-decision-records-madr) template
-└── plans                   # LLM generated/implemented plans, for references
+docs/
+├── adrs/                      # Architectural Decision Records (MADR template)
+└── plans/                     # LLM generated/implemented plans
 
-.claude/skills/chess-commentator/  # Chess Commentator skill for interactive analysis
+.claude/skills/chess-commentator/  # Chess Commentator skill
 ```
 
 ## Tech Stack

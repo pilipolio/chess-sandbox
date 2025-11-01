@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from chess_sandbox.concept_labelling.inference import ConceptProbe
-from chess_sandbox.concept_labelling.train import train
+from chess_sandbox.concept_extraction.model.inference import ConceptProbe
+from chess_sandbox.concept_extraction.model.train import train
 
 # Path to fixtures
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

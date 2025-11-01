@@ -141,7 +141,7 @@ def modal_main(...) -> dict[str, Any]:
 @app.function(...)
 def modal_main(...) -> dict[str, str]:
     from click.testing import CliRunner
-    from chess_sandbox.concept_labelling.pipeline import main
+    from chess_sandbox.concept_extraction.labelling.pipeline import main
 
     runner = CliRunner()
     result = runner.invoke(main, [
@@ -213,7 +213,7 @@ def main(
 
 ### Phase 1: Modal App Definition (Option 2 Implementation)
 
-**File:** `chess_sandbox/concept_labelling/modal_pipeline.py`
+**File:** `chess_sandbox/concept_extraction.labelling/modal_pipeline.py`
 
 **1.1 Build Modal Image**
 ```python
@@ -270,7 +270,7 @@ def process_pgn_batch(
         Dictionary with status and CLI output text
     """
     from click.testing import CliRunner
-    from chess_sandbox.concept_labelling.pipeline import main
+    from chess_sandbox.concept_extraction.labelling.pipeline import main
 
     # Build CLI arguments
     input_dir = f"/data/{input_subdir}"
@@ -472,7 +472,7 @@ modal volume ls chess-pgn-data /pgn_inputs/gameknot
 **3.1 Local Testing (Without Modal)**
 ```bash
 # Test existing CLI pipeline first
-uv run python -m chess_sandbox.concept_labelling.pipeline \
+uv run python -m chess_sandbox.concept_extraction.labelling.pipeline \
   --input-dir ./data/raw/annotated_pgn_free/gameknot \
   --output ./test_output.jsonl \
   --limit 5
@@ -481,13 +481,13 @@ uv run python -m chess_sandbox.concept_labelling.pipeline \
 **3.2 Modal Development Server**
 ```bash
 # Start Modal dev server (runs locally, simulates Modal environment)
-modal serve chess_sandbox/concept_labelling/modal_pipeline.py
+modal serve chess_sandbox/concept_extraction.labelling/modal_pipeline.py
 ```
 
 **3.3 Small Batch Test**
 ```bash
 # Test with 10 files, no LLM (fast validation)
-modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
+modal run chess_sandbox/concept_extraction.labelling/modal_pipeline.py::main \
   --input-subdir pgn_inputs/gameknot \
   --output-filename test_10_files.jsonl \
   --limit 10
@@ -496,7 +496,7 @@ modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
 **3.4 LLM Integration Test**
 ```bash
 # Test with 5 files and LLM refinement
-modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
+modal run chess_sandbox/concept_extraction.labelling/modal_pipeline.py::main \
   --input-subdir pgn_inputs/gameknot \
   --output-filename test_llm_5_files.jsonl \
   --limit 5 \
@@ -523,7 +523,7 @@ diff <(jq -S . local_output.jsonl) <(jq -S . test_modal_output.jsonl)
 
 ```bash
 # Process 100 PGN files with regex-based labeling
-modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
+modal run chess_sandbox/concept_extraction.labelling/modal_pipeline.py::main \
   --input-subdir pgn_inputs/gameknot \
   --output-filename gameknot_100_regex.jsonl \
   --limit 100
@@ -533,7 +533,7 @@ modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
 
 ```bash
 # Process all files with LLM validation
-modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
+modal run chess_sandbox/concept_extraction.labelling/modal_pipeline.py::main \
   --input-subdir pgn_inputs/gameknot \
   --output-filename gameknot_all_llm.jsonl \
   --refine-with-llm \
@@ -544,7 +544,7 @@ modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
 
 ```bash
 # Use different LLM model
-modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
+modal run chess_sandbox/concept_extraction.labelling/modal_pipeline.py::main \
   --input-subdir pgn_inputs/lichess \
   --output-filename lichess_gpt5nano.jsonl \
   --refine-with-llm \
@@ -569,7 +569,7 @@ modal volume get chess-pgn-data \
 
 ```
 chess_sandbox/
-├── concept_labelling/
+├── concept_extraction.labelling/
 │   ├── modal_pipeline.py       # NEW: Modal app definition
 │   ├── pipeline.py              # EXISTING: Core logic (reused)
 │   ├── parser.py                # EXISTING: PGN parsing
@@ -610,10 +610,10 @@ modal volume put chess-pgn-data \
 
 ```bash
 # Development testing (local simulation)
-modal serve chess_sandbox/concept_labelling/modal_pipeline.py
+modal serve chess_sandbox/concept_extraction.labelling/modal_pipeline.py
 
 # Production execution (remote Modal cloud)
-modal run chess_sandbox/concept_labelling/modal_pipeline.py::main \
+modal run chess_sandbox/concept_extraction.labelling/modal_pipeline.py::main \
   --input-subdir pgn_inputs/gameknot \
   --output-filename output.jsonl \
   --refine-with-llm
@@ -649,10 +649,10 @@ modal volume get chess-pgn-data \
 
 ## References
 
-- Existing CLI: `chess_sandbox/concept_labelling/pipeline.py:main()`
-- Parser logic: `chess_sandbox/concept_labelling/parser.py:parse_pgn_directory()`
-- Labeller logic: `chess_sandbox/concept_labelling/labeller.py:label_positions()`
-- Refiner logic: `chess_sandbox/concept_labelling/refiner.py:Refiner.refine()`
-- Async parallelization: `chess_sandbox/concept_labelling/pipeline.py:refine_positions_parallel()`
+- Existing CLI: `chess_sandbox/concept_extraction.labelling/pipeline.py:main()`
+- Parser logic: `chess_sandbox/concept_extraction.labelling/parser.py:parse_pgn_directory()`
+- Labeller logic: `chess_sandbox/concept_extraction.labelling/labeller.py:label_positions()`
+- Refiner logic: `chess_sandbox/concept_extraction.labelling/refiner.py:Refiner.refine()`
+- Async parallelization: `chess_sandbox/concept_extraction.labelling/pipeline.py:refine_positions_parallel()`
 - Modal API endpoint pattern: `chess_sandbox/endpoints.py`
 - Modal ADR: `docs/adrs/20251029-use-modal-for-serverless-endpoints.md`

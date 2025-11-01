@@ -1,4 +1,4 @@
-"""Integration tests for concept labelling pipeline CLI."""
+"""Integration tests for concept extraction labelling pipeline CLI."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from chess_sandbox.concept_labelling.pipeline import main
+from chess_sandbox.concept_extraction.labelling.pipeline import main
 
 
 @pytest.fixture

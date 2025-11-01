@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from .models import Concept
+from ..labelling.labeller import Concept
 
 
 @dataclass

@@ -8,7 +8,7 @@ from typing import Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from .models import Concept, LabelledPosition
+from .labeller import Concept, LabelledPosition
 
 Temporal = Literal["actual", "future", "hypothetical", "past"]
 
