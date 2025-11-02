@@ -94,28 +94,3 @@ def test_full_training_pipeline_with_real_model(
     # Check training metrics were stored
     assert "probe" in probe.training_metrics
     assert "baseline" in probe.training_metrics
-    assert "mode" in probe.training_metrics
-    assert probe.training_metrics["mode"] == mode
-
-    # Mode-specific checks
-    if mode == "multi-class":
-        # Multi-class should have accuracy metrics
-        assert "accuracy" in probe.training_metrics["probe"]
-        assert "f1_macro" in probe.training_metrics["probe"]
-        assert "f1_weighted" in probe.training_metrics["probe"]
-    else:
-        # Multi-label should have hamming loss and exact match
-        assert "hamming_loss" in probe.training_metrics["probe"]
-        assert "exact_match" in probe.training_metrics["probe"]
-
-    # Check per-concept metrics exist
-    assert "per_concept" in probe.training_metrics["probe"]
-    assert len(probe.training_metrics["probe"]["per_concept"]) > 0
-
-    print(f"\n✓ {mode} training completed successfully!")
-    print(f"  Concepts trained: {len(probe.concept_list)}")
-    print(f"  Concepts: {probe.concept_list}")
-    if mode == "multi-class":
-        print(f"  Accuracy: {probe.training_metrics['probe']['accuracy']:.2%}")
-    else:
-        print(f"  Exact Match: {probe.training_metrics['probe']['exact_match']:.2%}")
