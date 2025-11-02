@@ -18,5 +18,10 @@ class Settings(BaseSettings):
     MAIA_WEIGHTS_PATH: str = "data/raw/maia-1500.pb.gz"
     LICHESS_API_TOKEN: str = ""
 
+    # HuggingFace Hub settings
+    HF_TOKEN: str = ""
+    HF_ORG: str = "chess-concept-probes"
+    HF_CACHE_DIR: str | None = None
+
 
 settings = Settings()
