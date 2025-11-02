@@ -7,6 +7,7 @@ from LC0 layer activations.
 
 import json
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,8 @@ from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
 from ..labelling.labeller import LabelledPosition
 from .features import LczeroModel, extract_features_batch
-from .inference import create_probe
+from .hub import upload_probe
+from .inference import ConceptProbe
 
 
 def load_training_data(
@@ -208,7 +210,9 @@ def train_multiclass(
     data_path: Path,
     verbose: bool = False,
     n_jobs: int = -1,
-) -> None:
+    upload_to_hub: bool = False,
+    hf_repo_id: str | None = None,
+) -> ConceptProbe:
     """
     Train multi-class concept probe (one concept per position).
 
@@ -275,8 +279,7 @@ def train_multiclass(
     print(f"Baseline F1 (wtd):    {baseline_metrics['f1_weighted']:.1%}")
     print(f"Probe F1 (wtd):       {probe_metrics['f1_weighted']:.1%}")
 
-    print(f"\nSaving to {output}...")
-    probe = create_probe(
+    probe = ConceptProbe(  # pyright: ignore[reportReturnType]
         classifier=clf,
         concept_list=concept_list,
         layer_name=layer_name,
@@ -292,12 +295,11 @@ def train_multiclass(
             "verbose": verbose,
             "n_jobs": n_jobs,
         },
+        training_date=datetime.now().isoformat(),
         model_version=model_version,
         label_encoder=encoder,
     )
-    probe.save(output)
-
-    print("Done!")
+    return probe
 
 
 def train_multilabel(
@@ -312,7 +314,7 @@ def train_multilabel(
     data_path: Path,
     verbose: bool = False,
     n_jobs: int = -1,
-) -> None:
+) -> ConceptProbe:
     """
     Train multi-label concept probe (multiple concepts per position).
 
@@ -385,7 +387,7 @@ def train_multilabel(
     print(f"Error Reduction:      {error_reduction:.1%}")
 
     print(f"\nSaving to {output}...")
-    probe = create_probe(
+    probe = ConceptProbe(  # pyright: ignore[reportReturnType]
         classifier=clf,
         concept_list=concept_list,
         layer_name=layer_name,
@@ -401,12 +403,11 @@ def train_multilabel(
             "verbose": verbose,
             "n_jobs": n_jobs,
         },
+        training_date=datetime.now().isoformat(),
         model_version=model_version,
         label_encoder=encoder,
     )
-    probe.save(output)
-
-    print("Done!")
+    return probe
 
 
 @click.command()
@@ -473,6 +474,11 @@ def train_multilabel(
     type=int,
     help="Number of parallel jobs for sklearn (-1 uses all cores, -2 leaves one free)",
 )
+@click.option(
+    "--upload-to-hub",
+    is_flag=True,
+    help="Upload trained probe to HuggingFace Hub after training",
+)
 def train(
     data_path: Path,
     model_path: Path,
@@ -485,6 +491,7 @@ def train(
     mode: str,
     verbose: bool,
     n_jobs: int,
+    upload_to_hub: bool,
 ) -> None:
     """
     Train concept probe from labeled positions.
@@ -521,7 +528,7 @@ def train(
     )
     print(f"Activation matrix shape: {activations.shape}")
 
-    if mode == "multi-class":
+    probe = (
         train_multiclass(
             positions=positions,
             labels=labels,  # type: ignore[arg-type]
@@ -535,8 +542,8 @@ def train(
             verbose=verbose,
             n_jobs=n_jobs,
         )
-    else:
-        train_multilabel(
+        if mode == "multi-class"
+        else train_multilabel(
             positions=positions,
             labels=labels,  # type: ignore[arg-type]
             activations=activations,
@@ -549,6 +556,12 @@ def train(
             verbose=verbose,
             n_jobs=n_jobs,
         )
+    )
+
+    probe.save(output)
+    if upload_to_hub:
+        commit = upload_probe(output, model_name="chess-sandbox-concept-probes")
+        print(f"Successfully uploaded: {commit}")
 
 
 if __name__ == "__main__":
