@@ -1,13 +1,26 @@
 """Modal endpoints for concept extraction inference."""
 
 import modal
+from pydantic import BaseModel
 
-from chess_sandbox.concept_extraction.model.inference import (
-    ConceptConfidenceResponse,
-    ConceptExtractor,
-    ConceptPredictionResponse,
-)
+from chess_sandbox.concept_extraction.model.inference import ConceptExtractor
 from chess_sandbox.config import settings
+
+
+class ConceptPrediction(BaseModel):
+    """Individual concept prediction with confidence score."""
+
+    name: str
+    confidence: float
+
+
+class ConceptExtractionResponse(BaseModel):
+    """Response model for concept extraction endpoint."""
+
+    fen: str
+    threshold: float
+    concepts: list[ConceptPrediction]
+
 
 image = (
     modal.Image.debian_slim()
@@ -27,6 +40,48 @@ app = modal.App(name="chess-concept-extraction", image=image)
 _extractor: ConceptExtractor | None = None
 
 
+@app.function()  # type: ignore
+@modal.fastapi_endpoint(method="GET")  # type: ignore
+def extract_concepts(
+    fen: str,
+    threshold: float = 0.1,
+) -> ConceptExtractionResponse:
+    """
+    Extract chess concepts from a position with confidence scores.
+
+    Extracts chess concepts (pins, forks, sacrifices, etc.) from a position
+    using trained neural probe classifiers on Leela Chess Zero activations.
+    Returns only concepts above the specified probability threshold.
+
+    Args:
+        fen: Position in FEN notation (path parameter, required)
+        threshold: Probability threshold for filtering concepts (query parameter, default=0.1)
+
+    Returns:
+        ConceptExtractionResponse with concepts above threshold and their confidence scores
+
+    Raises:
+        ValueError: Invalid FEN notation
+        RuntimeError: Model loading or inference error
+
+    Example:
+        GET /position/{encoded_fen}/concepts?threshold=0.1
+        Where {encoded_fen} is the URL-encoded FEN string
+    """
+    extractor = get_extractor()
+    all_predictions = extractor.extract_concepts_with_confidence(fen)
+
+    return ConceptExtractionResponse(
+        fen=fen,
+        threshold=threshold,
+        concepts=[
+            ConceptPrediction(name=name, confidence=confidence)
+            for name, confidence in all_predictions
+            if confidence >= threshold
+        ],
+    )
+
+
 def get_extractor() -> ConceptExtractor:
     """
     Get or initialize the ConceptExtractor instance.
@@ -44,63 +99,3 @@ def get_extractor() -> ConceptExtractor:
         _extractor = ConceptExtractor.from_hf(probe_repo_id=probe_repo_id)
         print("ConceptExtractor initialized successfully")
     return _extractor
-
-
-@app.function()  # type: ignore
-@modal.fastapi_endpoint(method="GET")  # type: ignore
-def predict_concepts(
-    fen: str,
-    threshold: float = 0.5,
-) -> ConceptPredictionResponse:
-    """
-    Predict chess concepts from a position.
-
-    Extracts chess concepts (pins, forks, sacrifices, etc.) from a position
-    using trained neural probe classifiers on Leela Chess Zero activations.
-
-    Args:
-        fen: Position in FEN notation (required)
-        threshold: Probability threshold for positive prediction (default=0.5)
-
-    Returns:
-        ConceptPredictionResponse with detected concepts above threshold
-
-    Raises:
-        ValueError: Invalid FEN notation
-        RuntimeError: Model loading or inference error
-
-    Example:
-        GET /predict-concepts?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201
-    """
-    extractor = get_extractor()
-    concepts = extractor.extract_concepts(fen, threshold=threshold)
-    return ConceptPredictionResponse.from_concepts(fen=fen, concepts=concepts, threshold=threshold)
-
-
-@app.function()  # type: ignore
-@modal.fastapi_endpoint(method="GET")  # type: ignore
-def predict_concepts_with_confidence(
-    fen: str,
-) -> ConceptConfidenceResponse:
-    """
-    Predict chess concepts with confidence scores.
-
-    Extracts all chess concepts with probability scores, allowing inspection
-    of the model's confidence for each concept.
-
-    Args:
-        fen: Position in FEN notation (required)
-
-    Returns:
-        ConceptConfidenceResponse with all concepts and their probabilities
-
-    Raises:
-        ValueError: Invalid FEN notation
-        RuntimeError: Model loading or inference error
-
-    Example:
-        GET /predict-concepts-with-confidence?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201
-    """
-    extractor = get_extractor()
-    predictions = extractor.extract_concepts_with_confidence(fen)
-    return ConceptConfidenceResponse.from_predictions(fen=fen, predictions=predictions)

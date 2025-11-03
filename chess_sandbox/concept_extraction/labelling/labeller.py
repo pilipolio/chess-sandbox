@@ -108,7 +108,7 @@ class LabelledPosition:
     game_id: str
     move_san: str
     previous_fen: str
-    concepts: list[Concept] = field(default_factory=list)
+    concepts: list[Concept] = field(default_factory=lambda: [])
 
     @property
     def validated_concepts(self) -> list[Concept]:
