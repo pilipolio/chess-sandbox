@@ -1,3 +1,5 @@
+"""Modal endpoints for chess position analysis."""
+
 import modal
 
 from chess_sandbox.engine.position_analysis import PositionAnalysis, analyze_position

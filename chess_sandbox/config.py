@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # HuggingFace Hub settings
     HF_TOKEN: str = ""
     HF_ORG: str = "chess-concept-probes"
-    HF_CACHE_DIR: str | None = None
+    HF_CACHE_DIR: str = "/root/.cache/huggingface"
+    HF_CONCEPT_PROBE_REPO: str = "pilipolio/chess-positions-extractor"
 
 
 settings = Settings()
