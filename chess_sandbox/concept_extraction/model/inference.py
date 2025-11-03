@@ -13,9 +13,61 @@ from typing import Any
 import click
 import numpy as np
 from huggingface_hub import hf_hub_download
+from pydantic import BaseModel
 
 from ...config import settings
 from ..labelling.labeller import Concept, LabelledPosition
+
+
+class ConceptResponse(BaseModel):
+    """Pydantic model for concept in API responses."""
+
+    name: str
+    validated_by: str | None = None
+    temporal: str | None = None
+    reasoning: str | None = None
+
+    @classmethod
+    def from_concept(cls, concept: Concept) -> "ConceptResponse":
+        """Convert dataclass Concept to Pydantic model."""
+        return cls(
+            name=concept.name,
+            validated_by=concept.validated_by,
+            temporal=concept.temporal,
+            reasoning=concept.reasoning,
+        )
+
+
+class ConceptPredictionResponse(BaseModel):
+    """Response model for single position concept prediction."""
+
+    fen: str
+    concepts: list[ConceptResponse]
+    threshold: float
+
+    @classmethod
+    def from_concepts(cls, fen: str, concepts: list[Concept], threshold: float) -> "ConceptPredictionResponse":
+        """Create response from list of Concept dataclasses."""
+        return cls(
+            fen=fen,
+            concepts=[ConceptResponse.from_concept(c) for c in concepts],
+            threshold=threshold,
+        )
+
+
+class ConceptConfidenceResponse(BaseModel):
+    """Response model for concept predictions with confidence scores."""
+
+    fen: str
+    predictions: list[tuple[str, float]]
+
+    @classmethod
+    def from_predictions(cls, fen: str, predictions: list[tuple[str, float]]) -> "ConceptConfidenceResponse":
+        """Create response from predictions with confidence scores."""
+        return cls(
+            fen=fen,
+            predictions=predictions,
+        )
 
 
 @dataclass
