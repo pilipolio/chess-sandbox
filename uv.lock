@@ -241,6 +241,7 @@ dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "joblib" },
+    { name = "joblib-stubs" },
     { name = "lczerolens" },
     { name = "modal" },
     { name = "openai" },
@@ -273,6 +274,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "huggingface-hub", specifier = ">=0.27.0" },
     { name = "joblib", specifier = ">=1.4.0" },
+    { name = "joblib-stubs", specifier = ">=1.5.2.0.20250831" },
     { name = "lczerolens", specifier = ">=0.3.3" },
     { name = "modal", specifier = ">=1.2.1" },
     { name = "openai", specifier = ">=2.6.1" },
@@ -732,6 +734,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e8/5d/447af5ea094b9e4c4054f82e223ada074c552335b9b4b2d14bd9b35a67c4/joblib-1.5.2.tar.gz", hash = "sha256:3faa5c39054b2f03ca547da9b2f52fde67c06240c31853f306aea97f13647b55", size = 331077, upload-time = "2025-08-27T12:15:46.575Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/e8/685f47e0d754320684db4425a0967f7d3fa70126bffd76110b7009a0090f/joblib-1.5.2-py3-none-any.whl", hash = "sha256:4e1f0bdbb987e6d843c70cf43714cb276623def372df3c22fe5266b2670bc241", size = 308396, upload-time = "2025-08-27T12:15:45.188Z" },
+]
+
+[[package]]
+name = "joblib-stubs"
+version = "1.5.2.0.20250831"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/80/2e0ea0e43642ab69b33ad0d39c73378f52cc8b961b3dfc2519d53639e518/joblib_stubs-1.5.2.0.20250831.tar.gz", hash = "sha256:1b419c5b5238cbfd2759ef2e463ae3399ba1d3a6cbdc213a9ac339e6312b21ef", size = 19886, upload-time = "2025-08-31T11:39:17.607Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/f7/f73413f8c13d208f291d1430528b415331320868c352b6e8e5442c5ad053/joblib_stubs-1.5.2.0.20250831-py3-none-any.whl", hash = "sha256:2b75f04fbb98975d207cc3d7b686c538ee1b2a749cb63c035ce41ff97a0eb4bc", size = 36252, upload-time = "2025-08-31T11:39:16.447Z" },
 ]
 
 [[package]]

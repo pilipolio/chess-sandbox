@@ -187,7 +187,7 @@ def extract_features(
     Example:
         >>> features = extract_features(  # doctest: +SKIP
         ...     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        ...     "models/maia-1500.pt",
+        ...     "models/maia-1500.onnx",
         ...     "block3/conv2/relu"
         ... )
         >>> features.shape  # doctest: +SKIP
@@ -229,7 +229,7 @@ def extract_features_batch(
     Example:
         >>> fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"] * 10  # doctest: +SKIP
         >>> features = extract_features_batch(  # doctest: +SKIP
-        ...     fens, "block3/conv2/relu", model_path="models/maia-1500.pt"
+        ...     fens, "block3/conv2/relu", model_path="models/maia-1500.onnx"
         ... )
         >>> features.shape  # doctest: +SKIP
         (10, 4096)

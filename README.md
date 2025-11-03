@@ -97,10 +97,16 @@ uv run python -m chess_sandbox.concept_extraction.labelling.lichess_export \
 **Train ML concept probes:**
 ```bash
 uv run python -m chess_sandbox.concept_extraction.model.train \
-  --data-path data/processed/concept_extraction/positions_labeled.jsonl \
-  --model-path models/maia-1500.pt \
-  --output models/concept_probes/probe_v1.pkl \
-  --mode multi-label
+  --dataset-repo-id pilipolio/chess-positions-concepts \
+  --dataset-filename data.jsonl \
+  --dataset-revision test_fixture \
+  --lc0-model-repo-id lczerolens/maia-1500 \
+  --layer-name block3/conv2/relu \
+  --mode multi-label \
+  --upload-to-hub \
+  --output-repo-id pilipolio/chess-positions-extractor \
+  --output-revision test_fixture
+
 ```
 
 Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and strategic themes (passed pawn, outpost, weak square, zugzwang). See [docs/plans/concept-labelling-pipeline.md](docs/plans/concept-labelling-pipeline.md) for details.
@@ -138,8 +144,10 @@ chess_sandbox/
     │   └── modal_pipeline.py  # Modal deployment
     └── model/                 # ML-based concept detection
         ├── features.py        # LC0 activation extraction
-        ├── train.py           # Training CLI
-        └── inference.py       # ConceptProbe, prediction
+        ├── train.py           # Training CLI (includes ModelTrainingOutput)
+        ├── inference.py       # ConceptProbe, ConceptExtractor
+        ├── evaluation.py      # Metrics calculation
+        └── hub.py             # HuggingFace Hub upload
 
 docs/
 ├── adrs/                      # Architectural Decision Records (MADR template)

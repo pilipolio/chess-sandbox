@@ -41,6 +41,7 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "torch>=2.9.0",
     "scikit-learn-stubs>=0.0.3",
+    "joblib-stubs>=1.5.2.0.20250831",
 ]
 
 [dependency-groups]
@@ -101,14 +102,16 @@ pythonVersion = "3.13"  # if library, specify the _lowest_ you support
 include = ["chess_sandbox", "tests"]
 strict = ["**/*.py"]    # use 'strict' checking on most files
 exclude = [
-    "**/concept_extraction/model/train.py",      # ML training code with sklearn
-    "**/concept_extraction/model/inference.py",  # ML inference with joblib
-    "**/concept_extraction/model/hub.py",        # HF Hub with partial types
+    ".venv",                                              # Don't scan dependencies
+    "**/concept_extraction/model/train.py",              # ML training code with sklearn
+    "**/concept_extraction/model/inference.py",          # ML inference with joblib
+    "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --ignore=chess_sandbox/endpoints.py"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: marks tests as integration tests requiring Stockfish (deselect with '-m \"not integration\"')",
 ]
