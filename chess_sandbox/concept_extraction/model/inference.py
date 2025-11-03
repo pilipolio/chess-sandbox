@@ -11,10 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import click
 import joblib
 import numpy as np
+from huggingface_hub import hf_hub_download, snapshot_download
 
-from ..labelling.labeller import Concept
+from ...config import settings
+from ..labelling.labeller import Concept, LabelledPosition
 
 
 @dataclass
@@ -61,18 +64,13 @@ class ConceptProbe:
         """
         path = Path(path)
 
-        # Load from HF snapshot format (directory)
         if not path.is_dir():
             msg = f"Path must be directory (HF format): {path}"
             raise ValueError(msg)
 
-        # Load model components
         classifier = joblib.load(path / "probe_model.joblib")
-
         encoder_path = path / "label_encoder.joblib"
         label_encoder = joblib.load(encoder_path) if encoder_path.exists() else None
-
-        # Load metadata
         config = json.loads((path / "config.json").read_text())
         metadata = json.loads((path / "probe_metadata.json").read_text())
 
@@ -248,7 +246,7 @@ probe = ConceptProbe.load("path/to/{self.model_version}")
 from chess_sandbox.concept_extraction.model.features import extract_features
 features = extract_features(
     fen="rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-    model_path="path/to/maia-1500.pt",
+    model_path="path/to/maia-1500.onnx",
     layer_name="{self.layer_name}"
 )
 
@@ -310,10 +308,6 @@ concepts = probe.predict(features)
             >>> probe.concept_list  # doctest: +SKIP
             ['fork', 'pin', ...]
         """
-        from huggingface_hub import snapshot_download
-
-        from chess_sandbox.config import settings
-
         # Use settings for defaults
         cache_dir = cache_dir or settings.HF_CACHE_DIR
         token = token or settings.HF_TOKEN or None
@@ -444,3 +438,475 @@ concepts = probe.predict(features)
             f"layer={self.layer_name}, "
             f"version={self.model_version})"
         )
+
+
+@dataclass
+class ConceptExtractor:
+    """
+    High-level wrapper for extracting chess concepts from FEN positions.
+
+    Combines LC0 model loading, feature extraction, and concept prediction
+    into a single convenient interface. Downloads all dependencies from
+    HuggingFace Hub for zero-setup usage.
+
+    Example:
+        >>> extractor = ConceptExtractor.from_hf(  # doctest: +SKIP
+        ...     probe_repo_id="pilipolio/chess-sandbox-concept-probes"
+        ... )
+        >>> concepts = extractor.extract_concepts(  # doctest: +SKIP
+        ...     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        ... )
+    """
+
+    probe: ConceptProbe
+    model: Any
+    layer_name: str
+
+    @classmethod
+    def from_hf(
+        cls,
+        probe_repo_id: str,
+        *,
+        model_repo_id: str = "lczerolens/maia-1500",
+        model_filename: str = "model.onnx",
+        revision: str | None = None,
+        cache_dir: Path | str | None = None,
+        force_download: bool = False,
+        token: str | None = None,
+    ) -> "ConceptExtractor":
+        """
+        Load extractor from HuggingFace Hub (downloads both model and probe).
+
+        Downloads the Leela Chess Zero model and concept probe from HuggingFace Hub,
+        with automatic caching to avoid redundant downloads.
+
+        Args:
+            probe_repo_id: Probe repository (e.g., "pilipolio/chess-sandbox-concept-probes")
+            model_repo_id: LC0 model repository (default: "lczerolens/maia-1500")
+            model_filename: Model file to download (default: "model.onnx")
+            revision: Git revision for probe (tag, branch, commit). Defaults to "main"
+            cache_dir: Custom cache directory (defaults to ~/.cache/huggingface/)
+            force_download: Force re-download even if cached
+            token: HF authentication token for private repos
+
+        Returns:
+            Loaded ConceptExtractor instance with model and probe ready
+
+        Example:
+            >>> extractor = ConceptExtractor.from_hf(  # doctest: +SKIP
+            ...     probe_repo_id="pilipolio/chess-sandbox-concept-probes"
+            ... )
+            >>> extractor.layer_name  # doctest: +SKIP
+            'block3/conv2/relu'
+        """
+        from .features import LczeroModel
+
+        cache_dir = cache_dir or settings.HF_CACHE_DIR
+        token = token or settings.HF_TOKEN or None
+
+        print(f"Downloading probe from {probe_repo_id}...")
+        probe = ConceptProbe.from_hub(
+            repo_id=probe_repo_id,
+            revision=revision,
+            cache_dir=cache_dir,
+            force_download=force_download,
+            token=token,
+        )
+        print(f"Loaded probe: {probe}")
+
+        print(f"\nDownloading LC0 model from {model_repo_id}/{model_filename}...")
+        model_path = hf_hub_download(
+            repo_id=model_repo_id,
+            filename=model_filename,
+            cache_dir=cache_dir,
+            force_download=force_download,
+            token=token,
+        )
+        print(f"Model downloaded to: {model_path}")
+
+        print("Loading LC0 model...")
+        model = LczeroModel.from_path(model_path)
+        print("Model loaded successfully!")
+
+        return cls(
+            probe=probe,
+            model=model,
+            layer_name=probe.layer_name,
+        )
+
+    def extract_concepts(self, fen: str, threshold: float = 0.5) -> list[Concept]:
+        """
+        Extract concepts from a single FEN position.
+
+        Args:
+            fen: FEN notation of chess position
+            threshold: Probability threshold for concept detection (default: 0.5)
+
+        Returns:
+            List of detected concepts with validated_by="probe"
+
+        Example:
+            >>> # extractor = ConceptExtractor.from_hf(...)
+            >>> # concepts = extractor.extract_concepts(
+            >>> #     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            >>> # )
+            >>> # len(concepts) >= 0
+            True
+        """
+        from .features import extract_features_batch
+
+        features_batch = extract_features_batch(
+            fens=[fen],
+            layer_name=self.layer_name,
+            model=self.model,
+            batch_size=1,
+        )
+        features = features_batch[0]
+
+        return self.probe.predict(features, threshold=threshold)
+
+    def extract_concepts_with_confidence(self, fen: str) -> list[tuple[str, float]]:
+        """
+        Extract concepts with confidence scores from a FEN position.
+
+        Args:
+            fen: FEN notation of chess position
+
+        Returns:
+            List of (concept_name, probability) tuples for all concepts
+
+        Example:
+            >>> # extractor = ConceptExtractor.from_hf(...)
+            >>> # scores = extractor.extract_concepts_with_confidence(
+            >>> #     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            >>> # )
+            >>> # all(0 <= score <= 1 for _, score in scores)
+            True
+        """
+        from .features import extract_features_batch
+
+        features_batch = extract_features_batch(
+            fens=[fen],
+            layer_name=self.layer_name,
+            model=self.model,
+            batch_size=1,
+        )
+        features = features_batch[0]
+
+        return self.probe.predict_with_confidence(features)
+
+    def __repr__(self) -> str:
+        return f"ConceptExtractor(probe={self.probe}, " f"layer={self.layer_name})"
+
+
+@click.group()
+def cli() -> None:
+    """Concept probe inference CLI."""
+    pass
+
+
+@cli.command()
+@click.argument("fen", type=str)
+@click.option(
+    "--probe-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to trained probe directory",
+)
+@click.option(
+    "--model-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to LC0 model file (e.g., maia-1500.onnx)",
+)
+def predict(
+    fen: str,
+    probe_path: Path,
+    model_path: Path,
+) -> None:
+    """
+    Predict concepts for a single FEN position with confidence scores.
+
+    Example:
+        python -m chess_sandbox.concept_extraction.model.inference predict \\
+            --probe-path data/models/concept_probes/probe_v1 \\
+            --model-path tests/fixtures/maia-1500.onnx \\
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    """
+    from .features import extract_features
+
+    print("Loading probe...")
+    probe = ConceptProbe.load(probe_path)
+    print(f"Loaded probe: {probe}")
+
+    print(f"\nExtracting features for FEN: {fen}")
+    features = extract_features(
+        fen=fen,
+        model_path=model_path,
+        layer_name=probe.layer_name,
+    )
+
+    print("\nMaking predictions...")
+    predictions_with_confidence = probe.predict_with_confidence(features)
+
+    # Sort by confidence descending
+    predictions_with_confidence.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"\n{'=' * 70}")
+    print("PREDICTIONS")
+    print(f"{'=' * 70}\n")
+    print(f"FEN: {fen}\n")
+
+    if predictions_with_confidence:
+        print("Predicted Concepts (with confidence):")
+        for concept, confidence in predictions_with_confidence:
+            if confidence >= 0.1:
+                print(f"  {concept}: {confidence:.2%}")
+    else:
+        print("No concepts predicted")
+
+    print()
+
+
+@cli.command()
+@click.option(
+    "--probe-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to trained probe directory",
+)
+@click.option(
+    "--data-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to JSONL file with labeled positions",
+)
+@click.option(
+    "--model-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to LC0 model file (e.g., maia-1500.onnx)",
+)
+@click.option(
+    "--batch-size",
+    default=32,
+    type=int,
+    help="Batch size for activation extraction",
+)
+def batch_predict(
+    probe_path: Path,
+    data_path: Path,
+    model_path: Path,
+    batch_size: int,
+) -> None:
+    """
+    Predict concepts for multiple positions from JSONL file with confidence scores.
+
+    Example:
+        python -m chess_sandbox.concept_extraction.model.inference batch-predict \\
+            --probe-path data/models/concept_probes/probe_v1 \\
+            --data-path data/processed/test_labeled_positions.jsonl \\
+            --model-path tests/fixtures/maia-1500.onnx
+    """
+    from .features import LczeroModel, extract_features_batch
+
+    print("Loading probe...")
+    probe = ConceptProbe.load(probe_path)
+    print(f"Loaded probe: {probe}")
+
+    print("\nLoading LC0 model...")
+    model = LczeroModel.from_path(str(model_path))
+    print("Model loaded successfully!")
+
+    print("\nLoading positions from JSONL...")
+    positions: list[LabelledPosition] = []
+    with data_path.open() as f:
+        for line in f:
+            positions.append(LabelledPosition.from_dict(json.loads(line)))
+
+    print(f"Loaded {len(positions)} positions")
+
+    print(f"\nExtracting activations for {len(positions)} positions...")
+    fens = [p.fen for p in positions]
+    activations = extract_features_batch(
+        fens,
+        probe.layer_name,
+        model=model,
+        batch_size=batch_size,
+    )
+    print(f"Activation matrix shape: {activations.shape}")
+
+    print("\nMaking predictions...")
+
+    print(f"\n{'=' * 70}")
+    print(f"BATCH PREDICTIONS ({len(positions)} positions)")
+    print(f"{'=' * 70}\n")
+
+    for i, pos in enumerate(positions):
+        features = activations[i : i + 1]
+        predictions_with_confidence = probe.predict_with_confidence(features)
+        predictions_with_confidence.sort(key=lambda x: x[1], reverse=True)
+
+        print(f"Position {i + 1}:")
+        print(f"FEN: {pos.fen}")
+
+        # Show ground truth if available
+        if pos.concepts:
+            validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
+            if validated_concepts:
+                print(f"Ground Truth: {', '.join(validated_concepts)}")
+
+        # Show predictions with confidence
+        high_confidence = [(c, conf) for c, conf in predictions_with_confidence if conf >= 0.5]
+        if high_confidence:
+            pred_str = ", ".join(f"{c} ({conf:.2%})" for c, conf in high_confidence)
+            print(f"Predictions:  {pred_str}")
+        else:
+            print("Predictions:  (none)")
+
+        print()
+
+
+@cli.command()
+@click.option(
+    "--probe-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to trained probe directory",
+)
+@click.option(
+    "--data-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to JSONL file with labeled positions",
+)
+@click.option(
+    "--model-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to LC0 model file (e.g., maia-1500.onnx)",
+)
+@click.option(
+    "--sample-size",
+    default=10,
+    type=int,
+    help="Number of sample predictions to display",
+)
+@click.option(
+    "--batch-size",
+    default=32,
+    type=int,
+    help="Batch size for activation extraction",
+)
+@click.option(
+    "--random-seed",
+    default=42,
+    type=int,
+    help="Random seed for sample selection",
+)
+def evaluate(
+    probe_path: Path,
+    data_path: Path,
+    model_path: Path,
+    sample_size: int,
+    batch_size: int,
+    random_seed: int,
+) -> None:
+    """
+    Evaluate trained concept probe on test data and display sample predictions.
+
+    Example:
+        python -m chess_sandbox.concept_extraction.model.inference evaluate \\
+            --probe-path models/concept_probes/probe_v1 \\
+            --data-path data/positions.jsonl \\
+            --model-path models/maia-1500.onnx \\
+            --sample-size 10
+    """
+    from .features import LczeroModel, extract_features_batch
+
+    print("Loading probe...")
+    probe = ConceptProbe.load(probe_path)
+    print(f"Loaded probe: {probe}")
+    print(f"Concepts: {', '.join(probe.concept_list)}")
+
+    print("\nLoading LC0 model...")
+    model = LczeroModel.from_path(str(model_path))
+    print("Model loaded successfully!")
+
+    print("\nLoading test data...")
+    positions: list[LabelledPosition] = []
+    with data_path.open() as f:
+        for line in f:
+            positions.append(LabelledPosition.from_dict(json.loads(line)))
+
+    positions_with_concepts = [p for p in positions if p.concepts]
+    print(f"Loaded {len(positions)} positions, kept {len(positions_with_concepts)} with concepts")
+
+    # Filter positions with validated concepts
+    filtered_positions: list[LabelledPosition] = []
+    for pos in positions_with_concepts:
+        validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
+        if validated_concepts:
+            filtered_positions.append(pos)
+
+    print(f"Filtered to {len(filtered_positions)} positions with validated concepts")
+
+    if len(filtered_positions) == 0:
+        print("No positions with validated concepts found!")
+        return
+
+    # Sample random positions
+    n_samples = min(sample_size, len(filtered_positions))
+    rng = np.random.RandomState(random_seed)
+    sample_indices = rng.choice(len(filtered_positions), size=n_samples, replace=False)
+    sample_positions = [filtered_positions[i] for i in sample_indices]
+
+    print(f"\nExtracting activations for {n_samples} samples...")
+    fens = [p.fen for p in sample_positions]
+    activations = extract_features_batch(
+        fens,
+        probe.layer_name,
+        model=model,
+        batch_size=batch_size,
+    )
+    print(f"Activation matrix shape: {activations.shape}")
+
+    print("\nMaking predictions...")
+    predictions_batch = probe.predict_batch(activations)
+
+    print(f"\n{'=' * 70}")
+    print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
+    print(f"{'=' * 70}\n")
+
+    for pos, predicted_concepts in zip(sample_positions, predictions_batch, strict=True):
+        print(f"FEN: {pos.fen}")
+
+        # Get ground truth
+        ground_truth_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
+        predicted_concept_names = [c.name for c in predicted_concepts]
+
+        # Check if prediction matches
+        match_marker = "✓" if set(ground_truth_concepts) == set(predicted_concept_names) else "✗"
+
+        gt_str = ", ".join(ground_truth_concepts) if ground_truth_concepts else "(none)"
+        pred_str = ", ".join(predicted_concept_names) if predicted_concept_names else "(none)"
+        print(f"Ground Truth: {gt_str}")
+        print(f"Prediction:   {pred_str} {match_marker}")
+        print()
+
+    # Calculate overall accuracy
+    correct = 0
+    for pos, predicted_concepts in zip(sample_positions, predictions_batch, strict=True):
+        ground_truth_concepts = set(c.name for c in pos.concepts if c.validated_by is not None)
+        predicted_concept_names = set(c.name for c in predicted_concepts)
+        if ground_truth_concepts == predicted_concept_names:
+            correct += 1
+
+    accuracy = correct / n_samples
+    print(f"{'=' * 70}")
+    print(f"Sample Exact Match Rate: {accuracy:.1%} ({correct}/{n_samples})")
+    print(f"{'=' * 70}")
+
+
+if __name__ == "__main__":
+    cli()

@@ -98,7 +98,7 @@ uv run python -m chess_sandbox.concept_extraction.labelling.lichess_export \
 ```bash
 uv run python -m chess_sandbox.concept_extraction.model.train \
   --data-path data/processed/concept_extraction/positions_labeled.jsonl \
-  --model-path models/maia-1500.pt \
+  --model-path models/maia-1500.onnx \
   --output models/concept_probes/probe_v1.pkl \
   --mode multi-label
 ```

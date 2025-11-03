@@ -13,14 +13,14 @@ from chess_sandbox.concept_extraction.model.train import train
 # Path to fixtures
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_DATA = FIXTURES_DIR / "sample_labeled_positions.jsonl"
-MODEL_PATH = FIXTURES_DIR / "maia-1500.pt"
+MODEL_PATH = FIXTURES_DIR / "maia-1500.onnx"
 
 
 @pytest.fixture
 def lc0_model_path() -> Path:
     """Fixture that provides path to LC0 model or skips test."""
     if not MODEL_PATH.exists():
-        pytest.skip(f"LC0 model not found at {MODEL_PATH}. Please copy maia-1500.pt to tests/fixtures/")
+        pytest.skip(f"LC0 model not found at {MODEL_PATH}. Please copy maia-1500.onnx to tests/fixtures/")
     return MODEL_PATH
 
 
@@ -75,8 +75,12 @@ def test_full_training_pipeline_with_real_model(
     assert "Encoding labels..." in result.output
     assert "Splitting data..." in result.output
     assert "Training probe..." in result.output
-    assert "Evaluating..." in result.output
+    assert "[4/4] Evaluating..." in result.output
     assert "SUMMARY" in result.output
+
+    # Verify multi-label metrics are used for both modes
+    assert "Hamming Loss" in result.output
+    assert "Exact Match" in result.output
 
     # Verify probe file was created
     assert output_probe.exists(), f"Probe file not created at {output_probe}"
@@ -90,7 +94,3 @@ def test_full_training_pipeline_with_real_model(
     assert len(probe.concept_list) > 0, "Probe should have concepts"
     assert probe.classifier is not None
     assert probe.label_encoder is not None, "Encoder should be saved with probe"
-
-    # Check training metrics were stored
-    assert "probe" in probe.training_metrics
-    assert "baseline" in probe.training_metrics

@@ -41,6 +41,7 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "torch>=2.9.0",
     "scikit-learn-stubs>=0.0.3",
+    "joblib-stubs>=1.5.2.0.20250831",
 ]
 
 [dependency-groups]
