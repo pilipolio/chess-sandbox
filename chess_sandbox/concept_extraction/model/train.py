@@ -5,6 +5,7 @@ Trains multi-label logistic regression classifiers to detect chess concepts
 from LC0 layer activations.
 """
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -12,25 +13,86 @@ from typing import Any
 
 import click
 import numpy as np
+from huggingface_hub import hf_hub_download
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, hamming_loss
 from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
 from ..labelling.labeller import LabelledPosition
+from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
 from .hub import upload_probe
 from .inference import ConceptProbe
 
 
-def load_training_data(data_path: Path) -> tuple[list[LabelledPosition], list[list[str]]]:
+def generate_probe_name(model_repo_id: str, layer_name: str, mode: str, dataset_repo_id: str) -> str:
     """
-    Load positions and extract concept labels from JSONL file.
+    Generate a semantic probe name from training parameters.
 
-    Always returns labels as list of list of concepts (multi-label format).
-    Positions with multiple validated concepts keep all of them.
+    Format: {model_name}_{layer_safe}_{mode}_{dataset_hash}
+
+    Args:
+        model_repo_id: HuggingFace model repo ID (e.g., "pilipolio/maia-1500")
+        layer_name: Layer name (e.g., "block3/conv2/relu")
+        mode: Training mode ("multi-label" or "multi-class")
+        dataset_repo_id: HuggingFace dataset repo ID
+
+    Returns:
+        Generated probe name (e.g., "maia1500_block3_conv2_relu_multilabel_a3f8c2d")
+    """
+    model_name = model_repo_id.split("/")[-1].replace("-", "").replace("_", "")
+    layer_safe = layer_name.replace("/", "_").replace("-", "_")
+    mode_safe = mode.replace("-", "")
+    dataset_hash = hashlib.sha256(dataset_repo_id.encode()).hexdigest()[:8]
+    return f"{model_name}_{layer_safe}_{mode_safe}_{dataset_hash}"
+
+
+def load_lczero_model_from_hf(repo_id: str, filename: str = "model.onnx", revision: str | None = None) -> LczeroModel:
+    """
+    Load LC0 model from HuggingFace Hub.
+
+    Args:
+        repo_id: HuggingFace model repo ID (e.g., "pilipolio/maia-1500")
+        filename: Model filename in the repo (default: "model.onnx")
+        revision: Git revision (tag, branch, commit). Defaults to "main"
+
+    Returns:
+        Loaded LczeroModel
+    """
+    model_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+    return LczeroModel.from_path(model_path)
+
+
+def load_training_dataset_from_hf(
+    repo_id: str, filename: str, revision: str | None = None
+) -> tuple[list[LabelledPosition], list[list[str]]]:
+    """
+    Load training dataset from HuggingFace Hub.
+
+    Downloads JSONL file from HF dataset repo and parses it.
+    TODO: Consider using `datasets` library for better HF integration.
+
+    Args:
+        repo_id: HuggingFace dataset repo ID
+        filename: JSONL filename in the repo
+        revision: Git revision (tag, branch, commit). Defaults to "main"
+
+    Returns:
+        Tuple of (positions, labels)
+        - positions: List of LabelledPosition objects
+        - labels: list[list[str]] - each position has a list of concept names
+    """
+    data_path = Path(hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", revision=revision))
+    return _parse_training_data(data_path)
+
+
+def _parse_training_data(data_path: Path) -> tuple[list[LabelledPosition], list[list[str]]]:
+    """
+    Parse training data from JSONL file.
+
+    Internal helper used by both HF and local loading paths.
 
     Args:
         data_path: Path to JSONL file with labeled positions
@@ -68,6 +130,7 @@ def train_multiclass(
     test_split: float,
     random_seed: int,
     model_version: str,
+    source_provenance: dict[str, Any],
     verbose: bool = False,
     n_jobs: int = -1,
 ) -> ConceptProbe:
@@ -83,6 +146,7 @@ def train_multiclass(
         test_split: Fraction of data for testing
         random_seed: Random seed for reproducibility
         model_version: Version identifier for the probe
+        source_provenance: Provenance metadata (model/dataset repo IDs and filenames)
         verbose: Enable sklearn training progress output
         n_jobs: Number of parallel jobs (-1 = all cores)
 
@@ -135,62 +199,10 @@ def train_multiclass(
     y_pred_baseline_binary = eval_encoder.transform(y_pred_baseline_labels)
     y_pred_probe_binary = eval_encoder.transform(y_pred_probe_labels)
 
-    def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray, name: str) -> dict[str, Any]:
-        hamming = float(hamming_loss(y_true, y_pred))
-        exact_match = float(accuracy_score(y_true, y_pred))
+    baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_baseline_binary, concept_list)
+    probe_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_probe_binary, concept_list)
 
-        print(f"\n{'=' * 70}")
-        print(f"{name.upper()}")
-        print(f"{'=' * 70}")
-        print("\nOverall:")
-        print(f"  Hamming Loss: {hamming:.4f}")
-        print(f"  Exact Match: {exact_match:.4f}")
-
-        print("\nPer-Concept:")
-        per_concept_metrics = {}
-        for i, concept in enumerate(concept_list):
-            y_true_i = y_true[:, i]
-            y_pred_i = y_pred[:, i]
-            support = int(y_true_i.sum())
-
-            if support == 0:
-                continue
-
-            acc = float(accuracy_score(y_true_i, y_pred_i))
-            f1 = float(f1_score(y_true_i, y_pred_i, zero_division="warn"))  # type: ignore[call-arg]
-
-            per_concept_metrics[concept] = {
-                "accuracy": acc,
-                "f1": f1,
-                "support": support,
-            }
-
-            print(f"  {concept}: acc={acc:.3f} f1={f1:.3f} (n={support})")
-
-        return {
-            "hamming_loss": hamming,
-            "exact_match": exact_match,
-            "per_concept": per_concept_metrics,
-        }
-
-    baseline_metrics = calculate_metrics(y_test_binary, y_pred_baseline_binary, "Random Baseline")
-    probe_metrics = calculate_metrics(y_test_binary, y_pred_probe_binary, "Trained Probe")
-
-    print(f"\n{'=' * 70}")
-    print("SUMMARY")
-    print(f"{'=' * 70}")
-
-    print(f"Baseline Exact Match: {baseline_metrics['exact_match']:.1%}")
-    print(f"Probe Exact Match:    {probe_metrics['exact_match']:.1%}")
-    improvement = probe_metrics["exact_match"] / (baseline_metrics["exact_match"] + 1e-10)
-    print(f"Improvement:          {improvement:.1f}x")
-    print()
-    print(f"Baseline Hamming:     {baseline_metrics['hamming_loss']:.1%}")
-    print(f"Probe Hamming:        {probe_metrics['hamming_loss']:.1%}")
-    error_reduction = (baseline_metrics["hamming_loss"] - probe_metrics["hamming_loss"]) / baseline_metrics[
-        "hamming_loss"
-    ]
-    print(f"Error Reduction:      {error_reduction:.1%}")
+    print(format_metrics_display(probe_metrics, "Trained Probe", baseline_metrics=baseline_metrics))
 
     probe = ConceptProbe(  # pyright: ignore[reportReturnType]
         classifier=clf,
@@ -206,6 +218,7 @@ def train_multiclass(
             "mode": "multi-class",
             "verbose": verbose,
             "n_jobs": n_jobs,
+            **source_provenance,
         },
         training_date=datetime.now().isoformat(),
         model_version=model_version,
@@ -221,6 +234,7 @@ def train_multilabel(
     test_split: float,
     random_seed: int,
     model_version: str,
+    source_provenance: dict[str, Any],
     verbose: bool = False,
     n_jobs: int = -1,
 ) -> ConceptProbe:
@@ -234,6 +248,7 @@ def train_multilabel(
         test_split: Fraction of data for testing
         random_seed: Random seed for reproducibility
         model_version: Version identifier for the probe
+        source_provenance: Provenance metadata (model/dataset repo IDs and filenames)
         verbose: Enable sklearn training progress output
         n_jobs: Number of parallel jobs (-1 = all cores)
 
@@ -280,62 +295,10 @@ def train_multilabel(
     y_pred_baseline = baseline.predict(X_test)
     y_pred_probe = clf.predict(X_test)
 
-    def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray, name: str) -> dict[str, Any]:
-        hamming = float(hamming_loss(y_true, y_pred))
-        exact_match = float(accuracy_score(y_true, y_pred))
+    baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_baseline, concept_list)
+    probe_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_probe, concept_list)
 
-        print(f"\n{'=' * 70}")
-        print(f"{name.upper()}")
-        print(f"{'=' * 70}")
-        print("\nOverall:")
-        print(f"  Hamming Loss: {hamming:.4f}")
-        print(f"  Exact Match: {exact_match:.4f}")
-
-        print("\nPer-Concept:")
-        per_concept_metrics = {}
-        for i, concept in enumerate(concept_list):
-            y_true_i = y_true[:, i]
-            y_pred_i = y_pred[:, i]
-            support = int(y_true_i.sum())
-
-            if support == 0:
-                continue
-
-            acc = float(accuracy_score(y_true_i, y_pred_i))
-            f1 = float(f1_score(y_true_i, y_pred_i, zero_division="warn"))  # type: ignore[call-arg]
-
-            per_concept_metrics[concept] = {
-                "accuracy": acc,
-                "f1": f1,
-                "support": support,
-            }
-
-            print(f"  {concept}: acc={acc:.3f} f1={f1:.3f} (n={support})")
-
-        return {
-            "hamming_loss": hamming,
-            "exact_match": exact_match,
-            "per_concept": per_concept_metrics,
-        }
-
-    baseline_metrics = calculate_metrics(y_test_binary, y_pred_baseline, "Random Baseline")
-    probe_metrics = calculate_metrics(y_test_binary, y_pred_probe, "Trained Probe")
-
-    print(f"\n{'=' * 70}")
-    print("SUMMARY")
-    print(f"{'=' * 70}")
-
-    print(f"Baseline Exact Match: {baseline_metrics['exact_match']:.1%}")
-    print(f"Probe Exact Match:    {probe_metrics['exact_match']:.1%}")
-    improvement = probe_metrics["exact_match"] / (baseline_metrics["exact_match"] + 1e-10)
-    print(f"Improvement:          {improvement:.1f}x")
-    print()
-    print(f"Baseline Hamming:     {baseline_metrics['hamming_loss']:.1%}")
-    print(f"Probe Hamming:        {probe_metrics['hamming_loss']:.1%}")
-    error_reduction = (baseline_metrics["hamming_loss"] - probe_metrics["hamming_loss"]) / baseline_metrics[
-        "hamming_loss"
-    ]
-    print(f"Error Reduction:      {error_reduction:.1%}")
+    print(format_metrics_display(probe_metrics, "Trained Probe", baseline_metrics=baseline_metrics))
 
     probe = ConceptProbe(  # pyright: ignore[reportReturnType]
         classifier=clf,
@@ -351,6 +314,7 @@ def train_multilabel(
             "mode": "multi-label",
             "verbose": verbose,
             "n_jobs": n_jobs,
+            **source_provenance,
         },
         training_date=datetime.now().isoformat(),
         model_version=model_version,
@@ -361,16 +325,34 @@ def train_multilabel(
 
 @click.command()
 @click.option(
-    "--data-path",
+    "--dataset-repo-id",
     required=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Path to JSONL file with labeled positions",
+    help="HuggingFace dataset repository ID (e.g., 'pilipolio/chess-concepts-async-100')",
 )
 @click.option(
-    "--model-path",
+    "--dataset-filename",
     required=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Path to LC0 model file (e.g., maia-1500.onnx)",
+    help="JSONL filename in the dataset repository",
+)
+@click.option(
+    "--dataset-revision",
+    default=None,
+    help="Git revision for dataset (tag, branch, commit). Defaults to main",
+)
+@click.option(
+    "--model-repo-id",
+    required=True,
+    help="HuggingFace model repository ID (e.g., 'pilipolio/maia-1500')",
+)
+@click.option(
+    "--model-filename",
+    default="model.onnx",
+    help="Model filename in the repository (default: model.onnx)",
+)
+@click.option(
+    "--model-revision",
+    default=None,
+    help="Git revision for model (tag, branch, commit). Defaults to main",
 )
 @click.option(
     "--layer-name",
@@ -379,9 +361,9 @@ def train_multilabel(
 )
 @click.option(
     "--output",
-    required=True,
     type=click.Path(path_type=Path),
-    help="Path to save trained probe",
+    default=None,
+    help="Path to save trained probe (auto-generated if not provided)",
 )
 @click.option(
     "--test-split",
@@ -394,11 +376,6 @@ def train_multilabel(
     default=42,
     type=int,
     help="Random seed for reproducibility",
-)
-@click.option(
-    "--model-version",
-    default="v1",
-    help="Version identifier for the trained probe",
 )
 @click.option(
     "--batch-size",
@@ -429,13 +406,16 @@ def train_multilabel(
     help="Upload trained probe to HuggingFace Hub after training",
 )
 def train(
-    data_path: Path,
-    model_path: Path,
+    dataset_repo_id: str,
+    dataset_filename: str,
+    dataset_revision: str | None,
+    model_repo_id: str,
+    model_filename: str,
+    model_revision: str | None,
     layer_name: str,
-    output: Path,
+    output: Path | None,
     test_split: float,
     random_seed: int,
-    model_version: str,
     batch_size: int,
     mode: str,
     verbose: bool,
@@ -447,25 +427,37 @@ def train(
 
     Example:
         python -m chess_sandbox.concept_extraction.model.train \\
-            --data-path data/positions.jsonl \\
-            --model-path models/maia-1500.onnx \\
-            --output models/concept_probes/probe_v1.pkl \\
-            --verbose --n-jobs -1
+            --dataset-repo-id pilipolio/chess-concepts-async-100 \\
+            --dataset-filename data.jsonl \\
+            --model-repo-id pilipolio/maia-1500 \\
+            --layer-name block3/conv2/relu \\
+            --mode multi-label
     """
     print("Training concept probe...")
-    print(f"  Data: {data_path}")
-    print(f"  Model: {model_path}")
+    dataset_ref = f"{dataset_repo_id}/{dataset_filename}"
+    if dataset_revision:
+        dataset_ref += f"@{dataset_revision}"
+    print(f"  Dataset: {dataset_ref}")
+
+    model_ref = f"{model_repo_id}/{model_filename}"
+    if model_revision:
+        model_ref += f"@{model_revision}"
+    print(f"  Model: {model_ref}")
+
     print(f"  Layer: {layer_name}")
     print(f"  Mode: {mode}")
-    print(f"  Output: {output}")
     print(f"  Parallel jobs (n_jobs): {n_jobs}")
 
-    print("\nLoading LC0 model...")
-    model = LczeroModel.from_path(str(model_path))
+    auto_generated_name = generate_probe_name(model_repo_id, layer_name, mode, dataset_repo_id)
+    output_path = output or Path("data/models/concept_probes") / auto_generated_name
+    print(f"  Output: {output_path}")
+
+    print("\nLoading LC0 model from HuggingFace Hub...")
+    model = load_lczero_model_from_hf(model_repo_id, model_filename, model_revision)
     print("Model loaded successfully!")
 
-    print("\nLoading training data...")
-    positions, labels = load_training_data(data_path)
+    print("\nLoading training data from HuggingFace Hub...")
+    positions, labels = load_training_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
     print("\nExtracting activations...")
     fens = [p.fen for p in positions]
@@ -477,6 +469,20 @@ def train(
     )
     print(f"Activation matrix shape: {activations.shape}")
 
+    source_provenance = {
+        "source_model": {
+            "repo_id": model_repo_id,
+            "filename": model_filename,
+            "revision": model_revision,
+        },
+        "source_dataset": {
+            "repo_id": dataset_repo_id,
+            "filename": dataset_filename,
+            "revision": dataset_revision,
+            "hash": hashlib.sha256(dataset_repo_id.encode()).hexdigest(),
+        },
+    }
+
     if mode == "multi-class":
         probe = train_multiclass(
             labels=labels,
@@ -484,7 +490,8 @@ def train(
             layer_name=layer_name,
             test_split=test_split,
             random_seed=random_seed,
-            model_version=model_version,
+            model_version=auto_generated_name,
+            source_provenance=source_provenance,
             verbose=verbose,
             n_jobs=n_jobs,
         )
@@ -495,14 +502,15 @@ def train(
             layer_name=layer_name,
             test_split=test_split,
             random_seed=random_seed,
-            model_version=model_version,
+            model_version=auto_generated_name,
+            source_provenance=source_provenance,
             verbose=verbose,
             n_jobs=n_jobs,
         )
 
-    probe.save(output)
+    probe.save(output_path)
     if upload_to_hub:
-        commit = upload_probe(output, model_name="chess-sandbox-concept-probes")
+        commit = upload_probe(output_path, model_name=auto_generated_name)
         print(f"Successfully uploaded: {commit}")
 
 

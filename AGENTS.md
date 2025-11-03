@@ -6,6 +6,8 @@
 
 ## Pre-commit Checks
 
+### Code
+
 Run all checks before committing:
 ```bash
 uv run poe all
@@ -18,6 +20,10 @@ uv run poe lint    # ruff check --fix
 uv run poe check   # pyright
 uv run poe test    # pytest
 ```
+
+### Updating documentation
+
+Check for documentation impacted by command line or api changes. Don't modify `CLAUDE.md` unless specifically prompted.
 
 ## Tools
 
