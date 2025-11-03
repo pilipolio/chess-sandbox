@@ -1,0 +1,122 @@
+{
+  "model_config": {
+    "layer_name": "block3/conv2/relu",
+    "mode": "multi-label",
+    "n_concepts": 6,
+    "concepts": [
+      "discovered_attack",
+      "fork",
+      "mating_threat",
+      "passed_pawn",
+      "pin",
+      "sacrifice"
+    ],
+    "training_date": "2025-11-03T15:52:48.932397"
+  },
+  "training_info": {
+    "n_train": 14,
+    "n_test": 4,
+    "test_split": 0.2,
+    "random_seed": 42,
+    "training_params": {
+      "verbose": false,
+      "n_jobs": -1
+    }
+  },
+  "performance": {
+    "baseline": {
+      "hamming_loss": 0.25,
+      "exact_match": 0.0,
+      "per_concept": {
+        "discovered_attack": {
+          "accuracy": 0.75,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 1
+        },
+        "fork": {
+          "accuracy": 0.75,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 1
+        },
+        "passed_pawn": {
+          "accuracy": 0.25,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 2
+        },
+        "pin": {
+          "accuracy": 1.0,
+          "f1": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "support": 1
+        }
+      }
+    },
+    "probe": {
+      "hamming_loss": 0.3333333333333333,
+      "exact_match": 0.0,
+      "per_concept": {
+        "discovered_attack": {
+          "accuracy": 0.75,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 1
+        },
+        "fork": {
+          "accuracy": 0.75,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 1
+        },
+        "passed_pawn": {
+          "accuracy": 0.5,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 2
+        },
+        "pin": {
+          "accuracy": 0.75,
+          "f1": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "support": 1
+        }
+      }
+    },
+    "training_samples": 14,
+    "test_samples": 4,
+    "test_split": 0.2,
+    "random_seed": 42,
+    "mode": "multi-label",
+    "verbose": false,
+    "n_jobs": -1
+  },
+  "dependencies": {
+    "sklearn": "unknown",
+    "python": "3.13.9",
+    "lczerolens": "0.3.3",
+    "torch": "2.9.0"
+  },
+  "provenance": {
+    "source_model": {
+      "repo_id": "lczerolens/maia-1500",
+      "filename": "model.onnx",
+      "revision": null
+    },
+    "source_dataset": {
+      "repo_id": "pilipolio/chess-positions-concepts",
+      "filename": "data.jsonl",
+      "revision": "test_fixture",
+      "hash": "83ccce93d2b6120abba6953c51ecf11d14dbfba8b197e2f485ee22692d47e2c1"
+    }
+  }
+}

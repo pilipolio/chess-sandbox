@@ -9,7 +9,6 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import click
 import numpy as np
@@ -23,46 +22,8 @@ from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 from ..labelling.labeller import LabelledPosition
 from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
-from .hub import upload_probe
 from .inference import ConceptProbe
-
-
-def generate_probe_name(model_repo_id: str, layer_name: str, mode: str, dataset_repo_id: str) -> str:
-    """
-    Generate a semantic probe name from training parameters.
-
-    Format: {model_name}_{layer_safe}_{mode}_{dataset_hash}
-
-    Args:
-        model_repo_id: HuggingFace model repo ID (e.g., "pilipolio/maia-1500")
-        layer_name: Layer name (e.g., "block3/conv2/relu")
-        mode: Training mode ("multi-label" or "multi-class")
-        dataset_repo_id: HuggingFace dataset repo ID
-
-    Returns:
-        Generated probe name (e.g., "maia1500_block3_conv2_relu_multilabel_a3f8c2d")
-    """
-    model_name = model_repo_id.split("/")[-1].replace("-", "").replace("_", "")
-    layer_safe = layer_name.replace("/", "_").replace("-", "_")
-    mode_safe = mode.replace("-", "")
-    dataset_hash = hashlib.sha256(dataset_repo_id.encode()).hexdigest()[:8]
-    return f"{model_name}_{layer_safe}_{mode_safe}_{dataset_hash}"
-
-
-def load_lczero_model_from_hf(repo_id: str, filename: str = "model.onnx", revision: str | None = None) -> LczeroModel:
-    """
-    Load LC0 model from HuggingFace Hub.
-
-    Args:
-        repo_id: HuggingFace model repo ID (e.g., "pilipolio/maia-1500")
-        filename: Model filename in the repo (default: "model.onnx")
-        revision: Git revision (tag, branch, commit). Defaults to "main"
-
-    Returns:
-        Loaded LczeroModel
-    """
-    model_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
-    return LczeroModel.from_path(model_path)
+from .model_artefact import ModelTrainingOutput, generate_probe_name
 
 
 def load_training_dataset_from_hf(
@@ -129,11 +90,9 @@ def train_multiclass(
     layer_name: str,
     test_split: float,
     random_seed: int,
-    model_version: str,
-    source_provenance: dict[str, Any],
     verbose: bool = False,
     n_jobs: int = -1,
-) -> ConceptProbe:
+) -> ModelTrainingOutput:
     """
     Train multi-class concept probe (one concept per position).
 
@@ -145,13 +104,11 @@ def train_multiclass(
         layer_name: Layer name that activations were extracted from
         test_split: Fraction of data for testing
         random_seed: Random seed for reproducibility
-        model_version: Version identifier for the probe
-        source_provenance: Provenance metadata (model/dataset repo IDs and filenames)
         verbose: Enable sklearn training progress output
         n_jobs: Number of parallel jobs (-1 = all cores)
 
     Returns:
-        Trained ConceptProbe
+        Trained ModelTrainingOutput
     """
     print("\n[1/4] Splitting data...")
     indices = np.arange(len(labels))
@@ -204,27 +161,31 @@ def train_multiclass(
 
     print(format_metrics_display(probe_metrics, "Trained Probe", baseline_metrics=baseline_metrics))
 
-    probe = ConceptProbe(  # pyright: ignore[reportReturnType]
+    probe = ConceptProbe(
         classifier=clf,
         concept_list=concept_list,
         layer_name=layer_name,
-        training_metrics={
-            "baseline": baseline_metrics,
-            "probe": probe_metrics,
-            "training_samples": X_train.shape[0],
-            "test_samples": X_test.shape[0],
-            "test_split": test_split,
-            "random_seed": random_seed,
-            "mode": "multi-class",
-            "verbose": verbose,
-            "n_jobs": n_jobs,
-            **source_provenance,
-        },
-        training_date=datetime.now().isoformat(),
-        model_version=model_version,
         label_encoder=encoder,
     )
-    return probe
+
+    training_stats = {
+        "baseline": baseline_metrics,
+        "probe": probe_metrics,
+        "training_samples": X_train.shape[0],
+        "test_samples": X_test.shape[0],
+        "test_split": test_split,
+        "random_seed": random_seed,
+        "mode": "multi-class",
+        "verbose": verbose,
+        "n_jobs": n_jobs,
+    }
+
+    return ModelTrainingOutput(
+        probe=probe,
+        training_stats=training_stats,
+        source_provenance=None,
+        training_date=datetime.now().isoformat(),
+    )
 
 
 def train_multilabel(
@@ -233,11 +194,9 @@ def train_multilabel(
     layer_name: str,
     test_split: float,
     random_seed: int,
-    model_version: str,
-    source_provenance: dict[str, Any],
     verbose: bool = False,
     n_jobs: int = -1,
-) -> ConceptProbe:
+) -> ModelTrainingOutput:
     """
     Train multi-label concept probe (multiple concepts per position).
 
@@ -247,13 +206,11 @@ def train_multilabel(
         layer_name: Layer name that activations were extracted from
         test_split: Fraction of data for testing
         random_seed: Random seed for reproducibility
-        model_version: Version identifier for the probe
-        source_provenance: Provenance metadata (model/dataset repo IDs and filenames)
         verbose: Enable sklearn training progress output
         n_jobs: Number of parallel jobs (-1 = all cores)
 
     Returns:
-        Trained ConceptProbe
+        Trained ModelTrainingOutput
     """
     if not labels:
         raise ValueError("No validated concepts found! Cannot train without labels.")
@@ -300,27 +257,31 @@ def train_multilabel(
 
     print(format_metrics_display(probe_metrics, "Trained Probe", baseline_metrics=baseline_metrics))
 
-    probe = ConceptProbe(  # pyright: ignore[reportReturnType]
+    probe = ConceptProbe(
         classifier=clf,
         concept_list=concept_list,
         layer_name=layer_name,
-        training_metrics={
-            "baseline": baseline_metrics,
-            "probe": probe_metrics,
-            "training_samples": X_train.shape[0],
-            "test_samples": X_test.shape[0],
-            "test_split": test_split,
-            "random_seed": random_seed,
-            "mode": "multi-label",
-            "verbose": verbose,
-            "n_jobs": n_jobs,
-            **source_provenance,
-        },
-        training_date=datetime.now().isoformat(),
-        model_version=model_version,
         label_encoder=encoder,
     )
-    return probe
+
+    training_stats = {
+        "baseline": baseline_metrics,
+        "probe": probe_metrics,
+        "training_samples": X_train.shape[0],
+        "test_samples": X_test.shape[0],
+        "test_split": test_split,
+        "random_seed": random_seed,
+        "mode": "multi-label",
+        "verbose": verbose,
+        "n_jobs": n_jobs,
+    }
+
+    return ModelTrainingOutput(
+        probe=probe,
+        training_stats=training_stats,
+        source_provenance=None,
+        training_date=datetime.now().isoformat(),
+    )
 
 
 @click.command()
@@ -331,7 +292,7 @@ def train_multilabel(
 )
 @click.option(
     "--dataset-filename",
-    required=True,
+    default="data.jsonl",
     help="JSONL filename in the dataset repository",
 )
 @click.option(
@@ -340,19 +301,14 @@ def train_multilabel(
     help="Git revision for dataset (tag, branch, commit). Defaults to main",
 )
 @click.option(
-    "--model-repo-id",
+    "--lc0-model-repo-id",
     required=True,
-    help="HuggingFace model repository ID (e.g., 'pilipolio/maia-1500')",
+    help="HuggingFace model repository ID (e.g., 'lczerolens/maia-1500')",
 )
 @click.option(
-    "--model-filename",
+    "--lc0-model-filename",
     default="model.onnx",
     help="Model filename in the repository (default: model.onnx)",
-)
-@click.option(
-    "--model-revision",
-    default=None,
-    help="Git revision for model (tag, branch, commit). Defaults to main",
 )
 @click.option(
     "--layer-name",
@@ -403,15 +359,24 @@ def train_multilabel(
 @click.option(
     "--upload-to-hub",
     is_flag=True,
-    help="Upload trained probe to HuggingFace Hub after training",
+    help="Upload model output to HuggingFace Hub after training",
+)
+@click.option(
+    "--output-repo-id",
+    default=None,
+    help="HuggingFace repository ID for upload (e.g., 'pilipolio/chess-sandbox-concept-probes')",
+)
+@click.option(
+    "--output-revision",
+    default=None,
+    help="Optional revision/tag name for the upload (included in commit message)",
 )
 def train(
     dataset_repo_id: str,
     dataset_filename: str,
     dataset_revision: str | None,
-    model_repo_id: str,
-    model_filename: str,
-    model_revision: str | None,
+    lc0_model_repo_id: str,
+    lc0_model_filename: str,
     layer_name: str,
     output: Path | None,
     test_split: float,
@@ -421,6 +386,8 @@ def train(
     verbose: bool,
     n_jobs: int,
     upload_to_hub: bool,
+    output_repo_id: str | None,
+    output_revision: str | None,
 ) -> None:
     """
     Train concept probe from labeled positions.
@@ -429,7 +396,7 @@ def train(
         python -m chess_sandbox.concept_extraction.model.train \\
             --dataset-repo-id pilipolio/chess-concepts-async-100 \\
             --dataset-filename data.jsonl \\
-            --model-repo-id pilipolio/maia-1500 \\
+            --lc0-model-repo-id lczerolens/maia-1500 \\
             --layer-name block3/conv2/relu \\
             --mode multi-label
     """
@@ -439,21 +406,16 @@ def train(
         dataset_ref += f"@{dataset_revision}"
     print(f"  Dataset: {dataset_ref}")
 
-    model_ref = f"{model_repo_id}/{model_filename}"
-    if model_revision:
-        model_ref += f"@{model_revision}"
+    model_ref = f"{lc0_model_repo_id}/{lc0_model_filename}"
     print(f"  Model: {model_ref}")
 
     print(f"  Layer: {layer_name}")
     print(f"  Mode: {mode}")
     print(f"  Parallel jobs (n_jobs): {n_jobs}")
 
-    auto_generated_name = generate_probe_name(model_repo_id, layer_name, mode, dataset_repo_id)
-    output_path = output or Path("data/models/concept_probes") / auto_generated_name
-    print(f"  Output: {output_path}")
-
     print("\nLoading LC0 model from HuggingFace Hub...")
-    model = load_lczero_model_from_hf(model_repo_id, model_filename, model_revision)
+    lc0_model_path = hf_hub_download(repo_id=lc0_model_repo_id, filename=lc0_model_filename)
+    model = LczeroModel.from_path(lc0_model_path)
     print("Model loaded successfully!")
 
     print("\nLoading training data from HuggingFace Hub...")
@@ -469,11 +431,31 @@ def train(
     )
     print(f"Activation matrix shape: {activations.shape}")
 
-    source_provenance = {
+    if mode == "multi-class":
+        training_output = train_multiclass(
+            labels=labels,
+            activations=activations,
+            layer_name=layer_name,
+            test_split=test_split,
+            random_seed=random_seed,
+            verbose=verbose,
+            n_jobs=n_jobs,
+        )
+    else:
+        training_output = train_multilabel(
+            labels=labels,
+            activations=activations,
+            layer_name=layer_name,
+            test_split=test_split,
+            random_seed=random_seed,
+            verbose=verbose,
+            n_jobs=n_jobs,
+        )
+
+    training_output.source_provenance = {
         "source_model": {
-            "repo_id": model_repo_id,
-            "filename": model_filename,
-            "revision": model_revision,
+            "repo_id": lc0_model_repo_id,
+            "filename": lc0_model_filename,
         },
         "source_dataset": {
             "repo_id": dataset_repo_id,
@@ -483,34 +465,21 @@ def train(
         },
     }
 
-    if mode == "multi-class":
-        probe = train_multiclass(
-            labels=labels,
-            activations=activations,
-            layer_name=layer_name,
-            test_split=test_split,
-            random_seed=random_seed,
-            model_version=auto_generated_name,
-            source_provenance=source_provenance,
-            verbose=verbose,
-            n_jobs=n_jobs,
-        )
-    else:
-        probe = train_multilabel(
-            labels=labels,
-            activations=activations,
-            layer_name=layer_name,
-            test_split=test_split,
-            random_seed=random_seed,
-            model_version=auto_generated_name,
-            source_provenance=source_provenance,
-            verbose=verbose,
-            n_jobs=n_jobs,
-        )
+    output_path = output or Path("data/models/concept_probes") / generate_probe_name(
+        lc0_model_repo_id, layer_name, mode, dataset_repo_id
+    )
+    print(f"  Output: {output_path}")
 
-    probe.save(output_path)
+    training_output.save(output_path)
+
     if upload_to_hub:
-        commit = upload_probe(output_path, model_name=auto_generated_name)
+        if not output_repo_id:
+            raise ValueError("--output-repo-id is required when --upload-to-hub is set")
+        commit = training_output.upload_to_hf(
+            local_dir=output_path,
+            repo_id=output_repo_id,
+            revision=output_revision,
+        )
         print(f"Successfully uploaded: {commit}")
 
 
