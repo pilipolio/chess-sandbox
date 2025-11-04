@@ -58,20 +58,12 @@ graph TB
 
 #### 1. `raw-pgn-dataset`
 **Type**: HF Dataset
-**Repository**: `Waterhorse/chess_data` (external) or `{HF_ORG}/chess-pgn-annotated`
+**Repository**: `Waterhorse/chess_data`
 **Format**: PGN files with text annotations
-**Versioning**: Git commits, tags
-**Size**: ~MBs per game collection
-**Example**:
-```
-repo: pilipolio/chess-pgn-annotated
-files: gameknot/*.pgn
-version: main @ abc123
-```
 
 #### 2. `chess-positions-concepts`
 **Type**: HF Dataset
-**Repository**: `{HF_ORG}/chess-positions-concepts`
+**Repository**: `pilipolio/chess-positions-concepts`
 **Format**: JSONL (LabelledPosition with validated concepts)
 **Schema**: Complete LabelledPosition with validated concepts:
 ```json
@@ -109,7 +101,7 @@ concepts: [pin, fork, skewer, ...]
 
 #### 3. `lc0-model`
 **Type**: HF Model
-**Repository**: `{HF_ORG}/lc0-maia-1500-onnx` or external
+**Repository**: `lczerolense/maia-1500` or external
 **Format**: ONNX
 **Versioning**: Model version tag
 **Size**: ~3.3MB (Maia-1500) to ~500MB (large networks)
@@ -131,15 +123,9 @@ intermediate_layers: [block0/relu, block1/relu, ..., block3/conv2/relu]
   - Size: ~200MB, better positional understanding
 - **Best Networks**: See https://lczero.org/dev/wiki/best-nets-for-lc0/ for latest recommendations
 
-**Network Selection Considerations**:
-- Larger networks provide richer features but slower extraction
-- Maia networks are calibrated to human play strength
-- T1 networks are distilled for efficiency
-- Feature quality may vary by layer depth and network architecture
-
-#### 4. `concept-probe-model`
-**Type**: HF Model
-**Repository**: `{HF_ORG}/chess-concept-probes`
+#### 4. `concept-extractor-model`
+**Type**: PyTorch features + sklearn classifier
+**Repository**: `pilipolio/chess-concept-probes`
 **Format**: HF snapshot (joblib + metadata)
 **Structure**:
 ```

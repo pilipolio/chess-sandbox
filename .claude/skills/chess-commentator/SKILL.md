@@ -24,12 +24,12 @@ This skill automatically triggers when:
 To analyze a chess position from a FEN string:
 
 ```bash
-uv run python -m chess_sandbox.engine_analysis "<FEN>"
+uv run python -m chess_sandbox.engine.analysis "<FEN>"
 ```
 
 Example:
 ```bash
-uv run python -m chess_sandbox.engine_analysis "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+uv run python -m chess_sandbox.engine.analysis "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
 ```
 
 ### 2. Analyzing After a Specific Move
@@ -37,15 +37,30 @@ uv run python -m chess_sandbox.engine_analysis "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP
 To analyze a position after a specific move is played:
 
 ```bash
-uv run python -m chess_sandbox.engine_analysis "<FEN>" --next-move <MOVE_IN_SAN>
+uv run python -m chess_sandbox.engine.analysis "<FEN>" --next-move <MOVE_IN_SAN>
 ```
 
 Example:
 ```bash
-uv run python -m chess_sandbox.engine_analysis "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58" --next-move Kb5
+uv run python -m chess_sandbox.engine.analysis "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58" --next-move Kb5
 ```
 
 **Important:** The move must be in Standard Algebraic Notation (SAN), e.g., "Nf3", "e4", "O-O", "Bxe5"
+
+### 3. Extracting Concepts from a Position
+
+To extract AI-detected chess concepts with confidence scores:
+
+```bash
+uv run python -m chess_sandbox.concept_extraction.model.inference predict "<FEN>"
+```
+
+Example:
+```bash
+uv run python -m chess_sandbox.concept_extraction.model.inference predict "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+```
+
+**Output:** Concepts sorted by confidence descending, showing all concepts above 10% confidence (default threshold).
 
 ## Interpreting Engine Output
 
@@ -88,6 +103,13 @@ Identify relevant tactical or strategic themes present in the position:
 
 **Reference:** Load `references/chess_themes.md` when needed for comprehensive theme identification.
 
+### 5. Detected Concepts (Optional)
+When concept extraction is used, present AI-detected concepts after thematic insights:
+- List concepts with confidence ≥ 10%
+- Sort by confidence (highest first)
+- Format: "Concept name (XX.X%)"
+- Keep this section concise - typically 3-5 top concepts
+
 ## Commentary Style Guidelines
 
 **DO:**
@@ -118,6 +140,12 @@ Themes:
 - Central control: Both moves fight for central squares
 - Development: Prioritizing piece activity before committing pawns
 - Flexibility: Nf3 maintains options for c4 or e4 pawn breaks
+
+Detected Concepts:
+- Development advantage (87.3%)
+- Central control (72.1%)
+- King safety preparation (45.6%)
+- Piece activity (23.4%)
 ```
 
 ## Additional Options
@@ -129,7 +157,7 @@ The engine_analysis module accepts optional parameters:
 
 Example:
 ```bash
-uv run python -m chess_sandbox.engine_analysis "<FEN>" --depth 25 --num-lines 3
+uv run python -m chess_sandbox.engine.analysis "<FEN>" --depth 25 --num-lines 3
 ```
 
 ## Resources

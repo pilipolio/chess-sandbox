@@ -208,26 +208,29 @@ modal serve chess_sandbox/endpoints.py
 curl "http://localhost:8000/analyze?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
 ```
 
+```bash
+modal serve chess_sandbox/endpoints.py
+
+curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
+```
+
 ### Production Deployment
 
-```bash
-# Manual deployment
-modal deploy chess_sandbox/endpoints.py
-
-# Automatic deployment on GitHub releases
-# Configured in .github/workflows/release.yml
+Automatic deployment with `modal deploy` on GitHub [releases action](.github/workflows/release.yml)
 ```
+curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
+```
+
 
 ## Integration tests
 
-Build and run using Docker. To replace with Modal at some point
+Build and run using Docker.
 
 ```bash
 docker build -t chess-sandbox .
 
-# Run engine analysis
 docker run --rm chess-sandbox \
-  /app/.venv/bin/python -m chess_sandbox.engine_analysis \
+  /app/.venv/bin/python -m chess_sandbox.engine.analysis \
   "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 # Run tests

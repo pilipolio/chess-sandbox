@@ -18,11 +18,10 @@ class Settings(BaseSettings):
     MAIA_WEIGHTS_PATH: str = "data/raw/maia-1500.pb.gz"
     LICHESS_API_TOKEN: str = ""
 
-    # HuggingFace Hub settings
+    # HuggingFace settings
     HF_TOKEN: str = ""
-    HF_ORG: str = "chess-concept-probes"
-    HF_CACHE_DIR: str = "/root/.cache/huggingface"
-    HF_CONCEPT_PROBE_REPO: str = "pilipolio/chess-positions-extractor"
+    HF_CACHE_DIR: str = ""
+    HF_CONCEPT_EXTRACTOR_REPO_ID: str = "pilipolio/chess-positions-extractor"
 
 
 settings = Settings()

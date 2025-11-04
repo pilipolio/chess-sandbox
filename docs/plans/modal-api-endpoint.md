@@ -56,7 +56,7 @@ image = (
 
 **1.2 Implement GET Endpoint**
 ```python
-from chess_sandbox.engine_analysis import main
+from chess_sandbox.engine.analysis import main
 
 @app.function()
 @modal.fastapi_endpoint(method="GET")

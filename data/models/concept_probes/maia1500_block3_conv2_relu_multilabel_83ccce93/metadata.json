@@ -11,7 +11,7 @@
       "pin",
       "sacrifice"
     ],
-    "training_date": "2025-11-03T15:52:48.932397"
+    "training_date": "2025-11-04T07:50:06.227296"
   },
   "training_info": {
     "n_train": 14,
@@ -109,8 +109,7 @@
   "provenance": {
     "source_model": {
       "repo_id": "lczerolens/maia-1500",
-      "filename": "model.onnx",
-      "revision": null
+      "filename": "model.onnx"
     },
     "source_dataset": {
       "repo_id": "pilipolio/chess-positions-concepts",

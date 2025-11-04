@@ -364,7 +364,7 @@ def train_multilabel(
 @click.option(
     "--output-repo-id",
     default=None,
-    help="HuggingFace repository ID for upload (e.g., 'pilipolio/chess-sandbox-concept-probes')",
+    help="HuggingFace repository ID for upload (e.g., 'pilipolio/chess-positions-extractor')",
 )
 @click.option(
     "--output-revision",

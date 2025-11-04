@@ -17,8 +17,13 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Install dependencies
         run: uv sync
-      - name: Deploy to Modal
+      - name: Deploy position analysis to Modal
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: uv run modal deploy chess_sandbox/endpoints.py
+      - name: Deploy concept extraction to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: uv run modal deploy chess_sandbox/concept_extraction/endpoints.py
