@@ -24,7 +24,7 @@ Detects 6 chess concepts from internal activations of Leela Chess Zero (LC0) mod
 
 **Layer:** `block3/conv2/relu`
 **Mode:** multi-label
-**Training Date:** 2025-11-03
+**Training Date:** 2025-11-04
 
 ## Performance
 

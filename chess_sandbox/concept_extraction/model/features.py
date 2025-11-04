@@ -12,49 +12,11 @@ from typing import Any
 
 import numpy as np
 import torch
-from lczerolens import LczeroBoard  # type: ignore[import-untyped]
-from lczerolens import LczeroModel as _LczeroModel  # type: ignore[import-untyped]
+from lczerolens import (  # type: ignore[import-untyped]
+    LczeroBoard,
+    LczeroModel,
+)
 from tqdm import tqdm
-
-
-class LczeroModel:
-    """
-    Wrapper around lczerolens.LczeroModel for PyTorch 2.6+ compatibility.
-
-    PyTorch 2.6+ changed torch.load() to use weights_only=True by default for security.
-    LC0 models contain FX graph modules that aren't allowed under this restriction.
-    This wrapper temporarily patches torch.load to use weights_only=False.
-
-    TODO: Remove once lczerolens adds weights_only parameter support.
-    See: https://github.com/Xmaster6y/lczerolens/issues/XXX
-    """
-
-    @classmethod
-    def from_path(cls, model_path: str) -> Any:
-        """
-        Load LC0 model with PyTorch 2.6+ compatibility.
-
-        Args:
-            model_path: Path to LC0 model file (.pt or .onnx)
-
-        Returns:
-            Loaded LczeroModel instance
-
-        Note:
-            Temporarily uses weights_only=False for compatibility with FX graph modules.
-            Only use with trusted model files.
-        """
-        original_load = torch.load
-
-        def patched_load(*args: Any, **kwargs: Any) -> Any:
-            kwargs["weights_only"] = False
-            return original_load(*args, **kwargs)
-
-        try:
-            torch.load = patched_load  # type: ignore[assignment]
-            return _LczeroModel.from_path(model_path)
-        finally:
-            torch.load = original_load  # type: ignore[assignment]
 
 
 class ActivationExtractor:
@@ -166,40 +128,6 @@ class ActivationExtractor:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Auto-cleanup when exiting context."""
         self.cleanup()
-
-
-def extract_features(
-    fen: str,
-    model_path: str | Path,
-    layer_name: str,
-) -> np.ndarray:
-    """
-    Extract flattened activation vector from a chess position.
-
-    Args:
-        fen: Chess position in FEN notation
-        model_path: Path to LC0 model file
-        layer_name: Layer to extract from (e.g., "block3/conv2/relu")
-
-    Returns:
-        Flattened activation vector (e.g., shape (4096,) for 64×8×8)
-
-    Example:
-        >>> features = extract_features(  # doctest: +SKIP
-        ...     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        ...     "models/maia-1500.onnx",
-        ...     "block3/conv2/relu"
-        ... )
-        >>> features.shape  # doctest: +SKIP
-        (4096,)
-    """
-    model = LczeroModel.from_path(str(model_path))
-    with ActivationExtractor(model, [layer_name]) as extractor:
-        board = LczeroBoard(fen)
-        activations = extractor.extract(board)
-
-    activation = activations[layer_name].cpu().numpy()
-    return activation.reshape(-1)
 
 
 def extract_features_batch(

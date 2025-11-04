@@ -13,10 +13,10 @@ from click.testing import CliRunner
 from chess_sandbox.concept_extraction.model.inference import predict
 
 # HuggingFace references for testing
-TEST_MODEL_REPO = "lczerolens/maia-1500"
-TEST_MODEL_FILENAME = "model.onnx"
-TEST_PROBE_REPO = "pilipolio/chess-positions-extractor"
-TEST_PROBE_REVISION = "main"
+TEST_LC0_MODEL_REPO = "lczerolens/maia-1500"
+TEST_LC0_MODEL_FILENAME = "model.onnx"
+TEST_MODEL_REPO = "pilipolio/chess-positions-extractor"
+TEST_MODEL_REVISION = "main"
 
 TEST_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
@@ -35,13 +35,13 @@ def test_predict_single_fen(tmp_path: Path) -> None:
         [
             TEST_FEN,
             "--model-repo-id",
-            TEST_PROBE_REPO,
-            "--revision",
-            TEST_PROBE_REVISION,
-            "--lc0-repo-id",
             TEST_MODEL_REPO,
+            "--revision",
+            TEST_MODEL_REVISION,
+            "--lc0-repo-id",
+            TEST_LC0_MODEL_REPO,
             "--lc0-filename",
-            TEST_MODEL_FILENAME,
+            TEST_LC0_MODEL_FILENAME,
             "--cache-dir",
             str(tmp_path / "cache"),
         ],

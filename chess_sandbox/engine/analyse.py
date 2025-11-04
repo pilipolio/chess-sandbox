@@ -90,7 +90,7 @@ def info_to_pv(info: InfoDict, board: chess.Board) -> PrincipalVariation | None:
         san_moves.append(temp_board.san(move))
         temp_board.push(move)
 
-    score_value = score.relative.score() if score else None
+    score_value = score.white().score() if score else None
 
     return PrincipalVariation(score=score_value / 100 if score_value is not None else None, san_moves=san_moves)
 

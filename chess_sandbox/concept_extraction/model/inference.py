@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from ...config import settings
 from ..labelling.labeller import Concept, LabelledPosition
+from .features import extract_features_batch
 
 
 class ConceptResponse(BaseModel):
@@ -217,7 +218,7 @@ class ConceptExtractor:
 
     Example:
         >>> extractor = ConceptExtractor.from_hf(  # doctest: +SKIP
-        ...     probe_repo_id="pilipolio/chess-sandbox-concept-probes"
+        ...     probe_repo_id="pilipolio/chess-positions-extractor"
         ... )
         >>> concepts = extractor.extract_concepts(  # doctest: +SKIP
         ...     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -247,7 +248,7 @@ class ConceptExtractor:
         with automatic caching to avoid redundant downloads.
 
         Args:
-            probe_repo_id: Probe repository (e.g., "pilipolio/chess-sandbox-concept-probes")
+            probe_repo_id: Probe repository (e.g., "pilipolio/chess-positions-extractor")
             model_repo_id: LC0 model repository (default: "lczerolens/maia-1500")
             model_filename: Model file to download (default: "model.onnx")
             revision: Git revision for probe (tag, branch, commit). Defaults to "main"
@@ -260,7 +261,7 @@ class ConceptExtractor:
 
         Example:
             >>> extractor = ConceptExtractor.from_hf(  # doctest: +SKIP
-            ...     probe_repo_id="pilipolio/chess-sandbox-concept-probes"
+            ...     probe_repo_id="pilipolio/chess-positions-extractor"
             ... )
             >>> extractor.layer_name  # doctest: +SKIP
             'block3/conv2/relu'
@@ -321,12 +322,11 @@ class ConceptExtractor:
             >>> # len(concepts) >= 0
             True
         """
-        from .features import extract_features_batch
 
         features_batch = extract_features_batch(
+            model=self.model,
             fens=[fen],
             layer_name=self.layer_name,
-            model=self.model,
             batch_size=1,
         )
         features = features_batch[0]
@@ -405,7 +405,8 @@ def hf_hub_options(f):
         "--model-repo-id",
         required=True,
         type=str,
-        help="Model repository ID (e.g., pilipolio/chess-sandbox-concept-probes)",
+        default="pilipolio/chess-positions-extractor",
+        help="HuggingFace repository ID",
     )(f)
     return f
 
@@ -419,12 +420,19 @@ def cli() -> None:
 @cli.command()
 @click.argument("fen", type=str)
 @hf_hub_options
+@click.option(
+    "--min-confidence",
+    default=0.1,
+    type=float,
+    help="Minimum confidence to display (default: 0.1)",
+)
 def predict(
     fen: str,
     model_repo_id: str,
-    revision: str | None,
     lc0_repo_id: str,
     lc0_filename: str,
+    min_confidence: float,
+    revision: str | None,
     cache_dir: Path | None,
     force_download: bool,
     token: str | None,
@@ -433,9 +441,13 @@ def predict(
     Predict concepts for a single FEN position with confidence scores.
 
     Example:
-        python -m chess_sandbox.concept_extraction.model.inference predict \\
-            --model-repo-id pilipolio/chess-sandbox-concept-probes \\
+        uv run python -m chess_sandbox.concept_extraction.model.inference predict \\
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+        # With custom threshold:
+        uv run python -m chess_sandbox.concept_extraction.model.inference predict \\
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" \\
+            --min-confidence 0.3
     """
     print("Loading ConceptExtractor from HuggingFace Hub...")
     extractor = ConceptExtractor.from_hf(
@@ -459,13 +471,15 @@ def predict(
     print(f"{'=' * 70}\n")
     print(f"FEN: {fen}\n")
 
-    if predictions_with_confidence:
-        print("Predicted Concepts (with confidence):")
-        for concept, confidence in predictions_with_confidence:
-            if confidence >= 0.1:
-                print(f"  {concept}: {confidence:.2%}")
+    # Filter by minimum confidence
+    filtered_predictions = [(c, conf) for c, conf in predictions_with_confidence if conf >= min_confidence]
+
+    if filtered_predictions:
+        print(f"Predicted Concepts (confidence ≥ {min_confidence:.0%}):")
+        for concept, confidence in filtered_predictions:
+            print(f"  {concept}: {confidence:.2%}")
     else:
-        print("No concepts predicted")
+        print(f"No concepts predicted above {min_confidence:.0%} confidence")
 
     print()
 
@@ -500,7 +514,7 @@ def batch_predict(
 
     Example:
         python -m chess_sandbox.concept_extraction.model.inference batch-predict \\
-            --model-repo-id pilipolio/chess-sandbox-concept-probes \\
+            --model-repo-id pilipolio/chess-positions-extractor \\
             --data-path data/processed/test_labeled_positions.jsonl
     """
     print("Loading ConceptExtractor from HuggingFace Hub...")
@@ -609,7 +623,7 @@ def evaluate(
 
     Example:
         python -m chess_sandbox.concept_extraction.model.inference evaluate \\
-            --model-repo-id pilipolio/chess-sandbox-concept-probes \\
+            --model-repo-id pilipolio/chess-positions-extractor \\
             --data-path data/positions.jsonl \\
             --sample-size 10
     """
@@ -655,7 +669,6 @@ def evaluate(
     sample_positions = [filtered_positions[i] for i in sample_indices]
 
     print(f"\nExtracting activations for {n_samples} samples...")
-    from .features import extract_features_batch
 
     fens = [p.fen for p in sample_positions]
     activations = extract_features_batch(

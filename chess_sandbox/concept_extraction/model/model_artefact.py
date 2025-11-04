@@ -199,6 +199,10 @@ class ModelTrainingOutput:
             Loaded ModelTrainingOutput instance
         """
         cache_dir = cache_dir or settings.HF_CACHE_DIR
+
+        print(
+            f"Loading training output from {repo_id} with cache dir {cache_dir} and force download {force_download}..."
+        )
         token = token or settings.HF_TOKEN or None
 
         local_dir = snapshot_download(
