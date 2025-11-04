@@ -324,21 +324,19 @@ def evaluate(
     print(f"Concepts: {', '.join(extractor.probe.concept_list)}")
 
     print("\nLoading evaluation dataset from HuggingFace Hub...")
-    positions, labels = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    labelled_positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
-    if len(positions) == 0:
-        print("No positions with validated concepts found!")
-        return
-
-    all_fens = [p.fen for p in positions]
-    all_predictions_with_confidence = extractor.extract_concepts_with_confidence(all_fens)
+    fens = [p.fen for p in labelled_positions]
+    # Extract validated concept names from positions
+    labels = [[c.name for c in p.concepts if c.validated_by] if p.concepts else [] for p in labelled_positions]
+    all_predictions_with_confidence = extractor.extract_concepts_with_confidence(fens)
 
     # Show sample predictions if requested
     if show_samples:
-        n_samples = min(sample_size, len(positions))
+        n_samples = min(sample_size, len(labelled_positions))
         rng = np.random.RandomState(random_seed)
-        sample_indices = rng.choice(len(positions), size=n_samples, replace=False)
-        sample_fens = [all_fens[i] for i in sample_indices]
+        sample_indices = rng.choice(len(labelled_positions), size=n_samples, replace=False)
+        sample_fens = [fens[i] for i in sample_indices]
         sample_labels = [labels[i] for i in sample_indices]
         sample_predictions_with_confidence = [all_predictions_with_confidence[i] for i in sample_indices]
 
@@ -373,7 +371,7 @@ def evaluate(
 
     # Calculate comprehensive metrics on full dataset
     print("\nCalculating comprehensive metrics on full dataset...")
-    print(f"Extracting activations for {len(positions)} positions...")
+    print(f"Extracting activations for {len(labelled_positions)} positions...")
 
     # Convert predictions to binary matrices for metric calculation
     y_true, y_pred = binarize_predictions(

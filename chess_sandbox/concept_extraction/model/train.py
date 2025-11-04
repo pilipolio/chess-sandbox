@@ -430,7 +430,7 @@ def train(
     print("Model loaded successfully!")
 
     print("\nLoading training data from HuggingFace Hub...")
-    positions, labels = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
     print("\nSplitting dataset...")
     indices = np.arange(len(positions))
@@ -438,8 +438,6 @@ def train(
 
     train_positions = [positions[i] for i in train_indices]
     test_positions = [positions[i] for i in test_indices]
-    y_train_labels = [labels[i] for i in train_indices]
-    y_test_labels = [labels[i] for i in test_indices]
     print(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
 
     if save_splits:
@@ -466,6 +464,10 @@ def train(
         )
         print(f"  Train commit: {train_commit}")
         print(f"  Test commit: {test_commit}")
+
+    # Extract validated concept names from positions
+    y_train_labels = [[c.name for c in p.concepts if c.validated_by] if p.concepts else [] for p in train_positions]
+    y_test_labels = [[c.name for c in p.concepts if c.validated_by] if p.concepts else [] for p in test_positions]
 
     print("\nExtracting train activations...")
     train_fens = [p.fen for p in train_positions]
