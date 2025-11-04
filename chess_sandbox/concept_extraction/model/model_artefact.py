@@ -12,79 +12,10 @@ from pathlib import Path
 from typing import Any
 
 import joblib
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import EvalResult, HfApi, ModelCard, ModelCardData, snapshot_download
 
 from ...config import settings
 from .inference import ConceptProbe
-
-# Model card template for HuggingFace Hub
-MODEL_CARD_TEMPLATE = """---
-library_name: sklearn
-tags:
-- chess
-- concept-detection
-- interpretability
-- lc0
-- multi-label-classification
-model_type: concept-probe
-language:
-- en
-license: mit
----
-
-# Chess Concept Probe
-
-Trained {mode} classifier for detecting chess concepts from LC0 layer activations.
-
-## Model Description
-
-Detects {n_concepts} chess concepts from internal activations of Leela Chess Zero (LC0) models:
-
-{concept_list}
-
-**Layer:** `{layer_name}`
-**Mode:** {mode}
-**Training Date:** {training_date}
-
-## Performance
-
-- **{key_metric}**
-- {secondary_metric}
-
-### Per-Concept Performance
-
-| Concept | Accuracy | F1 Score | Support |
-|---------|----------|----------|---------|
-{per_concept_table}
-
-## Usage
-
-```python
-from chess_sandbox.concept_extraction.model.model_artefact import ModelTrainingOutput
-
-# Load training output from HF Hub
-output = ModelTrainingOutput.from_hub("pilipolio/chess-sandbox-concept-probes")
-probe = output.probe
-
-# Extract features
-from chess_sandbox.concept_extraction.model.features import extract_features
-features = extract_features(
-    fen="rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-    model_path="path/to/maia-1500.onnx",
-    layer_name="{layer_name}"
-)
-
-# Predict concepts
-concepts = probe.predict(features)
-```
-
-## Training Details
-
-- **Training samples:** {n_train:,}
-- **Test samples:** {n_test:,}
-- **Test split:** {test_split:.1%}
-- **Random seed:** {random_seed}
-"""
 
 
 @dataclass
@@ -291,42 +222,88 @@ class ModelTrainingOutput:
 
         return metadata
 
-    def _create_model_card(self) -> str:
-        """Generate model card with YAML frontmatter."""
-        mode = self.training_stats.get("mode", "multi-label")
+    def _create_eval_results(self) -> list[EvalResult]:
+        """Create EvalResult objects from training_stats for model card."""
+        if not self.source_provenance or "source_dataset" not in self.source_provenance:
+            return []
+
+        dataset_info = self.source_provenance["source_dataset"]
+        dataset_type = dataset_info.get("repo_id", "unknown")
+        dataset_revision = dataset_info.get("revision") or "main"
+
         probe_metrics = self.training_stats.get("probe", {})
+        if not probe_metrics:
+            return []
 
-        # TODO: add precision, recall
-        key_metric = f"Exact Match: {probe_metrics.get('exact_match', 0):.1%}"
+        # Only use metrics already in training_stats - no calculations
+        results = [
+            EvalResult(
+                task_type="tabular-classification",
+                dataset_type=dataset_type,
+                dataset_name="Chess Positions with Concepts",
+                dataset_revision=dataset_revision,
+                metric_type="exact_match",
+                metric_value=probe_metrics.get("exact_match", 0),
+            ),
+            EvalResult(
+                task_type="tabular-classification",
+                dataset_type=dataset_type,
+                dataset_name="Chess Positions with Concepts",
+                dataset_revision=dataset_revision,
+                metric_type="hamming_loss",
+                metric_value=probe_metrics.get("hamming_loss", 0),
+            ),
+        ]
 
-        # Build per-concept table
-        per_concept_rows = []
-        per_concept = probe_metrics.get("per_concept", {})
-        for concept in self.probe.concept_list:
-            if concept in per_concept:
-                c_metrics = per_concept[concept]
-                per_concept_rows.append(
-                    f"| {concept} | {c_metrics['accuracy']:.3f} | {c_metrics['f1']:.3f} | {c_metrics['support']} |"
-                )
-        per_concept_table = "\n".join(per_concept_rows)
+        # TODO: Add micro/macro averages if computed during training
+        # Would need: probe_metrics["micro_precision"], probe_metrics["micro_recall"], etc.
 
-        # Format concept list
-        concept_list = ", ".join(f"`{c}`" for c in self.probe.concept_list)
+        return results
 
-        return MODEL_CARD_TEMPLATE.format(
-            mode=mode,
-            n_concepts=len(self.probe.concept_list),
-            concept_list=concept_list,
-            layer_name=self.probe.layer_name,
-            training_date=self.training_date[:10],
-            key_metric=key_metric,
-            secondary_metric="",
-            per_concept_table=per_concept_table,
-            n_train=self.training_stats.get("training_samples", 0),
-            n_test=self.training_stats.get("test_samples", 0),
-            test_split=self.training_stats.get("test_split", 0.2),
-            random_seed=self.training_stats.get("random_seed", 42),
+    def _create_model_card(self) -> str:
+        """Generate model card using HuggingFace default template."""
+        # Extract provenance info
+        datasets = []
+        base_model = None
+        if self.source_provenance:
+            if "source_dataset" in self.source_provenance:
+                datasets.append(self.source_provenance["source_dataset"].get("repo_id", ""))
+            if "source_model" in self.source_provenance:
+                base_model = self.source_provenance["source_model"].get("repo_id")
+
+        # Get eval results
+        eval_results = self._create_eval_results()
+
+        # Create model card data
+        card_data = ModelCardData(
+            language="en",
+            license="mit",
+            library_name="scikit-learn",
+            tags=["chess", "concept-detection", "interpretability", "lc0", "multi-label-classification"],
+            datasets=datasets if datasets else None,
+            base_model=base_model,
+            pipeline_tag="tabular-classification",
+            model_name="Chess Concept Probe",
+            eval_results=eval_results if eval_results else None,
         )
+
+        # Prepare simple template variables
+        mode = self.training_stats.get("mode", "multi-label")
+        concept_list = ", ".join(self.probe.concept_list)
+        model_description = (
+            f"Trained {mode} classifier for detecting {len(self.probe.concept_list)} chess concepts "
+            f"({concept_list}) from LC0 layer activations ({self.probe.layer_name})."
+        )
+
+        # Use default HuggingFace template
+        card = ModelCard.from_template(
+            card_data,
+            model_id="chess-concept-probe",
+            model_description=model_description,
+            developers="chess-sandbox",
+        )
+
+        return str(card)
 
     @staticmethod
     def _get_package_version(package: str) -> str:

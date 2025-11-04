@@ -64,3 +64,15 @@ def test_e2e_training_and_inference_pipeline(
 
     assert output_training_directory.exists(), f"Probe directory not created at {output_training_directory}"
     assert output_training_directory.is_dir(), "Probe output should be a directory"
+
+    # Validate model card
+    readme_path = output_training_directory / "README.md"
+    assert readme_path.exists(), "README.md model card not created"
+
+    readme_content = readme_path.read_text()
+    assert "datasets:" in readme_content, "Model card missing datasets field in YAML"
+    assert TEST_DATASET_REPO in readme_content, "Dataset repo not linked in model card"
+    assert "base_model:" in readme_content, "Model card missing base_model field in YAML"
+    assert "model-index:" in readme_content, "Model card missing model-index for Papers with Code"
+    assert "exact_match" in readme_content.lower(), "Model card missing exact_match metric"
+    assert "hamming_loss" in readme_content.lower(), "Model card missing hamming_loss metric"
