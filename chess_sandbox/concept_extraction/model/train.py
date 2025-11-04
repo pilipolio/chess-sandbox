@@ -6,7 +6,6 @@ from LC0 layer activations.
 """
 
 import hashlib
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -19,69 +18,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
-from ..labelling.labeller import LabelledPosition
+from .dataset import load_dataset_from_hf
 from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
 from .inference import ConceptProbe
 from .model_artefact import ModelTrainingOutput, generate_probe_name
-
-
-def load_training_dataset_from_hf(
-    repo_id: str, filename: str, revision: str | None = None
-) -> tuple[list[LabelledPosition], list[list[str]]]:
-    """
-    Load training dataset from HuggingFace Hub.
-
-    Downloads JSONL file from HF dataset repo and parses it.
-    TODO: Consider using `datasets` library for better HF integration.
-
-    Args:
-        repo_id: HuggingFace dataset repo ID
-        filename: JSONL filename in the repo
-        revision: Git revision (tag, branch, commit). Defaults to "main"
-
-    Returns:
-        Tuple of (positions, labels)
-        - positions: List of LabelledPosition objects
-        - labels: list[list[str]] - each position has a list of concept names
-    """
-    data_path = Path(hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", revision=revision))
-    return _parse_training_data(data_path)
-
-
-def _parse_training_data(data_path: Path) -> tuple[list[LabelledPosition], list[list[str]]]:
-    """
-    Parse training data from JSONL file.
-
-    Internal helper used by both HF and local loading paths.
-
-    Args:
-        data_path: Path to JSONL file with labeled positions
-
-    Returns:
-        Tuple of (positions, labels)
-        - positions: List of position dictionaries
-        - labels: list[list[str]] - each position has a list of concept names
-    """
-    all_positions: list[LabelledPosition] = []
-    with data_path.open() as f:
-        for line in f:
-            all_positions.append(LabelledPosition.from_dict(json.loads(line)))
-
-    positions_with_concepts = [p for p in all_positions if p.concepts]
-    print(f"Loaded {len(all_positions)} positions, kept {len(positions_with_concepts)} with concepts")
-
-    positions: list[LabelledPosition] = []
-    labels: list[list[str]] = []
-
-    for pos in positions_with_concepts:
-        validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
-        if validated_concepts:
-            positions.append(pos)
-            labels.append(validated_concepts)
-
-    print(f"Kept {len(positions)} positions with at least one validated concept")
-    return positions, labels
 
 
 def train_multiclass(
@@ -169,8 +110,8 @@ def train_multiclass(
     )
 
     training_stats = {
-        "baseline": baseline_metrics,
-        "probe": probe_metrics,
+        "baseline": baseline_metrics.model_dump(),
+        "probe": probe_metrics.model_dump(),
         "training_samples": X_train.shape[0],
         "test_samples": X_test.shape[0],
         "test_split": test_split,
@@ -265,8 +206,8 @@ def train_multilabel(
     )
 
     training_stats = {
-        "baseline": baseline_metrics,
-        "probe": probe_metrics,
+        "baseline": baseline_metrics.model_dump(),
+        "probe": probe_metrics.model_dump(),
         "training_samples": X_train.shape[0],
         "test_samples": X_test.shape[0],
         "test_split": test_split,
@@ -419,7 +360,7 @@ def train(
     print("Model loaded successfully!")
 
     print("\nLoading training data from HuggingFace Hub...")
-    positions, labels = load_training_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    positions, labels = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
     print("\nExtracting activations...")
     fens = [p.fen for p in positions]

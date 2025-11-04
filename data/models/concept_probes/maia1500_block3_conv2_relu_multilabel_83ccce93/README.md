@@ -5,7 +5,6 @@ datasets:
 language: en
 library_name: scikit-learn
 license: mit
-model_name: Chess Concept Probe
 pipeline_tag: tabular-classification
 tags:
 - chess
@@ -13,114 +12,213 @@ tags:
 - interpretability
 - lc0
 - multi-label-classification
-model_index:
-- name: chess-concept-extraction
-  results:
-  - task:
-      type: tabular-classification
-      name: Chess Position Concept Extraction
-    dataset:
-      type: pilipolio/chess-positions-concepts
-      name: Chess Positions with Concepts
-      revision: test_fixture
-    metrics:
-    - type: exact_match
-      value: 0.0
-      name: Exact Match
-    - type: hamming_loss
-      value: 0.3333333333333333
-      name: Hamming Loss
-    - type: precision
-      value: 0.0
-      name: Precision (Micro)
-    - type: recall
-      value: 0.0
-      name: Recall (Micro)
-    - type: f1
-      value: 0.0
-      name: F1 (Micro)
-    - type: precision
-      value: 0.0
-      name: Precision (Macro)
-    - type: recall
-      value: 0.0
-      name: Recall (Macro)
-    - type: f1
-      value: 0.0
-      name: F1 (Macro)
 model-index:
-- name: chess-concept-extraction
+- name: Chess Concept Probe
   results:
   - task:
       type: tabular-classification
-      name: Chess Position Concept Extraction
     dataset:
-      type: pilipolio/chess-positions-concepts
       name: Chess Positions with Concepts
+      type: pilipolio/chess-positions-concepts
       revision: test_fixture
     metrics:
     - type: exact_match
       value: 0.0
-      name: Exact Match
     - type: hamming_loss
       value: 0.3333333333333333
-      name: Hamming Loss
-    - type: precision
-      value: 0.0
-      name: Precision (Micro)
-    - type: recall
-      value: 0.0
-      name: Recall (Micro)
-    - type: f1
-      value: 0.0
-      name: F1 (Micro)
-    - type: precision
-      value: 0.0
-      name: Precision (Macro)
-    - type: recall
-      value: 0.0
-      name: Recall (Macro)
-    - type: f1
-      value: 0.0
-      name: F1 (Macro)
 ---
-# Chess Concept Probe
 
-Trained multi-label classifier for detecting chess concepts from LC0 layer activations.
+# Model Card for chess-concept-probe
 
-## Model Description
-
-Detects 6 chess concepts: `discovered_attack`, `fork`, `mating_threat`, `passed_pawn`, `pin`, `sacrifice`
-
-**Layer:** `block3/conv2/relu` | **Mode:** multi-label | **Trained:** 2025-11-04
-
-## Performance
-
-- Exact Match: **0.0%**
-- Hamming Loss: **0.3333**
+<!-- Provide a quick summary of what the model is/does. -->
 
 
-Detailed metrics available in model-index below.
 
-## Usage
+## Model Details
 
-```python
-from chess_sandbox.concept_extraction.model.model_artefact import ModelTrainingOutput
+### Model Description
 
-# Load from HF Hub
-output = ModelTrainingOutput.from_hub("pilipolio/chess-sandbox-concept-probes")
-probe = output.probe
+<!-- Provide a longer summary of what this model is. -->
 
-# Extract features and predict
-from chess_sandbox.concept_extraction.model.features import extract_features
-features = extract_features(
-    fen="rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-    model_path="path/to/maia-1500.onnx",
-    layer_name="block3/conv2/relu"
-)
-concepts = probe.predict(features)
-```
+Trained multi-label classifier for detecting 6 chess concepts (discovered_attack, fork, mating_threat, passed_pawn, pin, sacrifice) from LC0 layer activations (block3/conv2/relu).
+
+- **Developed by:** chess-sandbox
+- **Funded by [optional]:** [More Information Needed]
+- **Shared by [optional]:** [More Information Needed]
+- **Model type:** [More Information Needed]
+- **Language(s) (NLP):** en
+- **License:** mit
+- **Finetuned from model [optional]:** lczerolens/maia-1500
+
+### Model Sources [optional]
+
+<!-- Provide the basic links for the model. -->
+
+- **Repository:** [More Information Needed]
+- **Paper [optional]:** [More Information Needed]
+- **Demo [optional]:** [More Information Needed]
+
+## Uses
+
+<!-- Address questions around how the model is intended to be used, including the foreseeable users of the model and those affected by the model. -->
+
+### Direct Use
+
+<!-- This section is for the model use without fine-tuning or plugging into a larger ecosystem/app. -->
+
+[More Information Needed]
+
+### Downstream Use [optional]
+
+<!-- This section is for the model use when fine-tuned for a task, or when plugged into a larger ecosystem/app -->
+
+[More Information Needed]
+
+### Out-of-Scope Use
+
+<!-- This section addresses misuse, malicious use, and uses that the model will not work well for. -->
+
+[More Information Needed]
+
+## Bias, Risks, and Limitations
+
+<!-- This section is meant to convey both technical and sociotechnical limitations. -->
+
+[More Information Needed]
+
+### Recommendations
+
+<!-- This section is meant to convey recommendations with respect to the bias, risk, and technical limitations. -->
+
+Users (both direct and downstream) should be made aware of the risks, biases and limitations of the model. More information needed for further recommendations.
+
+## How to Get Started with the Model
+
+Use the code below to get started with the model.
+
+[More Information Needed]
 
 ## Training Details
 
-- Training: 14 samples | Test: 4 samples | Split: 20.0% | Seed: 42
+### Training Data
+
+<!-- This should link to a Dataset Card, perhaps with a short stub of information on what the training data is all about as well as documentation related to data pre-processing or additional filtering. -->
+
+[More Information Needed]
+
+### Training Procedure
+
+<!-- This relates heavily to the Technical Specifications. Content here should link to that section when it is relevant to the training procedure. -->
+
+#### Preprocessing [optional]
+
+[More Information Needed]
+
+
+#### Training Hyperparameters
+
+- **Training regime:** [More Information Needed] <!--fp32, fp16 mixed precision, bf16 mixed precision, bf16 non-mixed precision, fp16 non-mixed precision, fp8 mixed precision -->
+
+#### Speeds, Sizes, Times [optional]
+
+<!-- This section provides information about throughput, start/end time, checkpoint size if relevant, etc. -->
+
+[More Information Needed]
+
+## Evaluation
+
+<!-- This section describes the evaluation protocols and provides the results. -->
+
+### Testing Data, Factors & Metrics
+
+#### Testing Data
+
+<!-- This should link to a Dataset Card if possible. -->
+
+[More Information Needed]
+
+#### Factors
+
+<!-- These are the things the evaluation is disaggregating by, e.g., subpopulations or domains. -->
+
+[More Information Needed]
+
+#### Metrics
+
+<!-- These are the evaluation metrics being used, ideally with a description of why. -->
+
+[More Information Needed]
+
+### Results
+
+[More Information Needed]
+
+#### Summary
+
+
+
+## Model Examination [optional]
+
+<!-- Relevant interpretability work for the model goes here -->
+
+[More Information Needed]
+
+## Environmental Impact
+
+<!-- Total emissions (in grams of CO2eq) and additional considerations, such as electricity usage, go here. Edit the suggested text below accordingly -->
+
+Carbon emissions can be estimated using the [Machine Learning Impact calculator](https://mlco2.github.io/impact#compute) presented in [Lacoste et al. (2019)](https://arxiv.org/abs/1910.09700).
+
+- **Hardware Type:** [More Information Needed]
+- **Hours used:** [More Information Needed]
+- **Cloud Provider:** [More Information Needed]
+- **Compute Region:** [More Information Needed]
+- **Carbon Emitted:** [More Information Needed]
+
+## Technical Specifications [optional]
+
+### Model Architecture and Objective
+
+[More Information Needed]
+
+### Compute Infrastructure
+
+[More Information Needed]
+
+#### Hardware
+
+[More Information Needed]
+
+#### Software
+
+[More Information Needed]
+
+## Citation [optional]
+
+<!-- If there is a paper or blog post introducing the model, the APA and Bibtex information for that should go in this section. -->
+
+**BibTeX:**
+
+[More Information Needed]
+
+**APA:**
+
+[More Information Needed]
+
+## Glossary [optional]
+
+<!-- If relevant, include terms and calculations in this section that can help readers understand the model or model card. -->
+
+[More Information Needed]
+
+## More Information [optional]
+
+[More Information Needed]
+
+## Model Card Authors [optional]
+
+[More Information Needed]
+
+## Model Card Contact
+
+[More Information Needed]
