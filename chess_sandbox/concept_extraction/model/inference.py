@@ -333,35 +333,34 @@ class ConceptExtractor:
 
         return self.probe.predict(features, threshold=threshold)
 
-    def extract_concepts_with_confidence(self, fen: str) -> list[tuple[str, float]]:
+    def extract_concepts_with_confidence(self, fens: list[str]) -> list[list[tuple[str, float]]]:
         """
-        Extract concepts with confidence scores from a FEN position.
+        Extract concepts with confidence scores from FEN positions.
 
         Args:
-            fen: FEN notation of chess position
+            fens: List of FEN notations of chess positions
 
         Returns:
-            List of (concept_name, probability) tuples for all concepts
+            List of lists, where each inner list contains (concept_name, probability) tuples for all concepts
 
         Example:
             >>> # extractor = ConceptExtractor.from_hf(...)
             >>> # scores = extractor.extract_concepts_with_confidence(
-            >>> #     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            >>> #     ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]
             >>> # )
-            >>> # all(0 <= score <= 1 for _, score in scores)
+            >>> # all(all(0 <= score <= 1 for _, score in position_scores) for position_scores in scores)
             True
         """
         from .features import extract_features_batch
 
         features_batch = extract_features_batch(
-            fens=[fen],
+            fens=fens,
             layer_name=self.layer_name,
             model=self.model,
-            batch_size=1,
+            batch_size=32,
         )
-        features = features_batch[0]
 
-        return self.probe.predict_with_confidence(features)
+        return [self.probe.predict_with_confidence(features) for features in features_batch]
 
     def __repr__(self) -> str:
         return f"ConceptExtractor(probe={self.probe}, " f"layer={self.layer_name})"
@@ -461,7 +460,7 @@ def predict(
     )
 
     print(f"\nExtracting concepts for FEN: {fen}")
-    predictions_with_confidence = extractor.extract_concepts_with_confidence(fen)
+    predictions_with_confidence = extractor.extract_concepts_with_confidence([fen])[0]
 
     # Sort by confidence descending
     predictions_with_confidence.sort(key=lambda x: x[1], reverse=True)

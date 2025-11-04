@@ -70,7 +70,7 @@ def extract_concepts(
         Where {encoded_fen} is the URL-encoded FEN string
     """
     extractor = get_extractor()
-    all_predictions = extractor.extract_concepts_with_confidence(fen)
+    all_predictions = extractor.extract_concepts_with_confidence([fen])[0]
 
     return ConceptExtractionResponse(
         fen=fen,

@@ -14,7 +14,6 @@ from sklearn.metrics import precision_score, recall_score
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from .dataset import load_dataset_from_hf
-from .features import extract_features_batch
 from .inference import ConceptExtractor, hf_hub_options
 
 
@@ -173,6 +172,53 @@ def format_metrics_display(
     return "\n".join(lines)
 
 
+def binarize_predictions(
+    predictions_with_confidence: list[list[tuple[str, float]]],
+    ground_truth_labels: list[list[str]],
+    concept_list: list[str],
+    threshold: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Convert predictions with confidence scores and labels to binary matrices.
+
+    Args:
+        predictions_with_confidence: List of predictions per sample, each with (concept, confidence)
+        ground_truth_labels: List of ground truth concept lists per sample
+        concept_list: Complete list of all possible concepts
+        threshold: Confidence threshold for considering a prediction positive
+
+    Returns:
+        Tuple of (y_true, y_pred) as dense numpy binary matrices
+    """
+    # Initialize MultiLabelBinarizer with all concepts
+    mlb = MultiLabelBinarizer()
+    mlb.fit([concept_list])
+
+    # Transform ground truth labels to binary matrix
+    y_true_transformed = mlb.transform(ground_truth_labels)
+
+    # Filter predictions by threshold and extract concept names
+    y_pred_concepts = [
+        [name for name, confidence in predictions if confidence >= threshold]
+        for predictions in predictions_with_confidence
+    ]
+    y_pred_transformed = mlb.transform(y_pred_concepts)
+
+    # Convert sparse matrices to dense numpy arrays
+    y_true = (
+        np.asarray(y_true_transformed.toarray())
+        if hasattr(y_true_transformed, "toarray")
+        else np.asarray(y_true_transformed)
+    )
+    y_pred = (
+        np.asarray(y_pred_transformed.toarray())
+        if hasattr(y_pred_transformed, "toarray")
+        else np.asarray(y_pred_transformed)
+    )
+
+    return y_true, y_pred
+
+
 @click.group()
 def cli() -> None:
     """Evaluation commands for concept probes."""
@@ -219,6 +265,12 @@ def cli() -> None:
     default=True,
     help="Show individual sample predictions",
 )
+@click.option(
+    "--threshold",
+    default=0.5,
+    type=float,
+    help="Confidence threshold for positive predictions",
+)
 def evaluate(
     model_repo_id: str,
     revision: str | None,
@@ -234,6 +286,7 @@ def evaluate(
     batch_size: int,
     random_seed: int,
     show_samples: bool,
+    threshold: float,
 ) -> None:
     """
     Evaluate trained concept probe on test data with comprehensive metrics.
@@ -277,26 +330,17 @@ def evaluate(
         print("No positions with validated concepts found!")
         return
 
+    all_fens = [p.fen for p in positions]
+    all_predictions_with_confidence = extractor.extract_concepts_with_confidence(all_fens)
+
     # Show sample predictions if requested
     if show_samples:
         n_samples = min(sample_size, len(positions))
         rng = np.random.RandomState(random_seed)
         sample_indices = rng.choice(len(positions), size=n_samples, replace=False)
-        sample_positions = [positions[i] for i in sample_indices]
+        sample_fens = [all_fens[i] for i in sample_indices]
         sample_labels = [labels[i] for i in sample_indices]
-
-        print(f"\nExtracting activations for {n_samples} samples...")
-        fens = [p.fen for p in sample_positions]
-        activations = extract_features_batch(
-            fens,
-            extractor.layer_name,
-            model=extractor.model,
-            batch_size=batch_size,
-        )
-        print(f"Activation matrix shape: {activations.shape}")
-
-        print("\nMaking predictions...")
-        predictions_batch = extractor.probe.predict_batch(activations)
+        sample_predictions_with_confidence = [all_predictions_with_confidence[i] for i in sample_indices]
 
         print(f"\n{'=' * 70}")
         print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
@@ -304,22 +348,22 @@ def evaluate(
 
         sample_correct = 0
         for pos, ground_truth, predicted_concepts in zip(
-            sample_positions, sample_labels, predictions_batch, strict=True
+            sample_fens, sample_labels, sample_predictions_with_confidence, strict=True
         ):
-            print(f"FEN: {pos.fen}")
+            print(f"FEN: {pos}")
 
-            predicted_concept_names = [c.name for c in predicted_concepts]
+            above_threshold_extracted_concept = [c for c, score in predicted_concepts if score >= threshold]
 
             # Check if prediction matches
-            match_marker = "✓" if set(ground_truth) == set(predicted_concept_names) else "✗"
+            match_marker = "✓" if set(ground_truth) == set(above_threshold_extracted_concept) else "✗"
 
             gt_str = ", ".join(ground_truth) if ground_truth else "(none)"
-            pred_str = ", ".join(predicted_concept_names) if predicted_concept_names else "(none)"
+            pred_str = ", ".join(above_threshold_extracted_concept) if above_threshold_extracted_concept else "(none)"
             print(f"Ground Truth: {gt_str}")
             print(f"Prediction:   {pred_str} {match_marker}")
             print()
 
-            if set(ground_truth) == set(predicted_concept_names):
+            if set(ground_truth) == set(above_threshold_extracted_concept):
                 sample_correct += 1
 
         sample_accuracy = sample_correct / n_samples
@@ -331,37 +375,10 @@ def evaluate(
     print("\nCalculating comprehensive metrics on full dataset...")
     print(f"Extracting activations for {len(positions)} positions...")
 
-    all_fens = [p.fen for p in positions]
-    all_activations = extract_features_batch(
-        all_fens,
-        extractor.layer_name,
-        model=extractor.model,
-        batch_size=batch_size,
+    # Convert predictions to binary matrices for metric calculation
+    y_true, y_pred = binarize_predictions(
+        all_predictions_with_confidence, labels, extractor.probe.concept_list, threshold
     )
-    print(f"Activation matrix shape: {all_activations.shape}")
-
-    print("Making predictions...")
-    all_predictions = extractor.probe.predict_batch(all_activations)
-
-    # Convert to binary matrices for metrics calculation
-    mlb = MultiLabelBinarizer()
-    mlb.fit([extractor.probe.concept_list])
-
-    y_true_transformed = mlb.transform(labels)
-    y_pred_concepts = [[c.name for c in pred] for pred in all_predictions]
-    y_pred_transformed = mlb.transform(y_pred_concepts)
-
-    # Convert sparse matrices to dense numpy arrays
-    y_true = (
-        np.asarray(y_true_transformed.toarray())
-        if hasattr(y_true_transformed, "toarray")
-        else np.asarray(y_true_transformed)
-    )  # type: ignore[union-attr]
-    y_pred = (
-        np.asarray(y_pred_transformed.toarray())
-        if hasattr(y_pred_transformed, "toarray")
-        else np.asarray(y_pred_transformed)
-    )  # type: ignore[union-attr]
 
     # Calculate metrics
     metrics = calculate_multilabel_metrics(y_true, y_pred, extractor.probe.concept_list)
