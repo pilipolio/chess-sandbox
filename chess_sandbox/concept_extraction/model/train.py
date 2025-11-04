@@ -6,30 +6,87 @@ from LC0 layer activations.
 """
 
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 
 import click
 import numpy as np
-from huggingface_hub import hf_hub_download
+from huggingface_hub import HfApi, hf_hub_download
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
-from .dataset import load_dataset_from_hf
+from .dataset import LabelledPosition, load_dataset_from_hf
 from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
 from .inference import ConceptProbe
 from .model_artefact import ModelTrainingOutput, generate_probe_name
 
 
+def save_dataset_split(positions: list[LabelledPosition], output_path: Path) -> Path:
+    """
+    Save dataset split to JSONL file.
+
+    Args:
+        positions: List of labeled positions
+        output_path: Path to save JSONL file
+
+    Returns:
+        Path to saved file
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w") as f:
+        for position in positions:
+            json.dump(position.to_dict(), f)
+            f.write("\n")
+    return output_path
+
+
+def upload_dataset_split(
+    local_path: Path,
+    repo_id: str,
+    filename: str,
+    revision: str | None = None,
+    split_name: str = "train",
+) -> str:
+    """
+    Upload dataset split to HuggingFace Hub.
+
+    Args:
+        local_path: Local path to JSONL file
+        repo_id: HuggingFace dataset repository ID
+        filename: Filename in the repository
+        revision: Optional git revision (branch/tag)
+        split_name: Name of split for commit message (train/test)
+
+    Returns:
+        Commit info string
+    """
+    api = HfApi()
+    commit_message = f"Add {split_name} split from training pipeline"
+    if revision:
+        commit_message += f" (revision: {revision})"
+
+    result = api.upload_file(
+        path_or_fileobj=str(local_path),
+        path_in_repo=filename,
+        repo_id=repo_id,
+        repo_type="dataset",
+        revision=revision,
+        commit_message=commit_message,
+    )
+    return str(result)
+
+
 def train_multiclass(
-    labels: list[list[str]],
-    activations: np.ndarray,
+    X_train: np.ndarray,
+    X_test: np.ndarray,
+    y_train_labels: list[list[str]],
+    y_test_labels: list[list[str]],
     layer_name: str,
-    test_split: float,
     random_seed: int,
     verbose: bool = False,
     n_jobs: int = -1,
@@ -40,10 +97,11 @@ def train_multiclass(
     Takes multi-label format labels and flattens them internally (takes first concept).
 
     Args:
-        labels: List of concept label lists (flattened internally to first concept)
-        activations: Pre-extracted activation features
+        X_train: Pre-extracted activation features for training
+        X_test: Pre-extracted activation features for testing
+        y_train_labels: List of concept label lists for training
+        y_test_labels: List of concept label lists for testing
         layer_name: Layer name that activations were extracted from
-        test_split: Fraction of data for testing
         random_seed: Random seed for reproducibility
         verbose: Enable sklearn training progress output
         n_jobs: Number of parallel jobs (-1 = all cores)
@@ -51,17 +109,25 @@ def train_multiclass(
     Returns:
         Trained ModelTrainingOutput
     """
-    print("\n[1/4] Splitting data...")
-    indices = np.arange(len(labels))
-    train_indices, test_indices = train_test_split(indices, test_size=test_split, random_state=random_seed)
+    print("\n[1/4] Preparing labels...")
+    # Filter out positions without concepts (multi-class requires at least one concept)
+    train_mask = [len(concepts) > 0 for concepts in y_train_labels]
+    test_mask = [len(concepts) > 0 for concepts in y_test_labels]
 
-    X_train = activations[train_indices]
-    X_test = activations[test_indices]
-    y_train_labels = [labels[i] for i in train_indices]
-    y_test_labels = [labels[i] for i in test_indices]
+    X_train_filtered = X_train[train_mask]
+    X_test_filtered = X_test[test_mask]
+    y_train_filtered = [y_train_labels[i] for i in range(len(y_train_labels)) if train_mask[i]]
+    y_test_filtered = [y_test_labels[i] for i in range(len(y_test_labels)) if test_mask[i]]
 
-    labels_flat = [concepts[0] for concepts in y_train_labels]
-    print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
+    if not y_train_filtered:
+        raise ValueError(
+            "No positions with concepts found in training set! "
+            "Multi-class mode requires at least one concept per position."
+        )
+
+    labels_flat = [concepts[0] for concepts in y_train_filtered]
+    print(f"Original: Train={X_train.shape[0]}, Test={X_test.shape[0]}")
+    print(f"Filtered (with concepts): Train={X_train_filtered.shape[0]}, Test={X_test_filtered.shape[0]}")
     print("Flattened multi-label to multi-class (taking first concept)")
 
     print("\n[2/4] Encoding labels...")
@@ -71,6 +137,9 @@ def train_multiclass(
     print(f"Label encoder classes: {encoder.classes_}")
 
     print("\n[3/4] Training probe...")
+    # NOTE: Consider adding class_weight='balanced' to handle remaining class imbalance
+    # within concepts (e.g., mating_threat:11k vs zugzwang:194 samples). This would
+    # automatically adjust weights inversely proportional to class frequencies.
     clf = LogisticRegression(
         max_iter=10000,
         random_state=random_seed,
@@ -78,19 +147,19 @@ def train_multiclass(
         n_jobs=n_jobs,
     )
     print(f"Training multi-class classifier with {len(encoder.classes_)} classes")
-    clf.fit(X_train, y_train_encoded)
+    clf.fit(X_train_filtered, y_train_encoded)
     print("Training complete!")
 
     baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
-    baseline.fit(X_train, y_train_encoded)
+    baseline.fit(X_train_filtered, y_train_encoded)
 
     print("\n[4/4] Evaluating...")
     eval_encoder = MultiLabelBinarizer()
     eval_encoder.fit([concept_list])
-    y_test_binary = eval_encoder.transform(y_test_labels)
+    y_test_binary = eval_encoder.transform(y_test_filtered)
 
-    y_pred_baseline = baseline.predict(X_test)
-    y_pred_probe = clf.predict(X_test)
+    y_pred_baseline = baseline.predict(X_test_filtered)
+    y_pred_probe = clf.predict(X_test_filtered)
 
     y_pred_baseline_labels = [[concept_list[int(pred)]] for pred in y_pred_baseline]
     y_pred_probe_labels = [[concept_list[int(pred)]] for pred in y_pred_probe]
@@ -112,9 +181,8 @@ def train_multiclass(
     training_stats = {
         "baseline": baseline_metrics.model_dump(),
         "probe": probe_metrics.model_dump(),
-        "training_samples": X_train.shape[0],
-        "test_samples": X_test.shape[0],
-        "test_split": test_split,
+        "training_samples": X_train_filtered.shape[0],
+        "test_samples": X_test_filtered.shape[0],
         "random_seed": random_seed,
         "mode": "multi-class",
         "verbose": verbose,
@@ -130,10 +198,11 @@ def train_multiclass(
 
 
 def train_multilabel(
-    labels: list[list[str]],
-    activations: np.ndarray,
+    X_train: np.ndarray,
+    X_test: np.ndarray,
+    y_train_labels: list[list[str]],
+    y_test_labels: list[list[str]],
     layer_name: str,
-    test_split: float,
     random_seed: int,
     verbose: bool = False,
     n_jobs: int = -1,
@@ -142,10 +211,11 @@ def train_multilabel(
     Train multi-label concept probe (multiple concepts per position).
 
     Args:
-        labels: List of concept label lists (multiple per position)
-        activations: Pre-extracted activation features
+        X_train: Pre-extracted activation features for training
+        X_test: Pre-extracted activation features for testing
+        y_train_labels: List of concept label lists for training
+        y_test_labels: List of concept label lists for testing
         layer_name: Layer name that activations were extracted from
-        test_split: Fraction of data for testing
         random_seed: Random seed for reproducibility
         verbose: Enable sklearn training progress output
         n_jobs: Number of parallel jobs (-1 = all cores)
@@ -153,29 +223,24 @@ def train_multilabel(
     Returns:
         Trained ModelTrainingOutput
     """
-    if not labels:
+    if not y_train_labels:
         raise ValueError("No validated concepts found! Cannot train without labels.")
 
     print("\n[1/4] Encoding labels...")
     encoder = MultiLabelBinarizer()
-    label_matrix = encoder.fit_transform(labels)
+    y_train = encoder.fit_transform(y_train_labels)
+    y_test_binary = encoder.transform(y_test_labels)
     concept_list = list(encoder.classes_)
     print(f"Multi-label binarizer classes: {encoder.classes_}")
-    print(f"Binary label matrix shape: {label_matrix.shape}")
-    print(f"Total labels: {label_matrix.sum()} ({label_matrix.sum() / label_matrix.size * 100:.1f}% density)")
-
-    print("\n[2/4] Splitting data...")
-    indices = np.arange(len(labels))
-    train_indices, test_indices = train_test_split(indices, test_size=test_split, random_state=random_seed)
-
-    X_train = activations[train_indices]
-    X_test = activations[test_indices]
-    y_train = label_matrix[train_indices]
-    y_test_labels = [labels[i] for i in test_indices]
-    y_test_binary = encoder.transform(y_test_labels)
     print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
+    print(f"Binary label matrix shape: {y_train.shape}")
+    print(f"Total labels: {y_train.sum()} ({y_train.sum() / y_train.size * 100:.1f}% density)")
 
-    print("\n[3/4] Training probe...")
+    print("\n[2/4] Training probe...")
+    # NOTE: Consider adding class_weight='balanced' to handle remaining class imbalance
+    # within concepts (e.g., mating_threat:11k vs zugzwang:194 samples). This would
+    # automatically adjust weights inversely proportional to class frequencies in each
+    # binary classifier (OneVsRest trains one binary classifier per concept).
     base_clf = LogisticRegression(
         max_iter=10000,
         random_state=random_seed,
@@ -189,7 +254,7 @@ def train_multilabel(
     baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
     baseline.fit(X_train, y_train)
 
-    print("\n[4/4] Evaluating...")
+    print("\n[3/4] Evaluating...")
     y_pred_baseline = baseline.predict(X_test)
     y_pred_probe = clf.predict(X_test)
 
@@ -210,7 +275,6 @@ def train_multilabel(
         "probe": probe_metrics.model_dump(),
         "training_samples": X_train.shape[0],
         "test_samples": X_test.shape[0],
-        "test_split": test_split,
         "random_seed": random_seed,
         "mode": "multi-label",
         "verbose": verbose,
@@ -312,6 +376,11 @@ def train_multilabel(
     default=None,
     help="Optional revision/tag name for the upload (included in commit message)",
 )
+@click.option(
+    "--save-splits",
+    is_flag=True,
+    help="Save train/test splits as train.jsonl and test.jsonl to the dataset repository",
+)
 def train(
     dataset_repo_id: str,
     dataset_filename: str,
@@ -329,6 +398,7 @@ def train(
     upload_to_hub: bool,
     output_repo_id: str | None,
     output_revision: str | None,
+    save_splits: bool,
 ) -> None:
     """
     Train concept probe from labeled positions.
@@ -362,32 +432,79 @@ def train(
     print("\nLoading training data from HuggingFace Hub...")
     positions, labels = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
-    print("\nExtracting activations...")
-    fens = [p.fen for p in positions]
-    activations = extract_features_batch(
-        fens,
+    print("\nSplitting dataset...")
+    indices = np.arange(len(positions))
+    train_indices, test_indices = train_test_split(indices, test_size=test_split, random_state=random_seed)
+
+    train_positions = [positions[i] for i in train_indices]
+    test_positions = [positions[i] for i in test_indices]
+    y_train_labels = [labels[i] for i in train_indices]
+    y_test_labels = [labels[i] for i in test_indices]
+    print(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
+
+    if save_splits:
+        print("\nSaving dataset splits...")
+        train_path = save_dataset_split(train_positions, Path("data/splits/train.jsonl"))
+        test_path = save_dataset_split(test_positions, Path("data/splits/test.jsonl"))
+        print(f"  Train split: {train_path}")
+        print(f"  Test split: {test_path}")
+
+        print("\nUploading splits to HuggingFace Hub...")
+        train_commit = upload_dataset_split(
+            train_path,
+            dataset_repo_id,
+            "train.jsonl",
+            dataset_revision,
+            split_name="train",
+        )
+        test_commit = upload_dataset_split(
+            test_path,
+            dataset_repo_id,
+            "test.jsonl",
+            dataset_revision,
+            split_name="test",
+        )
+        print(f"  Train commit: {train_commit}")
+        print(f"  Test commit: {test_commit}")
+
+    print("\nExtracting train activations...")
+    train_fens = [p.fen for p in train_positions]
+    X_train = extract_features_batch(
+        train_fens,
         layer_name,
         model=model,
         batch_size=batch_size,
     )
-    print(f"Activation matrix shape: {activations.shape}")
+    print(f"Train activation matrix shape: {X_train.shape}")
+
+    print("\nExtracting test activations...")
+    test_fens = [p.fen for p in test_positions]
+    X_test = extract_features_batch(
+        test_fens,
+        layer_name,
+        model=model,
+        batch_size=batch_size,
+    )
+    print(f"Test activation matrix shape: {X_test.shape}")
 
     if mode == "multi-class":
         training_output = train_multiclass(
-            labels=labels,
-            activations=activations,
+            X_train=X_train,
+            X_test=X_test,
+            y_train_labels=y_train_labels,
+            y_test_labels=y_test_labels,
             layer_name=layer_name,
-            test_split=test_split,
             random_seed=random_seed,
             verbose=verbose,
             n_jobs=n_jobs,
         )
     else:
         training_output = train_multilabel(
-            labels=labels,
-            activations=activations,
+            X_train=X_train,
+            X_test=X_test,
+            y_train_labels=y_train_labels,
+            y_test_labels=y_test_labels,
             layer_name=layer_name,
-            test_split=test_split,
             random_seed=random_seed,
             verbose=verbose,
             n_jobs=n_jobs,

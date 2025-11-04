@@ -23,9 +23,9 @@ model-index:
       revision: test_fixture
     metrics:
     - type: exact_match
-      value: 0.0
+      value: 0
     - type: hamming_loss
-      value: 0.3333333333333333
+      value: 0
 ---
 
 # Model Card for chess-concept-probe
@@ -40,7 +40,7 @@ model-index:
 
 <!-- Provide a longer summary of what this model is. -->
 
-Trained multi-label classifier for detecting 6 chess concepts (discovered_attack, fork, mating_threat, passed_pawn, pin, sacrifice) from LC0 layer activations (block3/conv2/relu).
+Trained multi-label classifier for detecting 4 chess concepts (mating_threat, passed_pawn, pin, sacrifice) from LC0 layer activations (block3/conv2/relu).
 
 - **Developed by:** chess-sandbox
 - **Funded by [optional]:** [More Information Needed]

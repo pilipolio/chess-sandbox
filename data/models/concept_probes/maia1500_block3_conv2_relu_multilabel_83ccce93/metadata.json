@@ -2,16 +2,14 @@
   "model_config": {
     "layer_name": "block3/conv2/relu",
     "mode": "multi-label",
-    "n_concepts": 6,
+    "n_concepts": 4,
     "concepts": [
-      "discovered_attack",
-      "fork",
       "mating_threat",
       "passed_pawn",
       "pin",
       "sacrifice"
     ],
-    "training_date": "2025-11-04T12:15:14.833502"
+    "training_date": "2025-11-04T15:30:37.408966"
   },
   "training_info": {
     "n_train": 14,
@@ -25,33 +23,17 @@
   },
   "performance": {
     "baseline": {
-      "hamming_loss": 0.25,
-      "exact_match": 0.0,
+      "micro_precision": 0.3333333333333333,
+      "micro_recall": 0.3333333333333333,
+      "macro_precision": 0.25,
+      "macro_recall": 0.25,
       "per_concept": {
-        "discovered_attack": {
-          "accuracy": 0.75,
-          "f1": 0.0,
-          "precision": 0.0,
-          "recall": 0.0,
-          "support": 1
-        },
-        "fork": {
-          "accuracy": 0.75,
-          "f1": 0.0,
-          "precision": 0.0,
-          "recall": 0.0,
-          "support": 1
-        },
         "passed_pawn": {
-          "accuracy": 0.25,
-          "f1": 0.0,
           "precision": 0.0,
           "recall": 0.0,
           "support": 2
         },
         "pin": {
-          "accuracy": 1.0,
-          "f1": 1.0,
           "precision": 1.0,
           "recall": 1.0,
           "support": 1
@@ -59,33 +41,17 @@
       }
     },
     "probe": {
-      "hamming_loss": 0.3333333333333333,
-      "exact_match": 0.0,
+      "micro_precision": 0.25,
+      "micro_recall": 0.3333333333333333,
+      "macro_precision": 0.25,
+      "macro_recall": 0.125,
       "per_concept": {
-        "discovered_attack": {
-          "accuracy": 0.75,
-          "f1": 0.0,
-          "precision": 0.0,
-          "recall": 0.0,
-          "support": 1
-        },
-        "fork": {
-          "accuracy": 0.75,
-          "f1": 0.0,
-          "precision": 0.0,
-          "recall": 0.0,
-          "support": 1
-        },
         "passed_pawn": {
-          "accuracy": 0.5,
-          "f1": 0.0,
-          "precision": 0.0,
-          "recall": 0.0,
+          "precision": 1.0,
+          "recall": 0.5,
           "support": 2
         },
         "pin": {
-          "accuracy": 0.75,
-          "f1": 0.0,
           "precision": 0.0,
           "recall": 0.0,
           "support": 1
@@ -94,7 +60,6 @@
     },
     "training_samples": 14,
     "test_samples": 4,
-    "test_split": 0.2,
     "random_seed": 42,
     "mode": "multi-label",
     "verbose": false,
