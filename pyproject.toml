@@ -106,6 +106,8 @@ exclude = [
     ".venv",                                              # Don't scan dependencies
     "**/concept_extraction/model/train.py",              # ML training code with sklearn
     "**/concept_extraction/model/inference.py",          # ML inference with joblib
+    "**/concept_extraction/model/evaluation.py",         # ML evaluation code with sklearn
+    "**/concept_extraction/model/dataset.py",            # Dataset loading with HF Hub
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs

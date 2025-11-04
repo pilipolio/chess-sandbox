@@ -152,7 +152,6 @@ class ModelTrainingOutput:
         repo_id: str,
         revision: str | None = None,
         token: str | None = None,
-        commit_message: str | None = None,
     ) -> str:
         """
         Upload probe directory to HuggingFace Hub.
@@ -235,7 +234,6 @@ class ModelTrainingOutput:
         if not probe_metrics:
             return []
 
-        # Only use metrics already in training_stats - no calculations
         results = [
             EvalResult(
                 task_type="tabular-classification",
@@ -271,10 +269,6 @@ class ModelTrainingOutput:
             if "source_model" in self.source_provenance:
                 base_model = self.source_provenance["source_model"].get("repo_id")
 
-        # Get eval results
-        eval_results = self._create_eval_results()
-
-        # Create model card data
         card_data = ModelCardData(
             language="en",
             license="mit",
@@ -284,10 +278,9 @@ class ModelTrainingOutput:
             base_model=base_model,
             pipeline_tag="tabular-classification",
             model_name="Chess Concept Probe",
-            eval_results=eval_results if eval_results else None,
+            eval_results=self._create_eval_results(),
         )
 
-        # Prepare simple template variables
         mode = self.training_stats.get("mode", "multi-label")
         concept_list = ", ".join(self.probe.concept_list)
         model_description = (
