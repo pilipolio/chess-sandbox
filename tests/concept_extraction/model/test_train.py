@@ -74,5 +74,5 @@ def test_e2e_training_and_inference_pipeline(
     assert TEST_DATASET_REPO in readme_content, "Dataset repo not linked in model card"
     assert "base_model:" in readme_content, "Model card missing base_model field in YAML"
     assert "model-index:" in readme_content, "Model card missing model-index for Papers with Code"
-    assert "precision" in readme_content.lower(), "Model card missing precision metrics in model-index"
-    assert "recall" in readme_content.lower(), "Model card missing recall metrics in model-index"
+    assert "exact_match" in readme_content.lower(), "Model card missing exact_match metric"
+    assert "hamming_loss" in readme_content.lower(), "Model card missing hamming_loss metric"

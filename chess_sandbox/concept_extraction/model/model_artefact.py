@@ -12,53 +12,10 @@ from pathlib import Path
 from typing import Any
 
 import joblib
-from huggingface_hub import HfApi, ModelCardData, snapshot_download
+from huggingface_hub import EvalResult, HfApi, ModelCard, ModelCardData, snapshot_download
 
 from ...config import settings
 from .inference import ConceptProbe
-
-# Model card template for HuggingFace Hub
-MODEL_CARD_TEMPLATE = """# Chess Concept Probe
-
-Trained {mode} classifier for detecting chess concepts from LC0 layer activations.
-
-## Model Description
-
-Detects {n_concepts} chess concepts: {concept_list}
-
-**Layer:** `{layer_name}` | **Mode:** {mode} | **Trained:** {training_date}
-
-## Performance
-
-- {key_metric}
-- {secondary_metric}
-{baseline_comparison}
-
-Detailed metrics available in model-index below.
-
-## Usage
-
-```python
-from chess_sandbox.concept_extraction.model.model_artefact import ModelTrainingOutput
-
-# Load from HF Hub
-output = ModelTrainingOutput.from_hub("pilipolio/chess-sandbox-concept-probes")
-probe = output.probe
-
-# Extract features and predict
-from chess_sandbox.concept_extraction.model.features import extract_features
-features = extract_features(
-    fen="rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-    model_path="path/to/maia-1500.onnx",
-    layer_name="{layer_name}"
-)
-concepts = probe.predict(features)
-```
-
-## Training Details
-
-- Training: {n_train:,} samples | Test: {n_test:,} samples | Split: {test_split:.1%} | Seed: {random_seed}
-"""
 
 
 @dataclass
@@ -265,88 +222,47 @@ class ModelTrainingOutput:
 
         return metadata
 
-    def _create_eval_results(self) -> list[dict[str, Any]]:
-        """
-        Create model-index structure with EvalResult objects for Papers with Code integration.
-
-        Returns structured evaluation results with overall metrics (micro/macro averages).
-        Per-concept metrics are displayed in markdown tables, not in model-index.
-        """
+    def _create_eval_results(self) -> list[EvalResult]:
+        """Create EvalResult objects from training_stats for model card."""
         if not self.source_provenance or "source_dataset" not in self.source_provenance:
             return []
 
         dataset_info = self.source_provenance["source_dataset"]
-        dataset_repo_id = dataset_info.get("repo_id", "unknown")
+        dataset_type = dataset_info.get("repo_id", "unknown")
         dataset_revision = dataset_info.get("revision") or "main"
 
         probe_metrics = self.training_stats.get("probe", {})
-
-        # Calculate micro and macro averages from per-concept metrics
-        per_concept = probe_metrics.get("per_concept", {})
-        if not per_concept:
+        if not probe_metrics:
             return []
 
-        # Micro averages: weight by support
-        total_support = sum(m["support"] for m in per_concept.values())
-        micro_precision = sum(m["precision"] * m["support"] for m in per_concept.values()) / total_support
-        micro_recall = sum(m["recall"] * m["support"] for m in per_concept.values()) / total_support
-        micro_f1 = sum(m["f1"] * m["support"] for m in per_concept.values()) / total_support
-
-        # Macro averages: unweighted mean
-        macro_precision = sum(m["precision"] for m in per_concept.values()) / len(per_concept)
-        macro_recall = sum(m["recall"] for m in per_concept.values()) / len(per_concept)
-        macro_f1 = sum(m["f1"] for m in per_concept.values()) / len(per_concept)
-
-        # Build model-index structure manually
+        # Only use metrics already in training_stats - no calculations
         results = [
-            {
-                "task": {"type": "tabular-classification", "name": "Chess Position Concept Extraction"},
-                "dataset": {
-                    "type": dataset_repo_id,
-                    "name": "Chess Positions with Concepts",
-                    "revision": dataset_revision,
-                },
-                "metrics": [
-                    {"type": "exact_match", "value": probe_metrics.get("exact_match", 0), "name": "Exact Match"},
-                    {
-                        "type": "hamming_loss",
-                        "value": probe_metrics.get("hamming_loss", 0),
-                        "name": "Hamming Loss",
-                    },
-                    {"type": "precision", "value": micro_precision, "name": "Precision (Micro)"},
-                    {"type": "recall", "value": micro_recall, "name": "Recall (Micro)"},
-                    {"type": "f1", "value": micro_f1, "name": "F1 (Micro)"},
-                    {"type": "precision", "value": macro_precision, "name": "Precision (Macro)"},
-                    {"type": "recall", "value": macro_recall, "name": "Recall (Macro)"},
-                    {"type": "f1", "value": macro_f1, "name": "F1 (Macro)"},
-                ],
-            }
+            EvalResult(
+                task_type="tabular-classification",
+                dataset_type=dataset_type,
+                dataset_name="Chess Positions with Concepts",
+                dataset_revision=dataset_revision,
+                metric_type="exact_match",
+                metric_value=probe_metrics.get("exact_match", 0),
+            ),
+            EvalResult(
+                task_type="tabular-classification",
+                dataset_type=dataset_type,
+                dataset_name="Chess Positions with Concepts",
+                dataset_revision=dataset_revision,
+                metric_type="hamming_loss",
+                metric_value=probe_metrics.get("hamming_loss", 0),
+            ),
         ]
 
-        return [{"name": "chess-concept-extraction", "results": results}]
+        # TODO: Add micro/macro averages if computed during training
+        # Would need: probe_metrics["micro_precision"], probe_metrics["micro_recall"], etc.
 
-    def _format_baseline_comparison(self) -> str:
-        """Calculate improvement over baseline for display."""
-        baseline_metrics = self.training_stats.get("baseline", {})
-        probe_metrics = self.training_stats.get("probe", {})
-
-        if not baseline_metrics or not probe_metrics:
-            return ""
-
-        baseline_exact = baseline_metrics.get("exact_match", 0)
-        probe_exact = probe_metrics.get("exact_match", 0)
-
-        if baseline_exact > 0:
-            improvement = probe_exact / baseline_exact
-            return f"**{improvement:.1f}x** better than random baseline"
-        return ""
+        return results
 
     def _create_model_card(self) -> str:
-        """Generate model card with YAML frontmatter using HuggingFace API."""
-        mode = self.training_stats.get("mode", "multi-label")
-        probe_metrics = self.training_stats.get("probe", {})
-
-        # Prepare metadata for YAML frontmatter
+        """Generate model card using HuggingFace default template."""
+        # Extract provenance info
         datasets = []
         base_model = None
         if self.source_provenance:
@@ -355,7 +271,10 @@ class ModelTrainingOutput:
             if "source_model" in self.source_provenance:
                 base_model = self.source_provenance["source_model"].get("repo_id")
 
-        # Create model card data with enhanced metadata
+        # Get eval results
+        eval_results = self._create_eval_results()
+
+        # Create model card data
         card_data = ModelCardData(
             language="en",
             license="mit",
@@ -365,49 +284,26 @@ class ModelTrainingOutput:
             base_model=base_model,
             pipeline_tag="tabular-classification",
             model_name="Chess Concept Probe",
+            eval_results=eval_results if eval_results else None,
         )
 
-        # Add model-index for Papers with Code integration
-        eval_results = self._create_eval_results()
-        if eval_results:
-            card_data.model_index = eval_results
-
-        # Prepare template variables
-        key_metric = f"Exact Match: **{probe_metrics.get('exact_match', 0):.1%}**"
-        hamming_loss = f"Hamming Loss: **{probe_metrics.get('hamming_loss', 0):.4f}**"
-        concept_list = ", ".join(f"`{c}`" for c in self.probe.concept_list)
-        baseline_comparison = self._format_baseline_comparison()
-        if baseline_comparison:
-            baseline_comparison = f"- {baseline_comparison}\n"
-
-        # Generate markdown content
-        markdown_content = MODEL_CARD_TEMPLATE.format(
-            mode=mode,
-            n_concepts=len(self.probe.concept_list),
-            concept_list=concept_list,
-            layer_name=self.probe.layer_name,
-            training_date=self.training_date[:10],
-            key_metric=key_metric,
-            secondary_metric=hamming_loss,
-            baseline_comparison=baseline_comparison,
-            n_train=self.training_stats.get("training_samples", 0),
-            n_test=self.training_stats.get("test_samples", 0),
-            test_split=self.training_stats.get("test_split", 0.2),
-            random_seed=self.training_stats.get("random_seed", 42),
+        # Prepare simple template variables
+        mode = self.training_stats.get("mode", "multi-label")
+        concept_list = ", ".join(self.probe.concept_list)
+        model_description = (
+            f"Trained {mode} classifier for detecting {len(self.probe.concept_list)} chess concepts "
+            f"({concept_list}) from LC0 layer activations ({self.probe.layer_name})."
         )
 
-        # Create model card with YAML frontmatter and markdown
-        # Note: We use ModelCardData but manually construct YAML to ensure model-index is included
-        import yaml
+        # Use default HuggingFace template
+        card = ModelCard.from_template(
+            card_data,
+            model_id="chess-concept-probe",
+            model_description=model_description,
+            developers="chess-sandbox",
+        )
 
-        # Convert card_data to dict and ensure model-index is included
-        yaml_dict = card_data.to_dict()
-        if eval_results:
-            yaml_dict["model-index"] = eval_results
-
-        yaml_str = yaml.dump(yaml_dict, sort_keys=False, allow_unicode=True)
-        full_content = f"---\n{yaml_str}---\n{markdown_content}"
-        return full_content
+        return str(card)
 
     @staticmethod
     def _get_package_version(package: str) -> str:
