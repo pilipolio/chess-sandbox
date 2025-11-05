@@ -24,12 +24,12 @@ class ConceptExtractionResponse(BaseModel):
 
 image = (
     modal.Image.debian_slim()
-    .env(
-        {
-            "HF_CACHE_DIR": "/root/.cache/huggingface",
-            "HF_CONCEPT_EXTRACTOR_REPO_ID": settings.HF_CONCEPT_EXTRACTOR_REPO_ID,
-        }
-    )
+    # .env(
+    #     {
+    #         "HF_CACHE_DIR": "/root/.cache/huggingface",
+    #         "HF_CONCEPT_EXTRACTOR_REPO_ID": settings.HF_CONCEPT_EXTRACTOR_REPO_ID,
+    #     }
+    # )
     .uv_sync(uv_project_dir="./", frozen=True)
     .uv_pip_install("fastapi[standard]")
     .add_local_python_source("chess_sandbox")
@@ -95,8 +95,9 @@ def get_extractor() -> ConceptExtractor:
     """
     global _extractor
     if _extractor is None:
-        probe_repo_id = settings.HF_CONCEPT_EXTRACTOR_REPO_ID
-        print(f"Initializing ConceptExtractor from {probe_repo_id}...")
-        _extractor = ConceptExtractor.from_hf(probe_repo_id=probe_repo_id)
+        model_repo_id = settings.HF_CONCEPT_EXTRACTOR_REPO_ID
+        model_revision = settings.HF_CONCEPT_EXTRACTOR_REVISION
+        print(f"Initializing ConceptExtractor from {model_repo_id}@{model_revision}...")
+        _extractor = ConceptExtractor.from_hf(probe_repo_id=model_repo_id, revision=model_revision)
         print("ConceptExtractor initialized successfully")
     return _extractor
