@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
-from .dataset import LabelledPosition, load_dataset_from_hf
+from .dataset import LabelledPosition, load_dataset_from_hf, rebalance_positions, split_positions
 from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
 from .inference import ConceptProbe
@@ -50,7 +50,6 @@ def upload_dataset_split(
     repo_id: str,
     filename: str,
     revision: str | None = None,
-    split_name: str = "train",
 ) -> str:
     """
     Upload dataset split to HuggingFace Hub.
@@ -60,13 +59,12 @@ def upload_dataset_split(
         repo_id: HuggingFace dataset repository ID
         filename: Filename in the repository
         revision: Optional git revision (branch/tag)
-        split_name: Name of split for commit message (train/test)
 
     Returns:
         Commit info string
     """
     api = HfApi()
-    commit_message = f"Add {split_name} split from training pipeline"
+    commit_message = f"Add {filename} split from training pipeline"
     if revision:
         commit_message += f" (revision: {revision})"
 
@@ -381,6 +379,11 @@ def train_multilabel(
     is_flag=True,
     help="Save train/test splits as train.jsonl and test.jsonl to the dataset repository",
 )
+@click.option(
+    "--rebalance-training-positions",
+    is_flag=False,
+    help="Rebalance training positions to achieve 50/50 ratio of positions with/without validated concepts",
+)
 def train(
     dataset_repo_id: str,
     dataset_filename: str,
@@ -399,6 +402,7 @@ def train(
     output_repo_id: str | None,
     output_revision: str | None,
     save_splits: bool,
+    rebalance_training_positions: bool,
 ) -> None:
     """
     Train concept probe from labeled positions.
@@ -434,10 +438,17 @@ def train(
 
     print("\nSplitting dataset...")
     indices = np.arange(len(positions))
-    train_indices, test_indices = train_test_split(indices, test_size=test_split, random_state=random_seed)
+    train_and_test_indices: list[list[int]] = train_test_split(indices, test_size=test_split, random_state=random_seed)
 
-    train_positions = [positions[i] for i in train_indices]
-    test_positions = [positions[i] for i in test_indices]
+    train_positions = [positions[i] for i in train_and_test_indices[0]]
+    test_positions = [positions[i] for i in train_and_test_indices[1]]
+
+    if rebalance_training_positions:
+        train_positions = rebalance_positions(train_positions, random_state=random_seed)
+    else:
+        # by default not using any positions w/o validated concepts
+        train_positions, _ = split_positions(train_positions)
+
     print(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
 
     if save_splits:
@@ -453,14 +464,12 @@ def train(
             dataset_repo_id,
             "train.jsonl",
             dataset_revision,
-            split_name="train",
         )
         test_commit = upload_dataset_split(
             test_path,
             dataset_repo_id,
             "test.jsonl",
             dataset_revision,
-            split_name="test",
         )
         print(f"  Train commit: {train_commit}")
         print(f"  Test commit: {test_commit}")

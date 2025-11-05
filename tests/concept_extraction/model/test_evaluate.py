@@ -41,8 +41,6 @@ def test_evaluate_cli_with_sample_predictions() -> None:
             TEST_DATASET_REVISION,
             "--sample-size",
             "10",
-            "--batch-size",
-            "4",
             "--random-seed",
             "42",
         ],
