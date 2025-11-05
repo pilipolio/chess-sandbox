@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 import numpy as np
 from pydantic import BaseModel
-from sklearn.metrics import precision_score, recall_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from .dataset import load_dataset_from_hf
@@ -32,6 +32,7 @@ class MultiLabelMetrics(BaseModel):
     micro_recall: float
     macro_precision: float
     macro_recall: float
+    subset_accuracy: float
     per_concept: dict[str, ConceptMetrics]
 
 
@@ -71,6 +72,7 @@ def calculate_multilabel_metrics(y_true: np.ndarray, y_pred: np.ndarray, concept
     micro_recall = float(recall_score(y_true, y_pred, average="micro", zero_division=0.0))
     macro_precision = float(precision_score(y_true, y_pred, average="macro", zero_division=0.0))
     macro_recall = float(recall_score(y_true, y_pred, average="macro", zero_division=0.0))
+    subset_accuracy = float(accuracy_score(y_true, y_pred))
 
     # Calculate per-concept metrics
     per_concept_metrics = {}
@@ -96,6 +98,7 @@ def calculate_multilabel_metrics(y_true: np.ndarray, y_pred: np.ndarray, concept
         micro_recall=micro_recall,
         macro_precision=macro_precision,
         macro_recall=macro_recall,
+        subset_accuracy=subset_accuracy,
         per_concept=per_concept_metrics,
     )
 
@@ -124,10 +127,11 @@ def format_metrics_display(
         lines.append("RANDOM BASELINE")
         lines.append("=" * 70)
         lines.append("\nOverall:")
-        lines.append(f"  Micro Precision: {baseline_metrics.micro_precision:.4f}")
-        lines.append(f"  Micro Recall:    {baseline_metrics.micro_recall:.4f}")
-        lines.append(f"  Macro Precision: {baseline_metrics.macro_precision:.4f}")
-        lines.append(f"  Macro Recall:    {baseline_metrics.macro_recall:.4f}")
+        lines.append(f"  Micro Precision:  {baseline_metrics.micro_precision:.4f}")
+        lines.append(f"  Micro Recall:     {baseline_metrics.micro_recall:.4f}")
+        lines.append(f"  Macro Precision:  {baseline_metrics.macro_precision:.4f}")
+        lines.append(f"  Macro Recall:     {baseline_metrics.macro_recall:.4f}")
+        lines.append(f"  Subset Accuracy:  {baseline_metrics.subset_accuracy:.4f}")
         lines.append("\nPer-Concept:")
         for concept, concept_metrics in baseline_metrics.per_concept.items():
             lines.append(
@@ -142,10 +146,11 @@ def format_metrics_display(
     lines.append(name.upper())
     lines.append("=" * 70)
     lines.append("\nOverall:")
-    lines.append(f"  Micro Precision: {metrics.micro_precision:.4f}")
-    lines.append(f"  Micro Recall:    {metrics.micro_recall:.4f}")
-    lines.append(f"  Macro Precision: {metrics.macro_precision:.4f}")
-    lines.append(f"  Macro Recall:    {metrics.macro_recall:.4f}")
+    lines.append(f"  Micro Precision:  {metrics.micro_precision:.4f}")
+    lines.append(f"  Micro Recall:     {metrics.micro_recall:.4f}")
+    lines.append(f"  Macro Precision:  {metrics.macro_precision:.4f}")
+    lines.append(f"  Macro Recall:     {metrics.macro_recall:.4f}")
+    lines.append(f"  Subset Accuracy:  {metrics.subset_accuracy:.4f}")
     lines.append("\nPer-Concept:")
     for concept, concept_metrics in metrics.per_concept.items():
         lines.append(
@@ -168,6 +173,11 @@ def format_metrics_display(
         lines.append(f"Probe Micro Recall:       {metrics.micro_recall:.1%}")
         recall_improvement = metrics.micro_recall / (baseline_metrics.micro_recall + 1e-10)
         lines.append(f"Improvement:              {recall_improvement:.1f}x")
+        lines.append("")
+        lines.append(f"Baseline Subset Accuracy: {baseline_metrics.subset_accuracy:.1%}")
+        lines.append(f"Probe Subset Accuracy:    {metrics.subset_accuracy:.1%}")
+        accuracy_improvement = metrics.subset_accuracy / (baseline_metrics.subset_accuracy + 1e-10)
+        lines.append(f"Improvement:              {accuracy_improvement:.1f}x")
 
     return "\n".join(lines)
 
@@ -249,12 +259,6 @@ def cli() -> None:
     help="Number of sample predictions to display",
 )
 @click.option(
-    "--batch-size",
-    default=32,
-    type=int,
-    help="Batch size for activation extraction",
-)
-@click.option(
     "--random-seed",
     default=42,
     type=int,
@@ -283,7 +287,6 @@ def evaluate(
     dataset_filename: str,
     dataset_revision: str | None,
     sample_size: int,
-    batch_size: int,
     random_seed: int,
     show_samples: bool,
     threshold: float,
@@ -324,21 +327,18 @@ def evaluate(
     print(f"Concepts: {', '.join(extractor.probe.concept_list)}")
 
     print("\nLoading evaluation dataset from HuggingFace Hub...")
-    positions, labels = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    labelled_positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
-    if len(positions) == 0:
-        print("No positions with validated concepts found!")
-        return
+    fens = [p.fen for p in labelled_positions]
+    # Extract validated concept names from positions
+    labels = [[c.name for c in p.concepts if c.validated_by] if p.concepts else [] for p in labelled_positions]
+    all_predictions_with_confidence = extractor.extract_concepts_with_confidence(fens)
 
-    all_fens = [p.fen for p in positions]
-    all_predictions_with_confidence = extractor.extract_concepts_with_confidence(all_fens)
-
-    # Show sample predictions if requested
     if show_samples:
-        n_samples = min(sample_size, len(positions))
+        n_samples = min(sample_size, len(labelled_positions))
         rng = np.random.RandomState(random_seed)
-        sample_indices = rng.choice(len(positions), size=n_samples, replace=False)
-        sample_fens = [all_fens[i] for i in sample_indices]
+        sample_indices = list[int](rng.choice(len(labelled_positions), size=n_samples, replace=False))
+        sample_fens = [fens[i] for i in sample_indices]
         sample_labels = [labels[i] for i in sample_indices]
         sample_predictions_with_confidence = [all_predictions_with_confidence[i] for i in sample_indices]
 
@@ -346,7 +346,6 @@ def evaluate(
         print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
         print(f"{'=' * 70}\n")
 
-        sample_correct = 0
         for pos, ground_truth, predicted_concepts in zip(
             sample_fens, sample_labels, sample_predictions_with_confidence, strict=True
         ):
@@ -354,7 +353,6 @@ def evaluate(
 
             above_threshold_extracted_concept = [c for c, score in predicted_concepts if score >= threshold]
 
-            # Check if prediction matches
             match_marker = "✓" if set(ground_truth) == set(above_threshold_extracted_concept) else "✗"
 
             gt_str = ", ".join(ground_truth) if ground_truth else "(none)"
@@ -363,27 +361,14 @@ def evaluate(
             print(f"Prediction:   {pred_str} {match_marker}")
             print()
 
-            if set(ground_truth) == set(above_threshold_extracted_concept):
-                sample_correct += 1
-
-        sample_accuracy = sample_correct / n_samples
-        print(f"{'=' * 70}")
-        print(f"Sample Exact Match Rate: {sample_accuracy:.1%} ({sample_correct}/{n_samples})")
-        print(f"{'=' * 70}\n")
-
-    # Calculate comprehensive metrics on full dataset
     print("\nCalculating comprehensive metrics on full dataset...")
-    print(f"Extracting activations for {len(positions)} positions...")
+    print(f"Extracting activations for {len(labelled_positions)} positions...")
 
-    # Convert predictions to binary matrices for metric calculation
     y_true, y_pred = binarize_predictions(
         all_predictions_with_confidence, labels, extractor.probe.concept_list, threshold
     )
-
-    # Calculate metrics
     metrics = calculate_multilabel_metrics(y_true, y_pred, extractor.probe.concept_list)
 
-    # Display formatted metrics
     print("\n" + format_metrics_display(metrics, "Concept Probe Evaluation"))
     print()
 

@@ -14,10 +14,6 @@ wheels/
 .env.local
 
 # data
-data/raw
-data/processed
+data
 
-# ML models and artifacts
-data/models/*.pt
-data/models/concept_probes/*.pkl
 .cache/

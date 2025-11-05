@@ -94,19 +94,23 @@ uv run python -m chess_sandbox.concept_extraction.labelling.lichess_export \
   --n-samples 64
 ```
 
-**Train ML concept probes:**
+**Train & evaluate ML concept extractor:**
 ```bash
 uv run python -m chess_sandbox.concept_extraction.model.train \
   --dataset-repo-id pilipolio/chess-positions-concepts \
-  --dataset-filename data.jsonl \
-  --dataset-revision test_fixture \
   --lc0-model-repo-id lczerolens/maia-1500 \
   --layer-name block3/conv2/relu \
   --mode multi-label \
-  --upload-to-hub \
+  --upload-to-hub --save-splits \
   --output-repo-id pilipolio/chess-positions-extractor \
+  --n-jobs 4 --verbose 1
   --output-revision test_fixture
 
+uv run python -m chess_sandbox.concept_extraction.model.evaluation evaluate \
+      --model-repo-id pilipolio/chess-positions-extractor \
+      --dataset-repo-id pilipolio/chess-positions-concepts \
+      --dataset-filename test.jsonl
+      --sample-size 10
 ```
 
 Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and strategic themes (passed pawn, outpost, weak square, zugzwang). See [docs/plans/concept-labelling-pipeline.md](docs/plans/concept-labelling-pipeline.md) for details.
@@ -204,7 +208,6 @@ Deploy the chess analysis endpoint as a serverless API using Modal:
 ```bash
 modal serve chess_sandbox/endpoints.py
 
-# Test endpoint
 curl "http://localhost:8000/analyze?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
 ```
 
@@ -218,6 +221,8 @@ curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen
 
 Automatic deployment with `modal deploy` on GitHub [releases action](.github/workflows/release.yml)
 ```
+curl "https://pilipolio--chess-analysis-analyze.modal.run?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
+
 curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
 ```
 
