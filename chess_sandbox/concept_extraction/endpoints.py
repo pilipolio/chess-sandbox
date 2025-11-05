@@ -24,15 +24,10 @@ class ConceptExtractionResponse(BaseModel):
 
 image = (
     modal.Image.debian_slim()
-    # .env(
-    #     {
-    #         "HF_CACHE_DIR": "/root/.cache/huggingface",
-    #         "HF_CONCEPT_EXTRACTOR_REPO_ID": settings.HF_CONCEPT_EXTRACTOR_REPO_ID,
-    #     }
-    # )
     .uv_sync(uv_project_dir="./", frozen=True)
     .uv_pip_install("fastapi[standard]")
     .add_local_python_source("chess_sandbox")
+    .add_local_file(".env.modal", "/root/.env")
 )
 
 app = modal.App(name="chess-concept-extraction", image=image)
@@ -47,28 +42,6 @@ def extract_concepts(
     fen: str,
     threshold: float = 0.1,
 ) -> ConceptExtractionResponse:
-    """
-    Extract chess concepts from a position with confidence scores.
-
-    Extracts chess concepts (pins, forks, sacrifices, etc.) from a position
-    using trained neural probe classifiers on Leela Chess Zero activations.
-    Returns only concepts above the specified probability threshold.
-
-    Args:
-        fen: Position in FEN notation (path parameter, required)
-        threshold: Probability threshold for filtering concepts (query parameter, default=0.1)
-
-    Returns:
-        ConceptExtractionResponse with concepts above threshold and their confidence scores
-
-    Raises:
-        ValueError: Invalid FEN notation
-        RuntimeError: Model loading or inference error
-
-    Example:
-        GET /position/{encoded_fen}/concepts?threshold=0.1
-        Where {encoded_fen} is the URL-encoded FEN string
-    """
     extractor = get_extractor()
     all_predictions = extractor.extract_concepts_with_confidence([fen])[0]
 
@@ -84,15 +57,6 @@ def extract_concepts(
 
 
 def get_extractor() -> ConceptExtractor:
-    """
-    Get or initialize the ConceptExtractor instance.
-
-    Lazy loads the extractor on first call, downloading models from HuggingFace Hub.
-    Subsequent calls return the cached instance. Uses configured default repo from settings.
-
-    Returns:
-        Initialized ConceptExtractor instance
-    """
     global _extractor
     if _extractor is None:
         model_repo_id = settings.HF_CONCEPT_EXTRACTOR_REPO_ID

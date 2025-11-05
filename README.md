@@ -172,7 +172,7 @@ Project scaffolding templated from [postmodern-python](https://github.com/carder
 - **Chess Library:** [python-chess](https://python-chess.readthedocs.io/)
 - **HTTP Client:** httpx (modern async/sync HTTP client)
 - **Testing:** respx (HTTP mocking for httpx)
-- **Modal Based Serverless deployment** See [docs/adrs/20251029-use-modal-for-serverless-endpoints.md](docs/adrs/20251029-use-modal-for-serverless-endpoints.md) for rationale.
+- **Modal Serverless Cloud** [modal.com](https://modal.com/docs) , see [docs/adrs/20251029-use-modal-for-serverless-endpoints.md](docs/adrs/20251029-use-modal-for-serverless-endpoints.md) for rationale.
 
 ## Development
 
@@ -193,9 +193,9 @@ uv run poe test    # pytest (unit tests)
 
 See `CLAUDE.md` for AI agent instructions and `pyproject.toml` for tool configurations.
 
-## Modal API Deployment
+## Modal Web Endpoints Deployment
 
-Deploy the chess analysis endpoint as a serverless API using Modal:
+Python functions are exposed as serverless http (webendpoint)[https://modal.com/docs/guide/webhooks].
 
 ### Prerequisites
 
@@ -203,29 +203,28 @@ Deploy the chess analysis endpoint as a serverless API using Modal:
 2. Generate API token at https://modal.com/settings/tokens
 3. Authenticate: `modal token set --token-id <ID> --token-secret <SECRET>`
 
-### Local Testing
+### Ephemeral Deployment
 
 ```bash
 modal serve chess_sandbox/endpoints.py
 
-curl "http://localhost:8000/analyze?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
+curl "https://pilipolio--chess-analysis-analyze-dev.modal.run?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
 ```
 
 ```bash
-modal serve chess_sandbox/endpoints.py
+modal serve chess_sandbox/concept_extraction/endpoints.py
 
-curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
+curl "https://pilipolio--chess-concept-extraction-extract-concepts-dev.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
 ```
 
 ### Production Deployment
 
-Automatic deployment with `modal deploy` on GitHub [releases action](.github/workflows/release.yml)
+Deployment happens with `modal deploy` on GitHub [releases action](.github/workflows/release.yml)
 ```
 curl "https://pilipolio--chess-analysis-analyze.modal.run?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
 
 curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
 ```
-
 
 ## Integration tests
 

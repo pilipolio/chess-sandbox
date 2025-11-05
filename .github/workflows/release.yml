@@ -22,8 +22,6 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: uv run modal deploy chess_sandbox/endpoints.py
-      - name: Configure Modal deployment environment
-        run: cp .env.modal .env
       - name: Deploy concept extraction to Modal
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
