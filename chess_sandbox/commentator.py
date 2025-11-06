@@ -12,6 +12,7 @@ from textwrap import dedent
 from typing import Any
 
 import chess
+import chess.engine
 from openai import OpenAI
 from openai.types.shared.reasoning_effort import ReasoningEffort
 from openai.types.shared_params.reasoning import Reasoning
@@ -78,35 +79,43 @@ class Commentator:
 
     def analyze(self, board: chess.Board) -> ChessPositionExplanationWithInput:
         config = EngineConfig.stockfish(num_lines=self.engine_num_lines, depth=self.engine_depth)
-        analysis_results = analyze_variations(board, config)
-        position_analysis = PositionAnalysis(
-            fen=board.fen(), next_move=None, principal_variations=analysis_results, human_moves=None
-        )
-        analysis_text = position_analysis.format_as_text()
+        engine = config.instantiate()
 
-        prompt = self.PROMPT.format(analysis_text=analysis_text)
+        try:
+            limit = chess.engine.Limit(depth=self.engine_depth)
+            analysis_results = analyze_variations(board, engine, self.engine_num_lines, limit)
+            position_analysis = PositionAnalysis(
+                fen=board.fen(), next_move=None, principal_variations=analysis_results, human_moves=None
+            )
+            analysis_text = position_analysis.format_as_text()
 
-        response = self.client.responses.parse(
-            model=self.llm_model,
-            input=prompt,
-            text_format=ChessPositionExplanation,
-            reasoning=Reasoning(effort=self.llm_reasoning_effort),
-        )
+            prompt = self.PROMPT.format(analysis_text=analysis_text)
 
-        # When using reasoning models, the first item is a ReasoningItem, followed by the message
-        message = next((item for item in response.output if item.type == "message"), None)  # type: ignore[attr-defined]
+            response = self.client.responses.parse(
+                model=self.llm_model,
+                input=prompt,
+                text_format=ChessPositionExplanation,
+                reasoning=Reasoning(effort=self.llm_reasoning_effort),
+            )
 
-        if not message:
-            raise Exception("No message found in response output")
+            # When using reasoning models, the first item is a ReasoningItem, followed by the message
+            message = next((item for item in response.output if item.type == "message"), None)  # type: ignore[attr-defined]
 
-        text = message.content[0]  # type: ignore[attr-defined]
-        assert text.type == "output_text", "Unexpected content type"  # type: ignore[attr-defined]
+            if not message:
+                raise Exception("No message found in response output")
 
-        if not text.parsed:  # type: ignore[attr-defined]
-            raise Exception("Could not parse LLM response into CommentaryOutput")
+            text = message.content[0]  # type: ignore[attr-defined]
+            assert text.type == "output_text", "Unexpected content type"  # type: ignore[attr-defined]
 
-        parsed_data: ChessPositionExplanation = text.parsed  # type: ignore[attr-defined]
-        return ChessPositionExplanationWithInput(fen=board.fen(), full_input=analysis_text, **parsed_data.model_dump())
+            if not text.parsed:  # type: ignore[attr-defined]
+                raise Exception("Could not parse LLM response into CommentaryOutput")
+
+            parsed_data: ChessPositionExplanation = text.parsed  # type: ignore[attr-defined]
+            return ChessPositionExplanationWithInput(
+                fen=board.fen(), full_input=analysis_text, **parsed_data.model_dump()
+            )
+        finally:
+            engine.quit()
 
 
 def print_explanation(explanation: ChessPositionExplanationWithInput):
