@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import chess
+import chess.engine
 import click
 from pydantic import BaseModel, computed_field
 
@@ -64,20 +65,22 @@ class PositionAnalysis(BaseModel):
 
 def analyze_position(
     fen: str,
+    stockfish_engine: chess.engine.SimpleEngine,
+    depth: int,
+    num_lines: int,
     next_move: str | None = None,
-    depth: int = 20,
-    num_lines: int = 5,
-    with_maia: bool = False,
+    maia_engine: chess.engine.SimpleEngine | None = None,
     maia_nodes: int = 1,
 ) -> PositionAnalysis:
     """Analyze a chess position given in FEN notation.
 
     Args:
         fen: Position in FEN notation
+        stockfish_engine: Pre-instantiated Stockfish engine instance
+        depth: Analysis depth for Stockfish
+        num_lines: Number of lines to analyze
         next_move: Optional next move in SAN notation to analyze after making it
-        depth: Analysis depth for Stockfish (default: 20)
-        num_lines: Number of lines to analyze (default: 5)
-        with_maia: Also analyze with Lc0/Maia for human-like evaluation
+        maia_engine: Optional pre-instantiated Maia engine instance for human-like evaluation
         maia_nodes: Number of nodes for Lc0/Maia analysis (default: 1)
 
     Returns:
@@ -88,17 +91,18 @@ def analyze_position(
     if next_move:
         board.push_san(next_move)
 
-    stockfish_variations = analyze_variations(board, config=EngineConfig.stockfish(num_lines=num_lines, depth=depth))
+    stockfish_limit = chess.engine.Limit(depth=depth)
+    stockfish_variations = analyze_variations(board, stockfish_engine, num_lines, stockfish_limit)
 
     human_moves = None
-    if with_maia:
-        maia_config = EngineConfig.maia(num_lines=num_lines, nodes=maia_nodes)
-        maia_variations = analyze_variations(board, config=maia_config)
+    if maia_engine is not None:
+        maia_limit = chess.engine.Limit(nodes=maia_nodes)
+        maia_variations = analyze_variations(board, maia_engine, num_lines, maia_limit)
         candidate_moves = [board.parse_san(pv.san_moves[0]) for pv in maia_variations if pv.san_moves]
 
         # Maia variations from multipv analysis have all the same score, so we need to analyze each move individually
         # TODO: understand if that's possible to return policy network probabilities instead of pseudo eval
-        human_moves = analyze_moves(board, maia_config, candidate_moves)
+        human_moves = analyze_moves(board, maia_engine, candidate_moves, maia_limit)
 
     return PositionAnalysis(
         fen=fen,
@@ -117,8 +121,29 @@ def analyze_position(
 @click.option("--maia-nodes", default=1, help="Number of nodes for Lc0/Maia analysis (default: 1)")
 def cli(fen: str, next_move: str | None, depth: int, num_lines: int, with_maia: bool, maia_nodes: int):
     """Analyze a chess position given in FEN notation."""
-    result = analyze_position(fen, next_move, depth, num_lines, with_maia, maia_nodes)
-    print(result.formatted_text)
+    stockfish_config = EngineConfig.stockfish(num_lines=num_lines, depth=depth)
+    stockfish_engine = stockfish_config.instantiate()
+
+    maia_engine = None
+    if with_maia:
+        maia_config = EngineConfig.maia(num_lines=num_lines, nodes=maia_nodes)
+        maia_engine = maia_config.instantiate()
+
+    try:
+        result = analyze_position(
+            fen=fen,
+            stockfish_engine=stockfish_engine,
+            depth=depth,
+            num_lines=num_lines,
+            next_move=next_move,
+            maia_engine=maia_engine,
+            maia_nodes=maia_nodes,
+        )
+        print(result.formatted_text)
+    finally:
+        stockfish_engine.quit()
+        if maia_engine is not None:
+            maia_engine.quit()
 
 
 if __name__ == "__main__":

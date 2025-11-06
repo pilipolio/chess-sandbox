@@ -54,6 +54,19 @@ class EngineConfig(BaseModel):
             limit=chess.engine.Limit(nodes=nodes),
         )
 
+    def instantiate(self) -> chess.engine.SimpleEngine:
+        """Instantiate and configure the chess engine.
+
+        Returns:
+            Configured SimpleEngine instance ready for analysis
+        """
+        engine = chess.engine.SimpleEngine.popen_uci(self.engine_path, stderr=subprocess.DEVNULL)
+
+        if self.weights_path is not None:
+            engine.configure({"WeightsFile": self.weights_path, "UCI_ShowWDL": True})
+
+        return engine
+
 
 def validate_fen(fen: str) -> None:
     """Validate FEN notation.
@@ -95,7 +108,12 @@ def info_to_pv(info: InfoDict, board: chess.Board) -> PrincipalVariation | None:
     return PrincipalVariation(score=score_value / 100 if score_value is not None else None, san_moves=san_moves)
 
 
-def analyze_moves(board: chess.Board, config: EngineConfig, moves: list[chess.Move]) -> list[CandidateMove]:
+def analyze_moves(
+    board: chess.Board,
+    engine: chess.engine.SimpleEngine,
+    moves: list[chess.Move],
+    limit: chess.engine.Limit,
+) -> list[CandidateMove]:
     """Analyze specific candidate moves by evaluating positions after each move.
 
     For each move, makes the move and analyzes the resulting position with multipv=1,
@@ -103,8 +121,9 @@ def analyze_moves(board: chess.Board, config: EngineConfig, moves: list[chess.Mo
 
     Args:
         board: Current position
-        config: Engine configuration
+        engine: Pre-instantiated engine instance
         moves: List of candidate moves to evaluate
+        limit: Analysis time/depth limit
 
     Returns:
         List of CandidateMove objects with move and score
@@ -112,17 +131,13 @@ def analyze_moves(board: chess.Board, config: EngineConfig, moves: list[chess.Mo
     if len(moves) == 0:
         return []
 
-    engine = chess.engine.SimpleEngine.popen_uci(config.engine_path, stderr=subprocess.DEVNULL)
-    if config.weights_path is not None:
-        engine.configure({"WeightsFile": config.weights_path, "UCI_ShowWDL": True})
-
     candidate_moves: list[CandidateMove] = []
 
     for move in moves:
         board_after = board.copy()
         board_after.push(move)
 
-        result = engine.analyse(board_after, limit=config.limit)
+        result = engine.analyse(board_after, limit=limit)
         score = result.get("score")
 
         score_value = None
@@ -133,29 +148,30 @@ def analyze_moves(board: chess.Board, config: EngineConfig, moves: list[chess.Mo
 
         candidate_moves.append(CandidateMove(san_move=board.san(move), score=score_value))
 
-    engine.quit()
     return candidate_moves
 
 
-def analyze_variations(board: chess.Board, config: EngineConfig) -> list[PrincipalVariation]:
-    """Analyze position with configured engine, returning top principal variations.
+def analyze_variations(
+    board: chess.Board,
+    engine: chess.engine.SimpleEngine,
+    num_lines: int,
+    limit: chess.engine.Limit,
+) -> list[PrincipalVariation]:
+    """Analyze position with engine, returning top principal variations.
 
     Args:
         board: Chess board position to analyze
-        config: Engine configuration
+        engine: Pre-instantiated engine instance
+        num_lines: Number of principal variations to return
+        limit: Analysis time/depth limit
 
     Returns:
         List of PrincipalVariation objects with scores and move sequences
     """
-    if config.num_lines == 0:
+    if num_lines == 0:
         return []
 
-    engine = chess.engine.SimpleEngine.popen_uci(config.engine_path, stderr=subprocess.DEVNULL)
-
-    if config.weights_path is not None:
-        engine.configure({"WeightsFile": config.weights_path, "UCI_ShowWDL": True})
-
-    analysis_results = engine.analyse(board, config.limit, multipv=config.num_lines)
+    analysis_results = engine.analyse(board, limit, multipv=num_lines)
 
     principal_variations: list[PrincipalVariation] = []
     for info in analysis_results:
@@ -163,5 +179,4 @@ def analyze_variations(board: chess.Board, config: EngineConfig) -> list[Princip
         if pv is not None:
             principal_variations.append(pv)
 
-    engine.quit()
     return principal_variations
