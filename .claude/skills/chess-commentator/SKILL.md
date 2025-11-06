@@ -17,6 +17,19 @@ This skill automatically triggers when:
 - User asks about best moves in a specific position
 - User requests position evaluation or commentary
 
+## Dependencies
+
+The SVG visualization feature requires the python-chess library:
+
+```bash
+pip install chess==1.11.2
+```
+
+Or with uv:
+```bash
+uv add chess==1.11.2
+```
+
 ## Core Workflow
 
 ### 1. Query Production Modal Endpoints (Recommended)
@@ -37,9 +50,14 @@ With custom threshold for concept extraction:
 python3 scripts/query_analysis.py "r4n1k/4b1pp/1P1p1p2/p2Rp3/2P3P1/4B3/1P3P1P/R5K1 b - - 2 31" --threshold 0.15
 ```
 
-**Output:** Returns JSON from both endpoints:
-- Position analysis with principal variations and evaluations
-- Concept extraction with confidence scores above threshold (default: 0.1)
+To generate an SVG visualization with analysis arrows:
+```bash
+python3 scripts/query_analysis.py "<FEN>" --output position.svg
+```
+
+**Output:**
+- JSON from both endpoints (position analysis and concept extraction)
+- Optional SVG file with chess board showing arrows for top 5 moves (rainbow colored: blue, purple, orange, green, red)
 
 ### 2. Alternative: Local Position Analysis
 
@@ -103,10 +121,18 @@ Each line includes:
 
 When analyzing positions, provide **succinct commentary** that includes:
 
-### 0. ASCII representation of the position
-As returned by the tool
+### 0. Position Visualization
 
-### 0.5. Lichess Analysis Link
+Generate an SVG visualization when needed:
+```bash
+python3 scripts/query_analysis.py "<FEN>" --output position.svg
+```
+
+The SVG can be displayed in Claude's artifact viewer and shows:
+- Current board position
+- Arrows for the top 5 moves color-coded by strength (blue = best, then purple, orange, green, red)
+
+### 1. Lichess Analysis Link
 Provide a clickable link to analyze the position on Lichess:
 `https://lichess.org/analysis/<FEN>`
 
@@ -114,20 +140,20 @@ Replace spaces in the FEN with underscores for the URL. Example:
 `https://lichess.org/analysis/r4n1k/4b1pp/1P1p1p2/p2Rp3/2P3P1/4B3/1P3P1P/R5K1_b_-_-_2_31`
 
 
-### 1. Position Assessment
+### 2. Position Assessment
 Briefly state the evaluation (White better / Black better / Equal / Winning / Losing)
 
-### 2. Best Move Explanation
+### 3. Best Move Explanation
 - Identify the top engine move
 - Explain **why** it's best in 1-2 sentences
 - Focus on the move's purpose and what it accomplishes
 
-### 3. Key Variations
+### 4. Key Variations
 - Present the main line(s) with brief annotations
 - Highlight critical moments or decision points
 - Use chess notation with explanatory comments
 
-### 4. Thematic Insights
+### 5. Thematic Insights
 Identify relevant tactical or strategic themes present in the position:
 - Tactical motifs (forks, pins, discoveries, etc.)
 - Strategic concepts (weak squares, pawn structure, piece activity, etc.)
@@ -135,7 +161,7 @@ Identify relevant tactical or strategic themes present in the position:
 
 **Reference:** Load `references/chess_themes.md` when needed for comprehensive theme identification.
 
-### 5. Detected Concepts (Optional)
+### 6. Detected Concepts (Optional)
 When concept extraction is used, present AI-detected concepts after thematic insights:
 - List concepts with confidence ≥ 10%
 - Sort by confidence (highest first)
@@ -160,6 +186,10 @@ When concept extraction is used, present AI-detected concepts after thematic ins
 ## Example Analysis Format
 
 ```
+[SVG visualization generated with --output flag, displaying board with colored arrows]
+
+Lichess Analysis: https://lichess.org/analysis/rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR_b_KQkq_e3_0_1
+
 Position Assessment: White has a slight advantage (+0.35)
 
 Best Move: Nf3
