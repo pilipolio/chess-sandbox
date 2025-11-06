@@ -19,37 +19,61 @@ This skill automatically triggers when:
 
 ## Core Workflow
 
-### 1. Analyzing a Position
+### 1. Query Production Modal Endpoints (Recommended)
 
-To analyze a chess position from a FEN string:
+Use the provided script to query both position analysis and concept extraction from production endpoints:
 
 ```bash
-uv run python -m chess_sandbox.engine.analysis "<FEN>"
+python3 scripts/query_analysis.py "<FEN>"
 ```
 
 Example:
 ```bash
-uv run python -m chess_sandbox.engine.analysis "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+python3 scripts/query_analysis.py "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
 ```
 
-### 2. Analyzing After a Specific Move
+With custom threshold for concept extraction:
+```bash
+python3 scripts/query_analysis.py "r4n1k/4b1pp/1P1p1p2/p2Rp3/2P3P1/4B3/1P3P1P/R5K1 b - - 2 31" --threshold 0.15
+```
 
-To analyze a position after a specific move is played:
+**Output:** Returns JSON from both endpoints:
+- Position analysis with principal variations and evaluations
+- Concept extraction with confidence scores above threshold (default: 0.1)
+
+### 2. Alternative: Local Position Analysis
+
+To analyze a chess position locally using Stockfish:
 
 ```bash
-uv run python -m chess_sandbox.engine.analysis "<FEN>" --next-move <MOVE_IN_SAN>
+uv run python -m chess_sandbox.engine.position_analysis "<FEN>"
 ```
 
 Example:
 ```bash
-uv run python -m chess_sandbox.engine.analysis "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58" --next-move Kb5
+uv run python -m chess_sandbox.engine.position_analysis "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+```
+
+To analyze after a specific move is played:
+
+```bash
+uv run python -m chess_sandbox.engine.position_analysis "<FEN>" --next-move <MOVE_IN_SAN>
+```
+
+Example:
+```bash
+uv run python -m chess_sandbox.engine.position_analysis "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58" --next-move Kb5
 ```
 
 **Important:** The move must be in Standard Algebraic Notation (SAN), e.g., "Nf3", "e4", "O-O", "Bxe5"
 
-### 3. Extracting Concepts from a Position
+Optional parameters:
+- `--depth <NUMBER>` - Analysis depth (default: 20)
+- `--num-lines <NUMBER>` - Number of candidate moves to analyze (default: 5)
 
-To extract AI-detected chess concepts with confidence scores:
+### 3. Alternative: Local Concept Extraction
+
+To extract AI-detected chess concepts locally:
 
 ```bash
 uv run python -m chess_sandbox.concept_extraction.model.inference predict "<FEN>"
@@ -64,7 +88,7 @@ uv run python -m chess_sandbox.concept_extraction.model.inference predict "rnbqk
 
 ## Interpreting Engine Output
 
-The engine_analysis module outputs:
+The position_analysis module outputs:
 1. **Position diagram** - Visual representation of the board
 2. **FEN** - Position in FEN notation
 3. **Turn** - Who is to move
@@ -80,7 +104,15 @@ Each line includes:
 When analyzing positions, provide **succinct commentary** that includes:
 
 ### 0. ASCII representation of the position
-As returned by the tool 
+As returned by the tool
+
+### 0.5. Lichess Analysis Link
+Provide a clickable link to analyze the position on Lichess:
+`https://lichess.org/analysis/<FEN>`
+
+Replace spaces in the FEN with underscores for the URL. Example:
+`https://lichess.org/analysis/r4n1k/4b1pp/1P1p1p2/p2Rp3/2P3P1/4B3/1P3P1P/R5K1_b_-_-_2_31`
+
 
 ### 1. Position Assessment
 Briefly state the evaluation (White better / Black better / Equal / Winning / Losing)
@@ -146,18 +178,6 @@ Detected Concepts:
 - Central control (72.1%)
 - King safety preparation (45.6%)
 - Piece activity (23.4%)
-```
-
-## Additional Options
-
-The engine_analysis module accepts optional parameters:
-- `--depth <NUMBER>` - Analysis depth (default: 20)
-- `--num-lines <NUMBER>` - Number of candidate moves to analyze (default: 5)
-- `--stockfish-path <PATH>` - Custom Stockfish binary location
-
-Example:
-```bash
-uv run python -m chess_sandbox.engine.analysis "<FEN>" --depth 25 --num-lines 3
 ```
 
 ## Resources
