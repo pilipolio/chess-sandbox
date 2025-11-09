@@ -7,7 +7,6 @@ models and probes from HuggingFace Hub.
 
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 from chess_sandbox.concept_extraction.model.inference import predict
@@ -16,12 +15,11 @@ from chess_sandbox.concept_extraction.model.inference import predict
 TEST_LC0_MODEL_REPO = "lczerolens/maia-1500"
 TEST_LC0_MODEL_FILENAME = "model.onnx"
 TEST_MODEL_REPO = "pilipolio/chess-positions-extractor"
-TEST_MODEL_REVISION = "main"
+TEST_MODEL_REVISION = "0e35944267e24ddf318296ac358cfd2215087486"
 
 TEST_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 
-@pytest.mark.integration
 def test_predict_single_fen(tmp_path: Path) -> None:
     """
     Test the predict command with a single FEN position using HuggingFace Hub.
