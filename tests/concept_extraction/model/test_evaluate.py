@@ -9,11 +9,13 @@ from click.testing import CliRunner
 
 from chess_sandbox.concept_extraction.model.evaluation import cli
 
-# HuggingFace references for testing
 TEST_MODEL_REPO = "pilipolio/chess-positions-extractor"
+TEST_MODEL_REVISION = "0e35944267e24ddf318296ac358cfd2215087486"
 TEST_DATASET_REPO = "pilipolio/chess-positions-concepts"
 TEST_DATASET_FILENAME = "data.jsonl"
 TEST_DATASET_REVISION = "test_fixture"
+TEST_LC0_MODEL_REPO = "lczerolens/maia-1500"
+TEST_LC0_MODEL_FILENAME = "model.onnx"
 
 
 def test_evaluate_cli_with_sample_predictions() -> None:
@@ -31,6 +33,12 @@ def test_evaluate_cli_with_sample_predictions() -> None:
         cli,
         [
             "evaluate",
+            "--lc0-repo-id",
+            TEST_LC0_MODEL_REPO,
+            "--lc0-filename",
+            TEST_LC0_MODEL_FILENAME,
+            "--revision",
+            TEST_MODEL_REVISION,
             "--model-repo-id",
             TEST_MODEL_REPO,
             "--dataset-repo-id",
