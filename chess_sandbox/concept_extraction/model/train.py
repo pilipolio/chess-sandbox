@@ -19,6 +19,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
+from ...git import get_commit_sha
 from .dataset import LabelledPosition, load_dataset_from_hf, rebalance_positions, split_positions
 from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
@@ -531,6 +532,10 @@ def train(
             "filename": dataset_filename,
             "revision": dataset_revision,
             "hash": hashlib.sha256(dataset_repo_id.encode()).hexdigest(),
+        },
+        "training_code": {
+            "repo": "pilipolio/chess-sandbox",
+            "commit": get_commit_sha(),
         },
     }
 

@@ -28,5 +28,8 @@ class Settings(BaseSettings):
     HF_CONCEPT_EXTRACTOR_REPO_ID: str = "pilipolio/chess-positions-extractor"
     HF_CONCEPT_EXTRACTOR_REVISION: str = "main"
 
+    # Git settings
+    GIT_COMMIT: str = ""
+
 
 settings = Settings()
