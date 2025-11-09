@@ -40,35 +40,7 @@ def generate_svg(fen: str, analysis_result: dict, output_path: str) -> None:
     """
     board = chess.Board(fen)
 
-    # Rainbow spectrum colors for lines 1-5
-    colors = [
-        "#0000ffcc",  # Blue
-        "#9933ffcc",  # Purple
-        "#ff8800cc",  # Orange
-        "#00cc00cc",  # Green
-        "#ff0000cc",  # Red
-    ]
-
-    arrows = []
-
-    # Extract arrows from analysis lines
-    if "lines" in analysis_result:
-        for idx, line in enumerate(analysis_result["lines"][:5]):  # Top 5 lines
-            if "moves" in line and line["moves"]:
-                # Parse the first move in UCI notation (e.g., "e2e4")
-                first_move_uci = line["moves"][0]
-                try:
-                    move = chess.Move.from_uci(first_move_uci)
-                    color = colors[idx % len(colors)]
-                    arrows.append(chess.svg.Arrow(move.from_square, move.to_square, color=color))
-                except (ValueError, IndexError):
-                    # Skip invalid moves
-                    continue
-
-    # Generate SVG
-    svg_content = chess.svg.board(board, arrows=arrows, size=400)
-
-    # Write to file
+    svg_content = chess.svg.board(board, arrows=[], size=400)
     with open(output_path, "w") as f:
         f.write(svg_content)
 
@@ -114,7 +86,6 @@ def main():
     except Exception as e:
         print(f"Error querying concept extraction: {e}")
 
-    # Generate SVG if output path is provided
     if args.output and analysis:
         print()
         print("=" * 70)

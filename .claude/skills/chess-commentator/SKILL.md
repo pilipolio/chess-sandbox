@@ -17,27 +17,23 @@ This skill automatically triggers when:
 - User asks about best moves in a specific position
 - User requests position evaluation or commentary
 
-## Dependencies
 
-The SVG visualization feature requires the python-chess library:
+## Core Workflow
+
+### 0. Install Python dependencies (Only once at start up)
+
+The SVG visualization feature requires the python-chess library and should be installed as the 1st step.
 
 ```bash
 pip install chess==1.11.2
 ```
 
-Or with uv:
-```bash
-uv add chess==1.11.2
-```
+### 1. Query endpoints (Recommended)
 
-## Core Workflow
-
-### 1. Query Production Modal Endpoints (Recommended)
-
-Use the provided script to query both position analysis and concept extraction from production endpoints:
+Use the provided script to retrieve position analysis, concept extraction and SVG/asci representations of the board as a Claude Artefact:
 
 ```bash
-python3 scripts/query_analysis.py "<FEN>"
+python3 scripts/query_analysis.py "<FEN>" --output position.svg
 ```
 
 Example:
@@ -45,92 +41,20 @@ Example:
 python3 scripts/query_analysis.py "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
 ```
 
-With custom threshold for concept extraction:
-```bash
-python3 scripts/query_analysis.py "r4n1k/4b1pp/1P1p1p2/p2Rp3/2P3P1/4B3/1P3P1P/R5K1 b - - 2 31" --threshold 0.15
-```
+### 2. Interpreting Script Output
 
-To generate an SVG visualization with analysis arrows:
-```bash
-python3 scripts/query_analysis.py "<FEN>" --output position.svg
-```
-
-**Output:**
-- JSON from both endpoints (position analysis and concept extraction)
-- Optional SVG file with chess board showing arrows for top 5 moves (rainbow colored: blue, purple, orange, green, red)
-
-### 2. Alternative: Local Position Analysis
-
-To analyze a chess position locally using Stockfish:
-
-```bash
-uv run python -m chess_sandbox.engine.position_analysis "<FEN>"
-```
-
-Example:
-```bash
-uv run python -m chess_sandbox.engine.position_analysis "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
-```
-
-To analyze after a specific move is played:
-
-```bash
-uv run python -m chess_sandbox.engine.position_analysis "<FEN>" --next-move <MOVE_IN_SAN>
-```
-
-Example:
-```bash
-uv run python -m chess_sandbox.engine.position_analysis "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58" --next-move Kb5
-```
-
-**Important:** The move must be in Standard Algebraic Notation (SAN), e.g., "Nf3", "e4", "O-O", "Bxe5"
-
-Optional parameters:
-- `--depth <NUMBER>` - Analysis depth (default: 20)
-- `--num-lines <NUMBER>` - Number of candidate moves to analyze (default: 5)
-
-### 3. Alternative: Local Concept Extraction
-
-To extract AI-detected chess concepts locally:
-
-```bash
-uv run python -m chess_sandbox.concept_extraction.model.inference predict "<FEN>"
-```
-
-Example:
-```bash
-uv run python -m chess_sandbox.concept_extraction.model.inference predict "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
-```
-
-**Output:** Concepts sorted by confidence descending, showing all concepts above 10% confidence (default threshold).
-
-## Interpreting Engine Output
-
-The position_analysis module outputs:
+The script outputs:
 1. **Position diagram** - Visual representation of the board
 2. **FEN** - Position in FEN notation
 3. **Turn** - Who is to move
-4. **Top engine lines** - Multiple candidate moves with evaluations
+4. **Engine evaluation and principal lines** - Optionally, the position evaluation in pawns (+positive = White better, -negative = Black better) and sequence of moves in SAN notation
+5. **Extracted Concepts** - Optionnaly, key concepts extracted 
 
-Each line includes:
-- **Depth** - How deeply the engine calculated
-- **Eval** - Position evaluation in pawns (+positive = White better, -negative = Black better)
-- **Moves** - The sequence of moves in SAN notation
+### 3. Providing Commentary
 
-## Providing Commentary
+Start displaying the board, using Claude's artifact viewer if available.
 
-When analyzing positions, provide **succinct commentary** that includes:
-
-### 0. Position Visualization
-
-Generate an SVG visualization when needed:
-```bash
-python3 scripts/query_analysis.py "<FEN>" --output position.svg
-```
-
-The SVG can be displayed in Claude's artifact viewer and shows:
-- Current board position
-- Arrows for the top 5 moves color-coded by strength (blue = best, then purple, orange, green, red)
+Provide **succinct commentary** that includes:
 
 ### 1. Lichess Analysis Link
 Provide a clickable link to analyze the position on Lichess:
@@ -139,30 +63,30 @@ Provide a clickable link to analyze the position on Lichess:
 Replace spaces in the FEN with underscores for the URL. Example:
 `https://lichess.org/analysis/r4n1k/4b1pp/1P1p1p2/p2Rp3/2P3P1/4B3/1P3P1P/R5K1_b_-_-_2_31`
 
+### 2. Thematic Insights
+If relevant, highlight the key tactical or strategic themes present in the position, grounded in the extracted concepts and their scores, when available:
+- Tactical motifs (forks, pins, discoveries, etc.)
+- Strategic concepts (weak squares, pawn structure, piece activity, etc.)
+- Critical evaluation factors (king safety, material imbalance, initiative, etc.)
 
 ### 2. Position Assessment
 Briefly state the evaluation (White better / Black better / Equal / Winning / Losing)
 
 ### 3. Best Move Explanation
-- Identify the top engine move
+- Identify the best move, using the engine lines if available
 - Explain **why** it's best in 1-2 sentences
-- Focus on the move's purpose and what it accomplishes
+- Focus on the move's purpose, what it accomplishes, grounded in the position's thematic insights highlighted before
 
 ### 4. Key Variations
 - Present the main line(s) with brief annotations
-- Highlight critical moments or decision points
+- Highlight critical moments or decision points, again grounded in the position's thematic insights highlighted before when relevant
 - Use chess notation with explanatory comments
 
-### 5. Thematic Insights
-Identify relevant tactical or strategic themes present in the position:
-- Tactical motifs (forks, pins, discoveries, etc.)
-- Strategic concepts (weak squares, pawn structure, piece activity, etc.)
-- Critical evaluation factors (king safety, material imbalance, initiative, etc.)
 
 **Reference:** Load `references/chess_themes.md` when needed for comprehensive theme identification.
 
 ### 6. Detected Concepts (Optional)
-When concept extraction is used, present AI-detected concepts after thematic insights:
+When concept extraction is used, present the full extracted concepts after thematic insights:
 - List concepts with confidence ≥ 10%
 - Sort by confidence (highest first)
 - Format: "Concept name (XX.X%)"
