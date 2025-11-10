@@ -488,7 +488,7 @@ def train(
     print("Model loaded successfully!")
 
     print("\nLoading training data from HuggingFace Hub...")
-    positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)[:10000]
+    positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
     print("\nSplitting dataset...")
     indices = np.arange(len(positions))
