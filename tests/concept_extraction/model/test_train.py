@@ -73,4 +73,5 @@ def test_e2e_training_and_inference_pipeline(
     assert "base_model:" in readme_content, "Model card missing base_model field in YAML"
     assert "model-index:" in readme_content, "Model card missing model-index for Papers with Code"
     assert "exact_match" in readme_content.lower(), "Model card missing exact_match metric"
-    assert "hamming_loss" in readme_content.lower(), "Model card missing hamming_loss metric"
+    assert "micro_precision" in readme_content.lower(), "Model card missing micro_precision metric"
+    assert "micro_recall" in readme_content.lower(), "Model card missing micro_recall metric"

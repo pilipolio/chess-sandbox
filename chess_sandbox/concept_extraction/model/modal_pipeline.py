@@ -19,7 +19,7 @@ app = modal.App(name="chess-concept-training", image=image)
 @app.function(  # type: ignore
     timeout=7200,  # 2 hours
     secrets=[modal.Secret.from_name("huggingface-read-write-secret")],  # type: ignore
-    gpu=None,
+    cpu=8.0,
     env={"GIT_COMMIT": get_commit_sha()},
 )
 def train(*arglist: str):

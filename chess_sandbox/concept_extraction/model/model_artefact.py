@@ -234,27 +234,43 @@ class ModelTrainingOutput:
         if not probe_metrics:
             return []
 
-        results = [
-            EvalResult(
-                task_type="tabular-classification",
-                dataset_type=dataset_type,
-                dataset_name="Chess Positions with Concepts",
-                dataset_revision=dataset_revision,
-                metric_type="exact_match",
-                metric_value=probe_metrics.get("exact_match", 0),
-            ),
-            EvalResult(
-                task_type="tabular-classification",
-                dataset_type=dataset_type,
-                dataset_name="Chess Positions with Concepts",
-                dataset_revision=dataset_revision,
-                metric_type="hamming_loss",
-                metric_value=probe_metrics.get("hamming_loss", 0),
-            ),
+        results = []
+
+        # Core metrics (always included)
+        metric_mappings = [
+            ("exact_match", "subset_accuracy"),  # HF standard name for subset accuracy
+            ("micro_precision", "micro_precision"),
+            ("micro_recall", "micro_recall"),
+            ("macro_precision", "macro_precision"),
+            ("macro_recall", "macro_recall"),
         ]
 
-        # TODO: Add micro/macro averages if computed during training
-        # Would need: probe_metrics["micro_precision"], probe_metrics["micro_recall"], etc.
+        for metric_name, probe_key in metric_mappings:
+            if probe_key in probe_metrics:
+                results.append(
+                    EvalResult(
+                        task_type="tabular-classification",
+                        dataset_type=dataset_type,
+                        dataset_name="Chess Positions with Concepts",
+                        dataset_revision=dataset_revision,
+                        metric_type=metric_name,
+                        metric_value=probe_metrics[probe_key],
+                    )
+                )
+
+        # Optional AUC metrics (only if available)
+        for auc_metric in ["micro_auc", "macro_auc"]:
+            if auc_metric in probe_metrics:
+                results.append(
+                    EvalResult(
+                        task_type="tabular-classification",
+                        dataset_type=dataset_type,
+                        dataset_name="Chess Positions with Concepts",
+                        dataset_revision=dataset_revision,
+                        metric_type=auc_metric,
+                        metric_value=probe_metrics[auc_metric],
+                    )
+                )
 
         return results
 
@@ -263,11 +279,21 @@ class ModelTrainingOutput:
         # Extract provenance info
         datasets = []
         base_model = None
+        dataset_repo_id = None
+        github_repo = None
+
         if self.source_provenance:
             if "source_dataset" in self.source_provenance:
-                datasets.append(self.source_provenance["source_dataset"].get("repo_id", ""))
+                dataset_repo_id = self.source_provenance["source_dataset"].get("repo_id", "")
+                datasets.append(dataset_repo_id)
             if "source_model" in self.source_provenance:
                 base_model = self.source_provenance["source_model"].get("repo_id")
+            if "training_code" in self.source_provenance:
+                training_code = self.source_provenance["training_code"]
+                repo_name = training_code.get("repo", "")
+                if repo_name:
+                    # Convert repo name to GitHub URL
+                    github_repo = f"https://github.com/{repo_name}"
 
         card_data = ModelCardData(
             language="en",
@@ -294,7 +320,8 @@ class ModelTrainingOutput:
             if training_code.get("commit"):
                 repo = training_code.get("repo", "chess-sandbox")
                 commit = training_code["commit"]
-                model_description += f"\n\nTrained from {repo}@{commit}."
+                commit_url = f"https://github.com/{repo}/commit/{commit}"
+                model_description += f"\n\nTrained from [{repo}@{commit}]({commit_url})."
 
         # Use default HuggingFace template
         card = ModelCard.from_template(
@@ -302,6 +329,36 @@ class ModelTrainingOutput:
             model_id="chess-concept-probe",
             model_description=model_description,
             developers="chess-sandbox",
+            model_type="Multi-label tabular classifier (scikit-learn LogisticRegression)",
+            direct_use=(
+                f"Extract chess concepts from positions. See {github_repo or 'repository'} for usage examples."
+            ),
+            out_of_scope_use="Not suitable for non-chess domains or positions outside training distribution.",
+            get_started_code=f"See {github_repo or 'repository'} README for complete examples.",
+            testing_metrics=(
+                "Multi-label metrics: precision, recall, AUC, subset accuracy. See evaluation results above."
+            ),
+            results=(
+                "See evaluation results in model card metadata above and metadata.json "
+                "for detailed per-concept breakdown."
+            ),
+            model_specs=(
+                f"sklearn LogisticRegression (C={self.training_stats.get('classifier_c', 1.0)}) "
+                "with OneVsRestClassifier wrapper for multi-label classification."
+            ),
+            model_card_contact=f"{github_repo}/issues" if github_repo else "[More Information Needed]",
+            repo=github_repo if github_repo else None,
+            training_data=(
+                f"Dataset: [{dataset_repo_id}](https://huggingface.co/datasets/{dataset_repo_id})"
+                if dataset_repo_id
+                else None
+            ),
+            testing_data=(
+                f"Same as training data. See [{dataset_repo_id}](https://huggingface.co/datasets/{dataset_repo_id})"
+                if dataset_repo_id
+                else None
+            ),
+            compute_infrastructure="CPU-based training (8 cores typical)",
         )
 
         return str(card)
