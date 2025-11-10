@@ -234,27 +234,43 @@ class ModelTrainingOutput:
         if not probe_metrics:
             return []
 
-        results = [
-            EvalResult(
-                task_type="tabular-classification",
-                dataset_type=dataset_type,
-                dataset_name="Chess Positions with Concepts",
-                dataset_revision=dataset_revision,
-                metric_type="exact_match",
-                metric_value=probe_metrics.get("exact_match", 0),
-            ),
-            EvalResult(
-                task_type="tabular-classification",
-                dataset_type=dataset_type,
-                dataset_name="Chess Positions with Concepts",
-                dataset_revision=dataset_revision,
-                metric_type="hamming_loss",
-                metric_value=probe_metrics.get("hamming_loss", 0),
-            ),
+        results = []
+
+        # Core metrics (always included)
+        metric_mappings = [
+            ("exact_match", "subset_accuracy"),  # HF standard name for subset accuracy
+            ("micro_precision", "micro_precision"),
+            ("micro_recall", "micro_recall"),
+            ("macro_precision", "macro_precision"),
+            ("macro_recall", "macro_recall"),
         ]
 
-        # TODO: Add micro/macro averages if computed during training
-        # Would need: probe_metrics["micro_precision"], probe_metrics["micro_recall"], etc.
+        for metric_name, probe_key in metric_mappings:
+            if probe_key in probe_metrics:
+                results.append(
+                    EvalResult(
+                        task_type="tabular-classification",
+                        dataset_type=dataset_type,
+                        dataset_name="Chess Positions with Concepts",
+                        dataset_revision=dataset_revision,
+                        metric_type=metric_name,
+                        metric_value=probe_metrics[probe_key],
+                    )
+                )
+
+        # Optional AUC metrics (only if available)
+        for auc_metric in ["micro_auc", "macro_auc"]:
+            if auc_metric in probe_metrics:
+                results.append(
+                    EvalResult(
+                        task_type="tabular-classification",
+                        dataset_type=dataset_type,
+                        dataset_name="Chess Positions with Concepts",
+                        dataset_revision=dataset_revision,
+                        metric_type=auc_metric,
+                        metric_value=probe_metrics[auc_metric],
+                    )
+                )
 
         return results
 
