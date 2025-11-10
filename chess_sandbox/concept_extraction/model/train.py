@@ -163,7 +163,7 @@ def train_multiclass(
     clf = LogisticRegression(
         C=classifier_c,
         class_weight="balanced" if classifier_class_weight == "balanced" else None,
-        max_iter=1000,
+        max_iter=10000,
         random_state=random_seed,
         verbose=verbose,
         n_jobs=n_jobs,
