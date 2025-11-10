@@ -333,25 +333,32 @@ class ConceptExtractor:
 
         return self.probe.predict(features, threshold=threshold)
 
-    def extract_concepts_with_confidence(self, fens: list[str]) -> list[list[tuple[str, float]]]:
+    def extract_concepts_with_confidence(
+        self, fen: str | list[str]
+    ) -> list[tuple[str, float]] | list[list[tuple[str, float]]]:
         """
-        Extract concepts with confidence scores from FEN positions.
+        Extract concepts with confidence scores from a FEN position or batch of FENs.
 
         Args:
-            fens: List of FEN notations of chess positions
+            fen: FEN notation of chess position or list of FEN positions
 
         Returns:
-            List of lists, where each inner list contains (concept_name, probability) tuples for all concepts
+            For single FEN: List of (concept_name, probability) tuples for all concepts
+            For batch of FENs: List of lists of (concept_name, probability) tuples
 
         Example:
             >>> # extractor = ConceptExtractor.from_hf(...)
             >>> # scores = extractor.extract_concepts_with_confidence(
-            >>> #     ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]
+            >>> #     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
             >>> # )
-            >>> # all(all(0 <= score <= 1 for _, score in position_scores) for position_scores in scores)
+            >>> # all(0 <= score <= 1 for _, score in scores)
             True
         """
         from .features import extract_features_batch
+
+        # Handle single FEN or batch
+        is_single_fen = isinstance(fen, str)
+        fens = [fen] if is_single_fen else fen
 
         features_batch = extract_features_batch(
             fens=fens,
@@ -360,7 +367,11 @@ class ConceptExtractor:
             batch_size=32,
         )
 
-        return [self.probe.predict_with_confidence(features) for features in features_batch]
+        # Get predictions for all positions
+        results = [self.probe.predict_with_confidence(features) for features in features_batch]
+
+        # Return single result or batch based on input
+        return results[0] if is_single_fen else results
 
     def __repr__(self) -> str:
         return f"ConceptExtractor(probe={self.probe}, " f"layer={self.layer_name})"
@@ -460,7 +471,7 @@ def predict(
     )
 
     print(f"\nExtracting concepts for FEN: {fen}")
-    predictions_with_confidence = extractor.extract_concepts_with_confidence([fen])[0]
+    predictions_with_confidence = extractor.extract_concepts_with_confidence(fen)
 
     # Sort by confidence descending
     predictions_with_confidence.sort(key=lambda x: x[1], reverse=True)
@@ -513,7 +524,7 @@ def batch_predict(
 
     Example:
         python -m chess_sandbox.concept_extraction.model.inference batch-predict \\
-            --model-repo-id pilipolio/chess-positions-extractor \\
+            --classifier-model-repo-id pilipolio/chess-positions-extractor \\
             --data-path data/processed/test_labeled_positions.jsonl
     """
     print("Loading ConceptExtractor from HuggingFace Hub...")
@@ -576,6 +587,143 @@ def batch_predict(
             print("Predictions:  (none)")
 
         print()
+
+
+@cli.command()
+@hf_hub_options
+@click.option(
+    "--data-path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to JSONL file with labeled positions",
+)
+@click.option(
+    "--sample-size",
+    default=10,
+    type=int,
+    help="Number of sample predictions to display",
+)
+@click.option(
+    "--batch-size",
+    default=32,
+    type=int,
+    help="Batch size for activation extraction",
+)
+@click.option(
+    "--random-seed",
+    default=42,
+    type=int,
+    help="Random seed for sample selection",
+)
+def evaluate(
+    model_repo_id: str,
+    revision: str | None,
+    lc0_repo_id: str,
+    lc0_filename: str,
+    cache_dir: Path | None,
+    force_download: bool,
+    token: str | None,
+    data_path: Path,
+    sample_size: int,
+    batch_size: int,
+    random_seed: int,
+) -> None:
+    """
+    Evaluate trained concept probe on test data and display sample predictions.
+
+    Example:
+        python -m chess_sandbox.concept_extraction.model.inference evaluate \\
+            --classifier-model-repo-id pilipolio/chess-positions-extractor \\
+            --data-path data/positions.jsonl \\
+            --sample-size 10
+    """
+    print("Loading ConceptExtractor from HuggingFace Hub...")
+    extractor = ConceptExtractor.from_hf(
+        probe_repo_id=model_repo_id,
+        model_repo_id=lc0_repo_id,
+        model_filename=lc0_filename,
+        revision=revision,
+        cache_dir=cache_dir,
+        force_download=force_download,
+        token=token,
+    )
+    print(f"Loaded probe: {extractor.probe}")
+    print(f"Concepts: {', '.join(extractor.probe.concept_list)}")
+
+    print("\nLoading test data...")
+    positions: list[LabelledPosition] = []
+    with data_path.open() as f:
+        for line in f:
+            positions.append(LabelledPosition.from_dict(json.loads(line)))
+
+    positions_with_concepts = [p for p in positions if p.concepts]
+    print(f"Loaded {len(positions)} positions, kept {len(positions_with_concepts)} with concepts")
+
+    # Filter positions with validated concepts
+    filtered_positions: list[LabelledPosition] = []
+    for pos in positions_with_concepts:
+        validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
+        if validated_concepts:
+            filtered_positions.append(pos)
+
+    print(f"Filtered to {len(filtered_positions)} positions with validated concepts")
+
+    if len(filtered_positions) == 0:
+        print("No positions with validated concepts found!")
+        return
+
+    # Sample random positions
+    n_samples = min(sample_size, len(filtered_positions))
+    rng = np.random.RandomState(random_seed)
+    sample_indices = rng.choice(len(filtered_positions), size=n_samples, replace=False)
+    sample_positions = [filtered_positions[i] for i in sample_indices]
+
+    print(f"\nExtracting activations for {n_samples} samples...")
+
+    fens = [p.fen for p in sample_positions]
+    activations = extract_features_batch(
+        fens,
+        extractor.layer_name,
+        model=extractor.model,
+        batch_size=batch_size,
+    )
+    print(f"Activation matrix shape: {activations.shape}")
+
+    print("\nMaking predictions...")
+    predictions_batch = extractor.probe.predict_batch(activations)
+
+    print(f"\n{'=' * 70}")
+    print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
+    print(f"{'=' * 70}\n")
+
+    for pos, predicted_concepts in zip(sample_positions, predictions_batch, strict=True):
+        print(f"FEN: {pos.fen}")
+
+        # Get ground truth
+        ground_truth_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
+        predicted_concept_names = [c.name for c in predicted_concepts]
+
+        # Check if prediction matches
+        match_marker = "✓" if set(ground_truth_concepts) == set(predicted_concept_names) else "✗"
+
+        gt_str = ", ".join(ground_truth_concepts) if ground_truth_concepts else "(none)"
+        pred_str = ", ".join(predicted_concept_names) if predicted_concept_names else "(none)"
+        print(f"Ground Truth: {gt_str}")
+        print(f"Prediction:   {pred_str} {match_marker}")
+        print()
+
+    # Calculate overall accuracy
+    correct = 0
+    for pos, predicted_concepts in zip(sample_positions, predictions_batch, strict=True):
+        ground_truth_concepts = set(c.name for c in pos.concepts if c.validated_by is not None)
+        predicted_concept_names = set(c.name for c in predicted_concepts)
+        if ground_truth_concepts == predicted_concept_names:
+            correct += 1
+
+    accuracy = correct / n_samples
+    print(f"{'=' * 70}")
+    print(f"Sample Exact Match Rate: {accuracy:.1%} ({correct}/{n_samples})")
+    print(f"{'=' * 70}")
 
 
 if __name__ == "__main__":

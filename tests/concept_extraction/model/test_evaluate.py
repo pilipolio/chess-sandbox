@@ -72,4 +72,5 @@ def test_evaluate_cli_with_sample_predictions() -> None:
     assert "Prediction:" in output, "Missing predictions"
 
     # Check for comprehensive metrics section
-    assert "CONCEPT PROBE EVALUATION" in output, "Missing evaluation section header"
+    assert "SUMMARY" in output, "Missing evaluation metrics summary"
+    assert "PER-CONCEPT METRICS" in output, "Missing per-concept metrics section"

@@ -27,6 +27,28 @@ from .inference import ConceptProbe
 from .model_artefact import ModelTrainingOutput, generate_probe_name
 
 
+def normalize_predict_proba(y_proba: np.ndarray | list[np.ndarray]) -> np.ndarray:
+    """
+    Normalize predict_proba output to a 2D array.
+
+    DummyClassifier.predict_proba() returns a list of arrays for multilabel,
+    while OneVsRestClassifier returns a 2D array. This function normalizes both.
+
+    Args:
+        y_proba: Either a 2D array (n_samples, n_classes) or a list of 2D arrays
+
+    Returns:
+        2D array of shape (n_samples, n_classes) with probabilities for class 1
+    """
+    if isinstance(y_proba, list):
+        # DummyClassifier multilabel: list of (n_samples, 2) arrays
+        # Extract probability of positive class (index 1) from each
+        return np.column_stack([proba[:, 1] for proba in y_proba])
+    else:
+        # Already a proper 2D array (OneVsRestClassifier or multiclass)
+        return y_proba
+
+
 def save_dataset_split(positions: list[LabelledPosition], output_path: Path) -> Path:
     """
     Save dataset split to JSONL file.
@@ -87,6 +109,8 @@ def train_multiclass(
     y_test_labels: list[list[str]],
     layer_name: str,
     random_seed: int,
+    classifier_c: float = 1.0,
+    classifier_class_weight: str = "none",
     verbose: bool = False,
     n_jobs: int = -1,
 ) -> ModelTrainingOutput:
@@ -136,11 +160,10 @@ def train_multiclass(
     print(f"Label encoder classes: {encoder.classes_}")
 
     print("\n[3/4] Training probe...")
-    # NOTE: Consider adding class_weight='balanced' to handle remaining class imbalance
-    # within concepts (e.g., mating_threat:11k vs zugzwang:194 samples). This would
-    # automatically adjust weights inversely proportional to class frequencies.
     clf = LogisticRegression(
-        max_iter=10000,
+        C=classifier_c,
+        class_weight="balanced" if classifier_class_weight == "balanced" else None,
+        max_iter=1000,
         random_state=random_seed,
         verbose=verbose,
         n_jobs=n_jobs,
@@ -157,18 +180,13 @@ def train_multiclass(
     eval_encoder.fit([concept_list])
     y_test_binary = eval_encoder.transform(y_test_filtered)
 
-    y_pred_baseline = baseline.predict(X_test_filtered)
-    y_pred_probe = clf.predict(X_test_filtered)
+    y_score_baseline = baseline.predict_proba(X_test_filtered)
+    y_score_probe = clf.predict_proba(X_test_filtered)
 
-    y_pred_baseline_labels = [[concept_list[int(pred)]] for pred in y_pred_baseline]
-    y_pred_probe_labels = [[concept_list[int(pred)]] for pred in y_pred_probe]
-    y_pred_baseline_binary = eval_encoder.transform(y_pred_baseline_labels)
-    y_pred_probe_binary = eval_encoder.transform(y_pred_probe_labels)
+    baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_score_baseline, concept_list)
+    probe_metrics = calculate_multilabel_metrics(y_test_binary, y_score_probe, concept_list)
 
-    baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_baseline_binary, concept_list)
-    probe_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_probe_binary, concept_list)
-
-    print(format_metrics_display(probe_metrics, "Trained Probe", baseline_metrics=baseline_metrics))
+    print(format_metrics_display(probe_metrics, baseline_metrics=baseline_metrics))
 
     probe = ConceptProbe(
         classifier=clf,
@@ -184,6 +202,8 @@ def train_multiclass(
         "test_samples": X_test_filtered.shape[0],
         "random_seed": random_seed,
         "mode": "multi-class",
+        "classifier_c": classifier_c,
+        "classifier_class_weight": classifier_class_weight,
         "verbose": verbose,
         "n_jobs": n_jobs,
     }
@@ -203,6 +223,8 @@ def train_multilabel(
     y_test_labels: list[list[str]],
     layer_name: str,
     random_seed: int,
+    classifier_c: float = 1.0,
+    classifier_class_weight: str = "none",
     verbose: bool = False,
     n_jobs: int = -1,
 ) -> ModelTrainingOutput:
@@ -236,12 +258,10 @@ def train_multilabel(
     print(f"Total labels: {y_train.sum()} ({y_train.sum() / y_train.size * 100:.1f}% density)")
 
     print("\n[2/4] Training probe...")
-    # NOTE: Consider adding class_weight='balanced' to handle remaining class imbalance
-    # within concepts (e.g., mating_threat:11k vs zugzwang:194 samples). This would
-    # automatically adjust weights inversely proportional to class frequencies in each
-    # binary classifier (OneVsRest trains one binary classifier per concept).
     base_clf = LogisticRegression(
-        max_iter=10000,
+        C=classifier_c,
+        class_weight="balanced" if classifier_class_weight == "balanced" else None,
+        max_iter=1000,
         random_state=random_seed,
         verbose=verbose,
     )
@@ -254,13 +274,32 @@ def train_multilabel(
     baseline.fit(X_train, y_train)
 
     print("\n[3/4] Evaluating...")
-    y_pred_baseline = baseline.predict(X_test)
-    y_pred_probe = clf.predict(X_test)
+
+    print("=" * 70)
+    print("TRAINING SET")
+    print("=" * 70)
+
+    y_train_proba_baseline = normalize_predict_proba(baseline.predict_proba(X_train))
+    y_train_proba_probe = clf.predict_proba(X_train)
+
+    print(
+        format_metrics_display(
+            calculate_multilabel_metrics(y_train, y_train_proba_probe, concept_list),
+            baseline_metrics=calculate_multilabel_metrics(y_train, y_train_proba_baseline, concept_list),
+        )
+    )
+
+    print("=" * 70)
+    print("TEST SET")
+    print("=" * 70)
+
+    y_pred_baseline = normalize_predict_proba(baseline.predict_proba(X_test))
+    y_pred_probe = clf.predict_proba(X_test)
 
     baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_baseline, concept_list)
     probe_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_probe, concept_list)
 
-    print(format_metrics_display(probe_metrics, "Trained Probe", baseline_metrics=baseline_metrics))
+    print(format_metrics_display(probe_metrics, baseline_metrics=baseline_metrics))
 
     probe = ConceptProbe(
         classifier=clf,
@@ -274,10 +313,10 @@ def train_multilabel(
         "probe": probe_metrics.model_dump(),
         "training_samples": X_train.shape[0],
         "test_samples": X_test.shape[0],
+        "classifier_mode": "multi-label",
+        "classifier_c": classifier_c,
+        "classifier_class_weight": classifier_class_weight,
         "random_seed": random_seed,
-        "mode": "multi-label",
-        "verbose": verbose,
-        "n_jobs": n_jobs,
     }
 
     return ModelTrainingOutput(
@@ -338,16 +377,25 @@ def train_multilabel(
     help="Random seed for reproducibility",
 )
 @click.option(
-    "--batch-size",
-    default=32,
-    type=int,
-    help="Batch size for activation extraction",
-)
-@click.option(
-    "--mode",
+    "--classifier-mode",
     default="multi-label",
     type=click.Choice(["multi-class", "multi-label"]),
     help="Training mode: 'multi-class' (one concept per position) or 'multi-label' (multiple concepts)",
+)
+@click.option(
+    "--classifier-c",
+    default=1.0,
+    type=float,
+    help="Inverse of regularization strength for LogisticRegression (lower values = stronger regularization)",
+)
+@click.option(
+    "--classifier-class-weight",
+    default="none",
+    type=click.Choice(["none", "balanced"]),
+    help=(
+        "Class weight strategy: 'none' (default) or 'balanced' "
+        "(adjust weights inversely proportional to class frequencies)"
+    ),
 )
 @click.option(
     "--verbose",
@@ -395,8 +443,9 @@ def train(
     output: Path | None,
     test_split: float,
     random_seed: int,
-    batch_size: int,
-    mode: str,
+    classifier_mode: str,
+    classifier_c: float,
+    classifier_class_weight: str,
     verbose: bool,
     n_jobs: int,
     upload_to_hub: bool,
@@ -410,11 +459,13 @@ def train(
 
     Example:
         python -m chess_sandbox.concept_extraction.model.train \\
-            --dataset-repo-id pilipolio/chess-concepts-async-100 \\
+            --dataset-repo-id pilipolio/chess-positions-concepts \\
             --dataset-filename data.jsonl \\
             --lc0-model-repo-id lczerolens/maia-1500 \\
             --layer-name block3/conv2/relu \\
-            --mode multi-label
+            --classifier-mode multi-label \\
+            --classifier-c 1.0 \\
+            --classifier-class-weight none
     """
     print("Training concept probe...")
     dataset_ref = f"{dataset_repo_id}/{dataset_filename}"
@@ -426,7 +477,9 @@ def train(
     print(f"  Model: {model_ref}")
 
     print(f"  Layer: {layer_name}")
-    print(f"  Mode: {mode}")
+    print(f"  Classifier mode: {classifier_mode}")
+    print(f"  Classifier C: {classifier_c}")
+    print(f"  Classifier class_weight: {classifier_class_weight}")
     print(f"  Parallel jobs (n_jobs): {n_jobs}")
 
     print("\nLoading LC0 model from HuggingFace Hub...")
@@ -435,7 +488,7 @@ def train(
     print("Model loaded successfully!")
 
     print("\nLoading training data from HuggingFace Hub...")
-    positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)[:10000]
 
     print("\nSplitting dataset...")
     indices = np.arange(len(positions))
@@ -449,6 +502,7 @@ def train(
     else:
         # by default not using any positions w/o validated concepts
         train_positions, _ = split_positions(train_positions)
+        # test_positions, _ = split_positions(test_positions)
 
     print(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
 
@@ -476,8 +530,8 @@ def train(
         print(f"  Test commit: {test_commit}")
 
     # Extract validated concept names from positions
-    y_train_labels = [[c.name for c in p.concepts if c.validated_by] if p.concepts else [] for p in train_positions]
-    y_test_labels = [[c.name for c in p.concepts if c.validated_by] if p.concepts else [] for p in test_positions]
+    y_train_labels = [[c.name for c in p.concepts if c.validated_by] for p in train_positions]
+    y_test_labels = [[c.name for c in p.concepts if c.validated_by] for p in test_positions]
 
     print("\nExtracting train activations...")
     train_fens = [p.fen for p in train_positions]
@@ -485,7 +539,6 @@ def train(
         train_fens,
         layer_name,
         model=model,
-        batch_size=batch_size,
     )
     print(f"Train activation matrix shape: {X_train.shape}")
 
@@ -495,11 +548,10 @@ def train(
         test_fens,
         layer_name,
         model=model,
-        batch_size=batch_size,
     )
     print(f"Test activation matrix shape: {X_test.shape}")
 
-    if mode == "multi-class":
+    if classifier_mode == "multi-class":
         training_output = train_multiclass(
             X_train=X_train,
             X_test=X_test,
@@ -507,6 +559,8 @@ def train(
             y_test_labels=y_test_labels,
             layer_name=layer_name,
             random_seed=random_seed,
+            classifier_c=classifier_c,
+            classifier_class_weight=classifier_class_weight,
             verbose=verbose,
             n_jobs=n_jobs,
         )
@@ -518,6 +572,8 @@ def train(
             y_test_labels=y_test_labels,
             layer_name=layer_name,
             random_seed=random_seed,
+            classifier_c=classifier_c,
+            classifier_class_weight=classifier_class_weight,
             verbose=verbose,
             n_jobs=n_jobs,
         )
@@ -540,7 +596,7 @@ def train(
     }
 
     output_path = output or Path("data/models/concept_probes") / generate_probe_name(
-        lc0_model_repo_id, layer_name, mode, dataset_repo_id
+        lc0_model_repo_id, layer_name, classifier_mode, dataset_repo_id
     )
     print(f"  Output: {output_path}")
 

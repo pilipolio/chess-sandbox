@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from .engine.analyse import EngineConfig, analyze_variations
 from .engine.position_analysis import PositionAnalysis
+from .lichess import get_analysis_url
 
 
 class ChessPositionExplanation(BaseModel):
@@ -32,12 +33,6 @@ class ChessPositionExplanation(BaseModel):
 class ChessPositionExplanationWithInput(ChessPositionExplanation):
     fen: str = Field(description="The input position in FEN format")
     full_input: str = Field(description="The full input position ")
-
-
-def get_lichess_link(fen: str, color: str = "white") -> str:
-    """Generate a Lichess analysis link for a given FEN position."""
-    fen_encoded = fen.replace(" ", "_")
-    return f"https://lichess.org/analysis/{fen_encoded}?color={color}"
 
 
 @dataclass
@@ -143,7 +138,7 @@ def main():
     }
 
     fen = "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58"
-    print(get_lichess_link(fen))
+    print(get_analysis_url(fen))
     board = chess.Board(fen)
 
     commentator = Commentator.create(params)

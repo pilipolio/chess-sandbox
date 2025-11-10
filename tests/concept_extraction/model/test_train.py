@@ -48,14 +48,12 @@ def test_e2e_training_and_inference_pipeline(
             "block3/conv2/relu",
             "--output",
             str(output_training_directory),
-            "--mode",
+            "--classifier-mode",
             mode,
             "--test-split",
             "0.3",
             "--random-seed",
             "42",
-            "--batch-size",
-            "4",
         ],
     )
 

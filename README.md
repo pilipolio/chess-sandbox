@@ -100,14 +100,14 @@ uv run python -m chess_sandbox.concept_extraction.model.train \
   --dataset-repo-id pilipolio/chess-positions-concepts \
   --lc0-model-repo-id lczerolens/maia-1500 \
   --layer-name block3/conv2/relu \
-  --mode multi-label \
+  --classifier-mode multi-label \
   --upload-to-hub --save-splits \
   --output-repo-id pilipolio/chess-positions-extractor \
   --n-jobs 4 --verbose 1
   --output-revision test_fixture
 
 uv run python -m chess_sandbox.concept_extraction.model.evaluation evaluate \
-      --model-repo-id pilipolio/chess-positions-extractor \
+      --classifier-model-repo-id pilipolio/chess-positions-extractor \
       --dataset-repo-id pilipolio/chess-positions-concepts \
       --dataset-filename test.jsonl
       --sample-size 10
@@ -132,7 +132,7 @@ Concept extractor training pipeline (requires `huggingface-read-write-secret`):
 modal run chess_sandbox/concept_extraction/model/modal_pipeline.py::train \
     --dataset-repo-id pilipolio/chess-positions-concepts \
     --lc0-model-repo-id lczerolens/maia-1500 \
-    --mode multi-label \
+    --classifier-mode multi-label \
     --upload-to-hub \
     --output-repo-id pilipolio/chess-positions-extractor
 ```

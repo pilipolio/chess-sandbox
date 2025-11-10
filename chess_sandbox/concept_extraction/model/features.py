@@ -7,6 +7,7 @@ internal layer activations from LC0 models using PyTorch hooks.
 Adapted from prototype implementations with minimal dependencies.
 """
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ from lczerolens import (  # type: ignore[import-untyped]
 )
 from tqdm import tqdm
 
+# Suppress PyTorch 2.9 deprecation warning from onnx2torch library
+warnings.filterwarnings("ignore", category=UserWarning, module="onnx2torch")
+
 
 class ActivationExtractor:
     """
@@ -28,7 +32,7 @@ class ActivationExtractor:
         True
     """
 
-    def __init__(self, model: Any, layer_names: list[str], device: str | None = None):
+    def __init__(self, model: LczeroModel, layer_names: list[str], device: str | None = None):
         """
         Initialize activation extractor.
 
@@ -52,17 +56,19 @@ class ActivationExtractor:
                 hook = layer.register_forward_hook(self._make_hook(name))
                 self.hooks.append(hook)
             except Exception as e:
-                print(f"Warning: Could not register hook for '{name}': {e}")
+                raise ValueError(
+                    f"Could not register hook for layer '{name}', available layers: {self.model.module.layer_names}"
+                ) from e
 
     def _get_layer_by_name(self, name: str) -> Any:
         """Get layer module by hierarchical name."""
         module = self.model.module if hasattr(self.model, "module") else self.model
 
         try:
-            return module.get_submodule(name)
+            return module.get_submodule(name)  # type: ignore[arg-type]
         except AttributeError:
             alt_name = name.replace("/", ".") if "/" in name else name.replace(".", "/")
-            return module.get_submodule(alt_name)
+            return module.get_submodule(alt_name)  # type: ignore[arg-type]
 
     def _make_hook(self, name: str) -> Any:
         """Create a hook function for capturing activations."""
@@ -89,7 +95,7 @@ class ActivationExtractor:
 
         with torch.no_grad():
             module = self.model.module if hasattr(self.model, "module") else self.model
-            _ = module(tensor)
+            _ = module(tensor)  # type: ignore[arg-type]
 
         return self.activations.copy()
 
@@ -111,7 +117,7 @@ class ActivationExtractor:
 
         with torch.no_grad():
             module = self.model.module if hasattr(self.model, "module") else self.model
-            _ = module(tensor)
+            _ = module(tensor)  # type: ignore[arg-type]
 
         return self.activations.copy()
 
@@ -133,9 +139,8 @@ class ActivationExtractor:
 def extract_features_batch(
     fens: list[str],
     layer_name: str,
-    model: Any | None = None,
-    model_path: str | Path | None = None,
-    batch_size: int = 32,
+    model: LczeroModel,
+    batch_size: int = 512,
 ) -> np.ndarray:
     """
     Extract flattened activation vectors from multiple chess positions.
@@ -162,26 +167,20 @@ def extract_features_batch(
         >>> features.shape  # doctest: +SKIP
         (10, 4096)
     """
-    if model is None and model_path is None:
-        raise ValueError("Must provide either model or model_path")
-    if model is not None and model_path is not None:
-        raise ValueError("Provide only one of model or model_path, not both")
 
-    print(f"Extracting activations for {len(fens)} positions...")
+    print(f"Extracting activations for {len(fens)} positions in batch of size {batch_size}...")
 
     results: list[np.ndarray] = []
-    if model is None:
-        model = LczeroModel.from_path(str(model_path))
 
     with ActivationExtractor(model, [layer_name]) as extractor:
         for i in tqdm(range(0, len(fens), batch_size)):
             batch_fens = fens[i : i + batch_size]
             boards = [LczeroBoard(fen) for fen in batch_fens]
             activations = extractor.extract_batch(boards)
-            batch_activations: Any = activations[layer_name].cpu().numpy()
+            batch_activations = activations[layer_name].cpu().numpy()
 
             for j in range(len(batch_fens)):
-                flattened: np.ndarray = batch_activations[j].reshape(-1)
+                flattened = batch_activations[j].reshape(-1)
                 results.append(flattened)
 
     return np.array(results)
