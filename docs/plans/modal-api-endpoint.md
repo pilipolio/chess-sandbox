@@ -36,7 +36,7 @@
 
 ### Phase 1: Modal Endpoint Implementation
 
-**File:** `chess_sandbox/endpoints.py`
+**File:** `chess_sandbox/commentary/endpoints.py`
 
 **1.1 Build Modal Image**
 ```python
@@ -90,7 +90,7 @@ deploy-modal:
       env:
         MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
         MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-      run: modal deploy chess_sandbox/endpoints.py
+      run: modal deploy chess_sandbox/commentary/endpoints.py
 ```
 
 **2.2 Configure GitHub Secrets**
@@ -104,8 +104,8 @@ deploy-modal:
 **3.1 README.md Additions**
 - New section: "Modal API Deployment"
 - Prerequisites (Modal account, token setup)
-- Local testing: `modal serve chess_sandbox/endpoints.py`
-- Production deploy: `modal deploy chess_sandbox/endpoints.py`
+- Local testing: `modal serve chess_sandbox/commentary/endpoints.py`
+- Production deploy: `modal deploy chess_sandbox/commentary/endpoints.py`
 - Usage examples with curl/httpie
 - Link to this plan document
 
@@ -167,7 +167,7 @@ Line 2: Eval +0.15
 ### Local Testing (Development)
 ```bash
 # Start Modal dev server
-modal serve chess_sandbox/endpoints.py
+modal serve chess_sandbox/commentary/endpoints.py
 
 # Test with curl
 curl "http://localhost:8000/analyze?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201"
@@ -183,7 +183,7 @@ curl "http://localhost:8000/analyze?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK
 ### Production Deployment
 ```bash
 # Deploy to Modal cloud
-modal deploy chess_sandbox/endpoints.py
+modal deploy chess_sandbox/commentary/endpoints.py
 
 # Test production endpoint
 curl "https://your-app.modal.run/analyze?fen=<FEN>"
@@ -203,7 +203,7 @@ curl "https://your-app.modal.run/analyze?fen=<FEN>"
 uv sync
 
 # Start dev server
-modal serve chess_sandbox/endpoints.py
+modal serve chess_sandbox/commentary/endpoints.py
 
 # Access at http://localhost:8000
 ```
@@ -211,7 +211,7 @@ modal serve chess_sandbox/endpoints.py
 ### Production Deployment
 ```bash
 # Manual deployment
-modal deploy chess_sandbox/endpoints.py
+modal deploy chess_sandbox/commentary/endpoints.py
 
 # Automatic deployment (GitHub releases)
 # Triggers on release publish via .github/workflows/release.yml

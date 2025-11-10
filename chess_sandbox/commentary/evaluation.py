@@ -14,8 +14,8 @@ import chess
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from ..lichess import get_analysis_url
 from .commentator import Commentator, print_explanation
-from .lichess import get_analysis_url
 
 
 class ThemeJudgement(BaseModel):
