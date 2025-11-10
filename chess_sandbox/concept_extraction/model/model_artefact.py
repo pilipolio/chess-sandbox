@@ -279,11 +279,21 @@ class ModelTrainingOutput:
         # Extract provenance info
         datasets = []
         base_model = None
+        dataset_repo_id = None
+        github_repo = None
+
         if self.source_provenance:
             if "source_dataset" in self.source_provenance:
-                datasets.append(self.source_provenance["source_dataset"].get("repo_id", ""))
+                dataset_repo_id = self.source_provenance["source_dataset"].get("repo_id", "")
+                datasets.append(dataset_repo_id)
             if "source_model" in self.source_provenance:
                 base_model = self.source_provenance["source_model"].get("repo_id")
+            if "training_code" in self.source_provenance:
+                training_code = self.source_provenance["training_code"]
+                repo_name = training_code.get("repo", "")
+                if repo_name:
+                    # Convert repo name to GitHub URL
+                    github_repo = f"https://github.com/{repo_name}"
 
         card_data = ModelCardData(
             language="en",
@@ -318,6 +328,36 @@ class ModelTrainingOutput:
             model_id="chess-concept-probe",
             model_description=model_description,
             developers="chess-sandbox",
+            model_type="Multi-label tabular classifier (scikit-learn LogisticRegression)",
+            direct_use=(
+                f"Extract chess concepts from positions. See {github_repo or 'repository'} for usage examples."
+            ),
+            out_of_scope_use="Not suitable for non-chess domains or positions outside training distribution.",
+            get_started_code=f"See {github_repo or 'repository'} README for complete examples.",
+            testing_metrics=(
+                "Multi-label metrics: precision, recall, AUC, subset accuracy. See evaluation results above."
+            ),
+            results=(
+                "See evaluation results in model card metadata above and metadata.json "
+                "for detailed per-concept breakdown."
+            ),
+            model_specs=(
+                f"sklearn LogisticRegression (C={self.training_stats.get('classifier_c', 1.0)}) "
+                "with OneVsRestClassifier wrapper for multi-label classification."
+            ),
+            model_card_contact=f"{github_repo}/issues" if github_repo else "[More Information Needed]",
+            repo=github_repo if github_repo else None,
+            training_data=(
+                f"Dataset: [{dataset_repo_id}](https://huggingface.co/datasets/{dataset_repo_id})"
+                if dataset_repo_id
+                else None
+            ),
+            testing_data=(
+                f"Same as training data. See [{dataset_repo_id}](https://huggingface.co/datasets/{dataset_repo_id})"
+                if dataset_repo_id
+                else None
+            ),
+            compute_infrastructure="CPU-based training (8 cores typical)",
         )
 
         return str(card)
