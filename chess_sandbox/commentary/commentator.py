@@ -18,9 +18,9 @@ from openai.types.shared.reasoning_effort import ReasoningEffort
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import BaseModel, Field
 
-from .engine.analyse import EngineConfig, analyze_variations
-from .engine.position_analysis import PositionAnalysis
-from .lichess import get_analysis_url
+from ..engine.analyse import EngineConfig, analyze_variations
+from ..engine.position_analysis import PositionAnalysis
+from ..lichess import get_analysis_url
 
 
 class ChessPositionExplanation(BaseModel):

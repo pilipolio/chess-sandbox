@@ -58,13 +58,13 @@ Run automated commentary generation using OpenAI models:
 
 ```bash
 # Basic usage - analyze a single position
-uv run python -m chess_sandbox.commentator
+uv run python -m chess_sandbox.commentary.commentator
 ```
 
 Batch evaluation using LLM as judges:
 
 ```bash
-uv run python -m chess_sandbox.evaluation
+uv run python -m chess_sandbox.commentary.evaluation
 ```
 
 ### Approach 3: Concept Extraction Pipeline
@@ -144,9 +144,11 @@ chess_sandbox/
 ├── config.py                  # Settings management
 ├── engine/                    # Wrapper around stockfish/lc0 engines
 │   ├── ...
-├── commentator.py             # OpenAI-based automated commentary
+├── commentary/                # Commentary generation
+│   ├── commentator.py         # OpenAI-based automated commentary
+│   ├── evaluation.py          # Batch evaluation with LLM judges
+│   └── endpoints.py           # Modal API endpoints
 ├── data_scraper.py            # HTML scraping for ground truth data
-├── evaluation.py              # Batch evaluation with LLM judges
 └── concept_extraction/        # Concept extraction pipeline
     ├── labelling/             # Regex + LLM labeling
     │   ├── labeller.py        # Core labeling (includes Concept, LabelledPosition models)
@@ -216,7 +218,7 @@ Python functions are exposed as serverless http (webendpoint)[https://modal.com/
 ### Ephemeral Deployment
 
 ```bash
-modal serve chess_sandbox/endpoints.py
+modal serve chess_sandbox/commentary/endpoints.py
 
 curl "https://pilipolio--chess-analysis-analyze-dev.modal.run?fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR%20w%20KQkq%20-%200%201&depth=20&num_lines=5"
 ```

@@ -654,5 +654,5 @@ modal volume get chess-pgn-data \
 - Labeller logic: `chess_sandbox/concept_extraction.labelling/labeller.py:label_positions()`
 - Refiner logic: `chess_sandbox/concept_extraction.labelling/refiner.py:Refiner.refine()`
 - Async parallelization: `chess_sandbox/concept_extraction.labelling/pipeline.py:refine_positions_parallel()`
-- Modal API endpoint pattern: `chess_sandbox/endpoints.py`
+- Modal API endpoint pattern: `chess_sandbox/commentary/endpoints.py`
 - Modal ADR: `docs/adrs/20251029-use-modal-for-serverless-endpoints.md`
