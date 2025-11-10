@@ -320,7 +320,8 @@ class ModelTrainingOutput:
             if training_code.get("commit"):
                 repo = training_code.get("repo", "chess-sandbox")
                 commit = training_code["commit"]
-                model_description += f"\n\nTrained from {repo}@{commit}."
+                commit_url = f"https://github.com/{repo}/commit/{commit}"
+                model_description += f"\n\nTrained from [{repo}@{commit}]({commit_url})."
 
         # Use default HuggingFace template
         card = ModelCard.from_template(
