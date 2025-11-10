@@ -288,6 +288,14 @@ class ModelTrainingOutput:
             f"({concept_list}) from LC0 layer activations ({self.probe.layer_name})."
         )
 
+        # Add git commit info if available
+        if self.source_provenance and "training_code" in self.source_provenance:
+            training_code = self.source_provenance["training_code"]
+            if training_code.get("commit"):
+                repo = training_code.get("repo", "chess-sandbox")
+                commit = training_code["commit"]
+                model_description += f"\n\nTrained from {repo}@{commit}."
+
         # Use default HuggingFace template
         card = ModelCard.from_template(
             card_data,

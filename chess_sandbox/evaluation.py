@@ -14,7 +14,8 @@ import chess
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from .commentator import Commentator, get_lichess_link, print_explanation
+from .commentator import Commentator, print_explanation
+from .lichess import get_analysis_url
 
 
 class ThemeJudgement(BaseModel):
@@ -179,7 +180,7 @@ def run_evaluation(
             print(f"\n{'=' * 70}")
             print(f"POSITION {i}/{len(ground_truth_data)}")
             print(f"{'=' * 70}")
-            print(f"Lichess: {get_lichess_link(fen)}")
+            print(f"Lichess: {get_analysis_url(fen)}")
 
             try:
                 result = evaluate_position(

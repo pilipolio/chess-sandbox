@@ -100,14 +100,14 @@ uv run python -m chess_sandbox.concept_extraction.model.train \
   --dataset-repo-id pilipolio/chess-positions-concepts \
   --lc0-model-repo-id lczerolens/maia-1500 \
   --layer-name block3/conv2/relu \
-  --mode multi-label \
+  --classifier-mode multi-label \
   --upload-to-hub --save-splits \
   --output-repo-id pilipolio/chess-positions-extractor \
   --n-jobs 4 --verbose 1
   --output-revision test_fixture
 
 uv run python -m chess_sandbox.concept_extraction.model.evaluation evaluate \
-      --model-repo-id pilipolio/chess-positions-extractor \
+      --classifier-model-repo-id pilipolio/chess-positions-extractor \
       --dataset-repo-id pilipolio/chess-positions-concepts \
       --dataset-filename test.jsonl
       --sample-size 10
@@ -117,8 +117,7 @@ Detected concepts include tactical themes (pin, fork, skewer, sacrifice) and str
 
 **Running on Modal (serverless):**
 
-See `chess_sandbox/concept_extraction/labelling/modal_pipeline.py` for pre-requisites, then run:
-
+Labeling pipeline (requires `openai-secret`):
 ```bash
 modal run --detach chess_sandbox/concept_extraction/labelling/modal_pipeline.py::process_pgn_batch \
     --refine-with-llm --llm-model gpt-4.1-mini \
@@ -126,6 +125,16 @@ modal run --detach chess_sandbox/concept_extraction/labelling/modal_pipeline.py:
 
 modal volume get chess-pgn-data outputs/gpt-4.1-mini_labeled_positions_all.jsonl \
   data/processed/concept_extraction/gpt-4.1-mini_labeled_positions_all.jsonl
+```
+
+Concept extractor training pipeline (requires `huggingface-read-write-secret`):
+```bash
+modal run chess_sandbox/concept_extraction/model/modal_pipeline.py::train \
+    --dataset-repo-id pilipolio/chess-positions-concepts \
+    --lc0-model-repo-id lczerolens/maia-1500 \
+    --classifier-mode multi-label \
+    --upload-to-hub \
+    --output-repo-id pilipolio/chess-positions-extractor
 ```
 
 ## Project Structure
@@ -149,6 +158,7 @@ chess_sandbox/
     └── model/                 # ML-based concept detection
         ├── features.py        # LC0 activation extraction
         ├── train.py           # Training CLI (includes ModelTrainingOutput)
+        ├── modal_train.py     # Modal deployment for training
         ├── inference.py       # ConceptProbe, ConceptExtractor
         ├── evaluation.py      # Metrics calculation
         └── hub.py             # HuggingFace Hub upload

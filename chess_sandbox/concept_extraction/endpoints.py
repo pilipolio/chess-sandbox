@@ -43,7 +43,11 @@ def extract_concepts(
     threshold: float = 0.1,
 ) -> ConceptExtractionResponse:
     extractor = get_extractor()
-    all_predictions = extractor.extract_concepts_with_confidence([fen])[0]
+    predictions = extractor.extract_concepts_with_confidence(fen)
+
+    # When passing a single FEN, we get list[tuple[str, float]]
+    # The type checker needs help here since the method signature is overloaded
+    all_predictions: list[tuple[str, float]] = predictions  # type: ignore[assignment]
 
     return ConceptExtractionResponse(
         fen=fen,
