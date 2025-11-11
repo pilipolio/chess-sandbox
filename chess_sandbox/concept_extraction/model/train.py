@@ -18,6 +18,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
+from sklearn.svm import LinearSVC
 
 from ...git import get_commit_sha
 from .dataset import LabelledPosition, load_dataset_from_hf, rebalance_positions, split_positions
@@ -111,6 +112,7 @@ def train_multiclass(
     random_seed: int,
     classifier_c: float = 1.0,
     classifier_class_weight: str = "none",
+    classifier_algo: str = "logistic_regression",
     verbose: bool = False,
     n_jobs: int = -1,
 ) -> ModelTrainingOutput:
@@ -160,15 +162,25 @@ def train_multiclass(
     print(f"Label encoder classes: {encoder.classes_}")
 
     print("\n[3/4] Training probe...")
-    clf = LogisticRegression(
-        C=classifier_c,
-        class_weight="balanced" if classifier_class_weight == "balanced" else None,
-        max_iter=10000,
-        random_state=random_seed,
-        verbose=verbose,
-        n_jobs=n_jobs,
-    )
-    print(f"Training multi-class classifier with {len(encoder.classes_)} classes")
+    if classifier_algo == "svm":
+        clf = LinearSVC(
+            C=classifier_c,
+            class_weight="balanced" if classifier_class_weight == "balanced" else None,
+            max_iter=10000,
+            random_state=random_seed,
+            verbose=verbose,
+            dual="auto",
+        )
+    else:  # logistic_regression
+        clf = LogisticRegression(
+            C=classifier_c,
+            class_weight="balanced" if classifier_class_weight == "balanced" else None,
+            max_iter=10000,
+            random_state=random_seed,
+            verbose=verbose,
+            n_jobs=n_jobs,
+        )
+    print(f"Training multi-class {classifier_algo} classifier with {len(encoder.classes_)} classes")
     clf.fit(X_train_filtered, y_train_encoded)
     print("Training complete!")
 
@@ -181,7 +193,18 @@ def train_multiclass(
     y_test_binary = eval_encoder.transform(y_test_filtered)
 
     y_score_baseline = baseline.predict_proba(X_test_filtered)
-    y_score_probe = clf.predict_proba(X_test_filtered)
+
+    # SVM classifiers may not have predict_proba, use decision_function instead
+    if hasattr(clf, "predict_proba"):
+        y_score_probe = clf.predict_proba(X_test_filtered)
+    elif hasattr(clf, "decision_function"):
+        # Convert decision function to pseudo-probabilities using softmax
+        decision = clf.decision_function(X_test_filtered)
+        # Apply softmax for multi-class
+        exp_scores = np.exp(decision - np.max(decision, axis=1, keepdims=True))
+        y_score_probe = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
+    else:
+        raise ValueError(f"Classifier {type(clf)} does not support probability prediction")
 
     baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_score_baseline, concept_list)
     probe_metrics = calculate_multilabel_metrics(y_test_binary, y_score_probe, concept_list)
@@ -202,6 +225,7 @@ def train_multiclass(
         "test_samples": X_test_filtered.shape[0],
         "random_seed": random_seed,
         "mode": "multi-class",
+        "classifier_algo": classifier_algo,
         "classifier_c": classifier_c,
         "classifier_class_weight": classifier_class_weight,
         "verbose": verbose,
@@ -225,6 +249,7 @@ def train_multilabel(
     random_seed: int,
     classifier_c: float = 1.0,
     classifier_class_weight: str = "none",
+    classifier_algo: str = "logistic_regression",
     verbose: bool = False,
     n_jobs: int = -1,
 ) -> ModelTrainingOutput:
@@ -258,15 +283,25 @@ def train_multilabel(
     print(f"Total labels: {y_train.sum()} ({y_train.sum() / y_train.size * 100:.1f}% density)")
 
     print("\n[2/4] Training probe...")
-    base_clf = LogisticRegression(
-        C=classifier_c,
-        class_weight="balanced" if classifier_class_weight == "balanced" else None,
-        max_iter=1000,
-        random_state=random_seed,
-        verbose=verbose,
-    )
+    if classifier_algo == "svm":
+        base_clf = LinearSVC(
+            C=classifier_c,
+            class_weight="balanced" if classifier_class_weight == "balanced" else None,
+            max_iter=1000,
+            random_state=random_seed,
+            verbose=verbose,
+            dual="auto",
+        )
+    else:  # logistic_regression
+        base_clf = LogisticRegression(
+            C=classifier_c,
+            class_weight="balanced" if classifier_class_weight == "balanced" else None,
+            max_iter=1000,
+            random_state=random_seed,
+            verbose=verbose,
+        )
     clf = OneVsRestClassifier(base_clf, n_jobs=n_jobs, verbose=verbose)
-    print(f"Training multi-label classifier with {len(encoder.classes_)} concepts")
+    print(f"Training multi-label {classifier_algo} classifier with {len(encoder.classes_)} concepts")
     clf.fit(X_train, y_train)
     print("Training complete!")
 
@@ -280,7 +315,15 @@ def train_multilabel(
     print("=" * 70)
 
     y_train_proba_baseline = normalize_predict_proba(baseline.predict_proba(X_train))
-    y_train_proba_probe = clf.predict_proba(X_train)
+
+    # Handle SVM classifiers that don't have predict_proba
+    if hasattr(clf, "predict_proba"):
+        y_train_proba_probe = clf.predict_proba(X_train)
+    elif hasattr(clf, "decision_function"):
+        # For SVM with decision_function, use sigmoid to convert to pseudo-probabilities
+        y_train_proba_probe = 1 / (1 + np.exp(-clf.decision_function(X_train)))
+    else:
+        raise ValueError(f"Classifier {type(clf)} does not support probability prediction")
 
     print(
         format_metrics_display(
@@ -294,7 +337,15 @@ def train_multilabel(
     print("=" * 70)
 
     y_pred_baseline = normalize_predict_proba(baseline.predict_proba(X_test))
-    y_pred_probe = clf.predict_proba(X_test)
+
+    # Handle SVM classifiers that don't have predict_proba
+    if hasattr(clf, "predict_proba"):
+        y_pred_probe = clf.predict_proba(X_test)
+    elif hasattr(clf, "decision_function"):
+        # For SVM with decision_function, use sigmoid to convert to pseudo-probabilities
+        y_pred_probe = 1 / (1 + np.exp(-clf.decision_function(X_test)))
+    else:
+        raise ValueError(f"Classifier {type(clf)} does not support probability prediction")
 
     baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_baseline, concept_list)
     probe_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_probe, concept_list)
@@ -314,6 +365,7 @@ def train_multilabel(
         "training_samples": X_train.shape[0],
         "test_samples": X_test.shape[0],
         "classifier_mode": "multi-label",
+        "classifier_algo": classifier_algo,
         "classifier_c": classifier_c,
         "classifier_class_weight": classifier_class_weight,
         "random_seed": random_seed,
@@ -398,6 +450,24 @@ def train_multilabel(
     ),
 )
 @click.option(
+    "--classifier-algo",
+    default="logistic_regression",
+    type=click.Choice(["logistic_regression", "svm"]),
+    help="Classifier algorithm: 'logistic_regression' (default) or 'svm' (Support Vector Machine)",
+)
+@click.option(
+    "--max-train-positions",
+    default=None,
+    type=int,
+    help="Maximum number of training positions to use (for fast experimentation). Default: use all",
+)
+@click.option(
+    "--max-test-positions",
+    default=None,
+    type=int,
+    help="Maximum number of test positions to use (for fast experimentation). Default: use all",
+)
+@click.option(
     "--verbose",
     is_flag=True,
     help="Enable verbose output from sklearn models (shows training progress)",
@@ -446,6 +516,9 @@ def train(
     classifier_mode: str,
     classifier_c: float,
     classifier_class_weight: str,
+    classifier_algo: str,
+    max_train_positions: int | None,
+    max_test_positions: int | None,
     verbose: bool,
     n_jobs: int,
     upload_to_hub: bool,
@@ -478,17 +551,42 @@ def train(
 
     print(f"  Layer: {layer_name}")
     print(f"  Classifier mode: {classifier_mode}")
+    print(f"  Classifier algorithm: {classifier_algo}")
     print(f"  Classifier C: {classifier_c}")
     print(f"  Classifier class_weight: {classifier_class_weight}")
     print(f"  Parallel jobs (n_jobs): {n_jobs}")
+    if max_train_positions:
+        print(f"  Max train positions: {max_train_positions}")
+    if max_test_positions:
+        print(f"  Max test positions: {max_test_positions}")
 
     print("\nLoading LC0 model from HuggingFace Hub...")
-    lc0_model_path = hf_hub_download(repo_id=lc0_model_repo_id, filename=lc0_model_filename)
-    model = LczeroModel.from_path(lc0_model_path)
-    print("Model loaded successfully!")
+    try:
+        lc0_model_path = hf_hub_download(repo_id=lc0_model_repo_id, filename=lc0_model_filename)
+        model = LczeroModel.from_path(lc0_model_path)
+        print("Model loaded successfully!")
+    except Exception as e:
+        print(f"ERROR: Failed to download LC0 model from {lc0_model_repo_id}/{lc0_model_filename}")
+        print(f"Error: {e}")
+        print("\nPlease verify:")
+        print(f"  1. Repository exists: https://huggingface.co/{lc0_model_repo_id}")
+        print(f"  2. File '{lc0_model_filename}' exists in the repository")
+        print("  3. Your internet connection is working")
+        raise SystemExit(1) from e
 
     print("\nLoading training data from HuggingFace Hub...")
-    positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    try:
+        positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
+    except Exception as e:
+        print(f"ERROR: Failed to download dataset from {dataset_repo_id}/{dataset_filename}")
+        print(f"Error: {e}")
+        print("\nPlease verify:")
+        print(f"  1. Repository exists: https://huggingface.co/datasets/{dataset_repo_id}")
+        print(f"  2. File '{dataset_filename}' exists in the repository")
+        if dataset_revision:
+            print(f"  3. Revision '{dataset_revision}' exists")
+        print("  4. Your internet connection is working")
+        raise SystemExit(1) from e
 
     print("\nSplitting dataset...")
     indices = np.arange(len(positions))
@@ -503,6 +601,21 @@ def train(
         # by default not using any positions w/o validated concepts
         train_positions, _ = split_positions(train_positions)
         # test_positions, _ = split_positions(test_positions)
+
+    # Apply position limits if specified
+    if max_train_positions and len(train_positions) > max_train_positions:
+        print(f"Limiting training positions from {len(train_positions)} to {max_train_positions}")
+        import random
+
+        random.seed(random_seed)
+        train_positions = random.sample(train_positions, max_train_positions)
+
+    if max_test_positions and len(test_positions) > max_test_positions:
+        print(f"Limiting test positions from {len(test_positions)} to {max_test_positions}")
+        import random
+
+        random.seed(random_seed)
+        test_positions = random.sample(test_positions, max_test_positions)
 
     print(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
 
@@ -561,6 +674,7 @@ def train(
             random_seed=random_seed,
             classifier_c=classifier_c,
             classifier_class_weight=classifier_class_weight,
+            classifier_algo=classifier_algo,
             verbose=verbose,
             n_jobs=n_jobs,
         )
@@ -574,6 +688,7 @@ def train(
             random_seed=random_seed,
             classifier_c=classifier_c,
             classifier_class_weight=classifier_class_weight,
+            classifier_algo=classifier_algo,
             verbose=verbose,
             n_jobs=n_jobs,
         )

@@ -197,7 +197,14 @@ class ConceptProbe:
 
         if hasattr(self.classifier, "predict_proba"):
             probas = self.classifier.predict_proba(features)[0]
+        elif hasattr(self.classifier, "decision_function"):
+            # For SVM classifiers, convert decision function to pseudo-probabilities
+            # using sigmoid for multi-label (OneVsRestClassifier)
+            decision = self.classifier.decision_function(features)[0]
+            # Apply sigmoid: 1 / (1 + exp(-x))
+            probas = 1 / (1 + np.exp(-decision))
         else:
+            # Fallback: use binary predictions as 0/1 probabilities
             predictions = self.classifier.predict(features)[0]
             probas = predictions.astype(float)
 
