@@ -7,13 +7,14 @@ from pathlib import Path
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from chess_sandbox.concept_extraction.stockfish_concepts import Stockfish8ConceptExtractor
+from chess_sandbox.concept_extraction.stockfish_concepts import (
+    Stockfish8ConceptExtractor,
+    Stockfish8Config,
+)
 
-# Path to Stockfish 8
-stockfish_path = Path(__file__).parent / "data" / "engines" / "stockfish-8" / "src" / "stockfish"
-
-# Initialize extractor
-extractor = Stockfish8ConceptExtractor(stockfish_path)
+# Initialize with default config
+config = Stockfish8Config()
+extractor = Stockfish8ConceptExtractor(config)
 
 # Test position: Italian Game
 fen = "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3"

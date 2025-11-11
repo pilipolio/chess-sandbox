@@ -3,6 +3,10 @@
 This module provides functionality to extract chess concepts from positions
 using Stockfish 8's eval command, which returns detailed evaluation breakdowns
 by term (Material, Mobility, King safety, etc.).
+
+Note: The 'eval' command is a non-standard UCI extension specific to Stockfish.
+This implementation uses subprocess communication since python-chess doesn't
+support custom UCI commands through its engine API.
 """
 
 import re
@@ -12,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import chess
+
+from chess_sandbox.config import settings
 
 
 @dataclass
@@ -74,8 +80,59 @@ class PositionConcepts:
         return result
 
 
+class Stockfish8Config:
+    """Configuration for Stockfish 8 concept extraction.
+
+    Follows the EngineConfig pattern from chess_sandbox.engine.analyse.
+    """
+
+    def __init__(self, stockfish_8_path: str | Path | None = None):
+        """Initialize configuration.
+
+        Args:
+            stockfish_8_path: Path to Stockfish 8 binary.
+                If None, uses STOCKFISH_8_PATH from settings,
+                falling back to data/engines/stockfish-8/src/stockfish.
+        """
+        if stockfish_8_path is None:
+            # Try settings first, then fallback to default location
+            if hasattr(settings, "STOCKFISH_8_PATH"):
+                self.stockfish_path = Path(settings.STOCKFISH_8_PATH)
+            else:
+                # Default path relative to project root
+                default_path = Path(__file__).parent.parent.parent / "data" / "engines" / "stockfish-8" / "src" / "stockfish"
+                self.stockfish_path = default_path
+        else:
+            self.stockfish_path = Path(stockfish_8_path)
+
+    def validate(self) -> None:
+        """Validate that Stockfish 8 binary exists.
+
+        Raises:
+            FileNotFoundError: If binary not found at configured path
+        """
+        if not self.stockfish_path.exists():
+            raise FileNotFoundError(
+                f"Stockfish 8 binary not found at {self.stockfish_path}. "
+                f"Please compile Stockfish 8 or update STOCKFISH_8_PATH in settings."
+            )
+
+
 class Stockfish8ConceptExtractor:
-    """Extract chess concepts using Stockfish 8 eval command."""
+    """Extract chess concepts using Stockfish 8 eval command.
+
+    Uses subprocess to communicate directly with Stockfish since the eval
+    command is a non-standard UCI extension not supported by python-chess.
+
+    Example:
+        >>> from pathlib import Path
+        >>> config = Stockfish8Config()
+        >>> extractor = Stockfish8ConceptExtractor(config)
+        >>> fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        >>> concepts = extractor.get_concepts(fen)
+        >>> concepts.mobility.total_advantage
+        0.0
+    """
 
     # Mapping from eval output terms to attribute names
     TERM_MAP = {
@@ -93,15 +150,21 @@ class Stockfish8ConceptExtractor:
         "Space": "space",
     }
 
-    def __init__(self, stockfish_path: str | Path):
-        """Initialize with path to Stockfish 8 binary.
+    def __init__(self, config: Stockfish8Config | None = None):
+        """Initialize extractor.
 
         Args:
-            stockfish_path: Path to Stockfish 8 executable
+            config: Configuration object. If None, uses default config.
+
+        Raises:
+            FileNotFoundError: If Stockfish 8 binary not found
         """
-        self.stockfish_path = Path(stockfish_path)
-        if not self.stockfish_path.exists():
-            raise FileNotFoundError(f"Stockfish binary not found at {stockfish_path}")
+        if config is None:
+            config = Stockfish8Config()
+
+        config.validate()
+        self.config = config
+        self.stockfish_path = config.stockfish_path
 
     def _parse_score(self, value: str) -> float | None:
         """Parse a score value, handling --- for zero/invalid."""

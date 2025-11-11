@@ -5,18 +5,17 @@ This script demonstrates how to extract chess concepts from positions using
 Stockfish 8's detailed evaluation breakdown.
 """
 
-from pathlib import Path
-
-from chess_sandbox.concept_extraction.stockfish_concepts import Stockfish8ConceptExtractor
+from chess_sandbox.concept_extraction.stockfish_concepts import (
+    Stockfish8ConceptExtractor,
+    Stockfish8Config,
+)
 
 
 def main() -> None:
     """Run concept extraction demo on various positions."""
-    # Path to Stockfish 8 binary
-    stockfish_path = Path(__file__).parent.parent / "data" / "engines" / "stockfish-8" / "src" / "stockfish"
-
-    # Initialize extractor
-    extractor = Stockfish8ConceptExtractor(stockfish_path)
+    # Initialize with default config (uses settings or default path)
+    config = Stockfish8Config()
+    extractor = Stockfish8ConceptExtractor(config)
 
     # Test positions
     positions = {

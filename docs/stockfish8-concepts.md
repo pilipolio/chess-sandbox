@@ -51,7 +51,29 @@ cd src
 make -j build ARCH=x86-64
 ```
 
-### 2. Python Dependencies
+### 2. Configuration
+
+The extractor follows the `EngineConfig` pattern from `chess_sandbox.engine.analyse`. You can configure the Stockfish 8 path in three ways:
+
+**Option 1: Use default path (recommended)**
+```python
+from chess_sandbox.concept_extraction.stockfish_concepts import Stockfish8Config
+config = Stockfish8Config()  # Uses data/engines/stockfish-8/src/stockfish
+```
+
+**Option 2: Set in environment/settings**
+```bash
+# In .env file
+STOCKFISH_8_PATH=path/to/your/stockfish8
+```
+
+**Option 3: Specify directly**
+```python
+from pathlib import Path
+config = Stockfish8Config(stockfish_8_path=Path("custom/path/to/stockfish8"))
+```
+
+### 3. Python Dependencies
 
 The `chess` library is required and is already in the project dependencies.
 
@@ -60,12 +82,19 @@ The `chess` library is required and is already in the project dependencies.
 ### Python API
 
 ```python
-from pathlib import Path
-from chess_sandbox.concept_extraction.stockfish_concepts import Stockfish8ConceptExtractor
+from chess_sandbox.concept_extraction.stockfish_concepts import (
+    Stockfish8ConceptExtractor,
+    Stockfish8Config,
+)
 
-# Initialize extractor
-stockfish_path = Path("data/engines/stockfish-8/src/stockfish")
-extractor = Stockfish8ConceptExtractor(stockfish_path)
+# Initialize with default config (uses STOCKFISH_8_PATH from settings)
+config = Stockfish8Config()
+extractor = Stockfish8ConceptExtractor(config)
+
+# Or specify a custom path
+from pathlib import Path
+custom_config = Stockfish8Config(stockfish_8_path=Path("path/to/stockfish8"))
+extractor = Stockfish8ConceptExtractor(custom_config)
 
 # Extract concepts from a position
 fen = "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3"
@@ -132,6 +161,21 @@ Total evaluation: +0.24
 
 ## Technical Details
 
+### Why Subprocess Instead of python-chess?
+
+The `eval` command is a **non-standard UCI extension** specific to Stockfish. The python-chess library's engine API (`chess.engine.SimpleEngine`) only supports standard UCI commands like `go`, `stop`, and `setoption`.
+
+While python-chess has internal `send_line()` methods in its `Protocol` class, these are:
+- Not part of the public API
+- Designed for asynchronous communication
+- Require complex command queueing and response handling
+
+Since the `eval` command is a simple request-response pattern that returns text output (not standard UCI info lines), using subprocess provides:
+- ✅ Simpler, more direct communication
+- ✅ Easier to parse the non-standard tabular output
+- ✅ No dependencies on internal python-chess APIs
+- ✅ Consistent with the codebase's `EngineConfig` pattern
+
 ### How It Works
 
 1. The extractor communicates with Stockfish 8 via subprocess using the UCI protocol
@@ -145,6 +189,14 @@ Total evaluation: +0.24
 3. Stockfish responds with a detailed evaluation table showing all concept scores
 4. The output is parsed to extract middlegame and endgame scores for each concept
 5. A total advantage is computed as the average of MG and EG scores
+
+### Integration with Existing Code
+
+The implementation follows the `EngineConfig` pattern from `chess_sandbox.engine.analyse`:
+- Uses `Stockfish8Config` for configuration (similar to `EngineConfig`)
+- Reads from `settings.STOCKFISH_8_PATH` (similar to `settings.STOCKFISH_PATH`)
+- Provides sensible defaults with override capability
+- Validates configuration before use
 
 ### Parsing the Eval Output
 
