@@ -17,3 +17,8 @@ wheels/
 data
 
 .cache/
+
+# HuggingFace model cache
+.locks/
+models--*/
+datasets--*/
