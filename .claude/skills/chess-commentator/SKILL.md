@@ -22,6 +22,8 @@ This skill automatically triggers when:
 
 ### 0. Install Python dependencies (Only once at start up)
 
+** Only relevant for environments with SVG visualisation enabled ** through Artefacts or similar tools.
+
 The SVG visualization feature requires the python-chess library and should be installed as the 1st step.
 
 ```bash
@@ -30,10 +32,14 @@ pip install chess==1.11.2
 
 ### 1. Query endpoints (Recommended)
 
-Use the provided script to retrieve position analysis, concept extraction and SVG/asci representations of the board as a Claude Artefact:
+Use the provided script to retrieve position analysis, concept extraction and SVG or SVG representation of the board. Use the output argument in environment with rich UI (ie Claude Artefact viewwe) able to display SVG images.
 
 ```bash
+# For environments with rich UI capabilities
 python3 scripts/query_analysis.py "<FEN>" --output position.svg
+
+# For terminal like environments
+python3 scripts/query_analysis.py "<FEN>"
 ```
 
 Example:
@@ -44,6 +50,7 @@ python3 scripts/query_analysis.py "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR
 ### 2. Interpreting Script Output
 
 The script outputs:
+
 1. **Position diagram** - Visual representation of the board
 2. **FEN** - Position in FEN notation
 3. **Turn** - Who is to move
@@ -52,7 +59,9 @@ The script outputs:
 
 ### 3. Providing Commentary
 
-Start displaying the board, using Claude's artifact viewer if available.
+Start displaying the board:
+ * Use the output svg with Claude's artifact viewer if available,
+ * Show the ascii representation in terminal like environment (ie Claude Code).
 
 Provide **succinct commentary** that includes:
 

@@ -1,6 +1,12 @@
 # chess-sandbox
 
-This project implement research ideas for concept-grounded chess commentary with a focus on reproducibility, traceability and real world deployment prodived by modern open-source and cloud providers in the pyhton ecosystem.
+Implements research ideas for concept-grounded chess commentary in a production-ready ML/AI architecture.
+
+**Key Features:**
+- Interactive Claude skill for analyzing chess positions in natural language
+- ML model detecting 10+ tactical/strategic concepts (pins, forks, weak squares, etc.) from Leela Chess Zero neural network activations
+- Serverless inference endpoint for real-time concept extraction
+- Labelling and training pipelines with traceability and reproducibility focus
 
 ## Architecture
 
@@ -11,36 +17,35 @@ This project implement research ideas for concept-grounded chess commentary with
 ### High-level
 
 1. **Chess Commentary Skill** - A [Claude skill](https://www.claude.com/blog/skills) that enables a user to ask natural language query about a chess position (with FEN notation or game references like "Paul Morphy's Opera game") and an LLM to generate commentary grounded in position evaluation and chess concepts:
-   - Chess engine evaluation and principal variations (Stockfish)
-   - SVG visualization of positions
+   - Chess engine evaluation and principal variations ([Stockfish](https://stockfishchess.org/))
+   - SVG visualization of positions ([python-chess](https://python-chess.readthedocs.io/))
    - Concept extraction from a bespoke ML exposed via HTTP endpoint
 2. **Extract-Concepts Endpoint** - Serverless [Modal.com](https://modal.com/) HTTP endpoint returning detected concepts and confidence scores from a ML classifier.
 3. **Training Pipeline** - ML model training (local or Modal) for concept extraction:
    - Trained on [Leela Chess Zero (LC0)](https://lczero.org/) neural network activations
-   - Logistic Regression classifiers using [scikit-learn](https://scikit-learn.org/)
-4. **HuggingFace** - Centralized storage for datasets and trained models with associated model cards and evaluation metrics.
+   - Logistic Regression classifiers using [scikit-learn](https://scikit-learn.org/) and [lczerolens](https://lczerolens.readthedocs.io/).
+4. **Models and datasets repository** - [HuggingFace](https://huggingface.co/) as centralized storage for datasets and trained models with associated model cards and evaluation metrics.
 5. **CI/CD** - GitHub Actions for code quality checks and gated code/model updates.
 
+### Future Works
 
-### Detailled Tech Stack
+ * Human and LLM-as-Judge evaluation of generated chess commentaries using standardized quality metrics
+ * Data-centric improvements by collecting chess experts' feedback and annotations using https://prodi.gy/
+ * Additional board features relevant to extracted concepts
+ * Agentic "chess analyst" to explore moves and engine/human lines 
 
-**Core Components:**
-- **Chess Engines:** [Stockfish](https://stockfishchess.org/) (position evaluation), [Leela Chess Zero](https://lczero.org/) (neural network activations)
-- **ML Framework:** scikit-learn (Logistic Regression), [lczerolens](https://lczerolens.readthedocs.io/) (LC0 model interpretation)
-- **LLM Integration:** Claude (via [Claude Skills](https://www.claude.com/blog/skills))
-- **Serverless Deployment:** [Modal](https://modal.com/docs) - See [ADR](docs/adrs/20251029-use-modal-for-serverless-endpoints.md) for rationale
-- **Model Hub:** [HuggingFace Hub](https://huggingface.co/) (datasets, models, metrics)
+## Project 
 
-**Development:**
+Scaffolding templated from [postmodern-python](https://github.com/carderne/postmodern-python)
+
+### Stack
+- **Python 3.13+**
 - **Package Management:** [uv](https://docs.astral.sh/uv/)
 - **Type Safety:** Pydantic models, pyright (strict mode)
 - **Code Quality:** ruff (format/lint), pytest (unit tests)
-- **Chess Library:** [python-chess](https://python-chess.readthedocs.io/)
 - **CI/CD:** GitHub Actions
 
-Project scaffolding templated from [postmodern-python](https://github.com/carderne/postmodern-python)
-
-### Project Structure
+### Code Structure
 
 ```
 chess_sandbox/
@@ -65,22 +70,51 @@ docs/
 └── plans/                     # Implementation plans
 ```
 
-## Future works
-
- * Human and LLM-as-Judge evaluation of generated chess commentaries using 
- * Data-centric improvements by collecting chess experts' feedback and annotations using https://prodi.gy/
- * ...
-
 ## Quick Start
 
-### Prerequisites
+### Claude Code Skill
 
-- Python 3.13+
-- [uv](https://docs.astral.sh/uv/) for dependency management
+Requires to clone the repository and have Claude Code installed:
+
+```bash
+git clone git@github.com:pilipolio/chess-sandbox.git
+cd chess-sandbox
+claude
+
+...
+
+> Analyse this position
+r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15
+
+⏺ I'll analyze this chess position using the chess-commentator skill. Let me
+  start by querying the analysis endpoints.
+
+⏺ Bash(cd /Users/guillaumeallain/D/chess-sandbox/.claude/skills/chess-commentator
+      && python3 scripts/query_analysis.py
+      "r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2…)
+  ⎿  Running…
+...
+
+  Thematic Insights
+
+  This middlegame position features strong pin pressure (60.8% confidence) and
+   potential fork tactics (24.8% confidence). Black's bishop on d4 is
+  well-centralized and actively pinning the Nc3, creating coordination
+  challenges for White. The position revolves around king safety, piece
+  activity, and control of key central squares.```
+
+...
+```
+
+### Development 
+
+**Required:**
 - [Stockfish](https://stockfishchess.org/download/) chess engine
-- TOCLEAN:[Modal](https://modal.com/) account (serverless deployment and pipelines)
-- TOCLEAN: [Huggingface](https://huggingface.co/) account (pulling datasets and models)
-- OpenAI API key (optional, only for dataset creation with LLM validation)
+
+**Optional (for advanced features):**
+- [Modal](https://modal.com/) account - Required only for serverless deployment and running training pipelines on Modal
+- [HuggingFace](https://huggingface.co/) account - Required only for training models or pushing models/datasets to the Hub
+- OpenAI API key - Required only for dataset creation with LLM validation
 
 ### Setup
 
@@ -98,7 +132,8 @@ cp .env.example .env
 # OPENAI_API_KEY=your-api-key-here           # Optional: for dataset creation only
 ```
 
-3. Run checks
+3. Verify installation:
+
 ```bash
 uv run poe all
 ```
@@ -109,10 +144,17 @@ uv run poe all
 source .venv/bin/activate
 ```
 
-5. Locally run concept extraction (May require Huggingface account set-up, see TODO)
+5. (Optional) Test local concept extraction
 
 ```bash
+# Downloads models from HuggingFace Hub (public models, no auth required)
 uv run python -m chess_sandbox.concept_extraction.model.inference predict "r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15"
+```
+
+Note: If you encounter authentication issues, you may need to create a HuggingFace model and set-up local credentials:
+
+```bash
+uv run hf
 ```
 
 ## Usage
@@ -136,18 +178,30 @@ The skill is located in `.claude/skills/chess-commentator/` and triggers automat
 
 **Installation:**
 
-TODO: package zip, following documentation
+- **Claude Code users**: The skill is automatically available when working in this repository
+- **Claude.AI users**: Zip the `.claude/skills/chess-commentator/` directory and add to `https://claude.ai/settings/capabilities`
 
 ## Concept Extraction
 
 ### Inference
 
-Locally running:
+To inspect concept predictions locally, re-use the Quick Start command and review the JSON output:
 ```bash
 uv run python -m chess_sandbox.concept_extraction.model.inference predict "r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15"
 ```
 
-Or by querying the extract-concepts endpoint:
+Sample (truncated) output:
+```json
+{
+  "input_fen": "r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15",
+  "predictions": [
+    {"concept": "weak_back_rank", "confidence": 0.91},
+    {"concept": "passed_pawn", "confidence": 0.63}
+  ]
+}
+```
+
+For remote inference without downloading models locally, call the production endpoint:
 
 ```bash
 curl "https://pilipolio--chess-concept-extraction-extract-concepts.modal.run?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR+b+KQkq+e3+0+1&threshold=0.1"
