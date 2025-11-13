@@ -1,12 +1,31 @@
 # chess-sandbox
 
-Implements research ideas for concept-grounded chess commentary in a production-ready ML/AI architecture.
+Implements research ideas for chess commentary generation in a production-grade ML/AI engineering architecture.
+
+## Research Context
+
+This project builds on recent advances in concept-guided chess commentary generation, specifically:
+
+**[Kim et al. (2025) - "Bridging the Gap between Expert and Language Models"](https://arxiv.org/html/2410.20811v2)** introduced the approach of extracting chess concepts from neural network activations to ground LLM-generated commentary. Their method uses:
+- **Leela Chess Zero (LC0) neural network activations** to build vector representations of chess positions
+- **Stockfish 8 evaluation heuristics** as concept labels (~24 engine-internal features: material, imbalance, king safety, mobility, threats, etc.)
+- **Linear SVM classifiers** for concept detection framed as a multi-class problem (see [code](https://github.com/ml-postech/concept-guided-chess-commentary/blob/master/01_probing_svm.py#L133))
+
+Our implementation extends this approach with a key distinction:
+
+**Human-Grounded Concepts** (our contribution):
+- Instead of being limited to Stockfish 8's evaluation heuristics, we rely on **12 concepts from human game commentary**, including tactical motifs such pin, fork, skewer, but alo positional and strategical ones such as outpost, weak square, initiative
+- **Two-stage labelling pipeline**: regex pattern matching + LLM validation to extract concepts from annotated PGN games in the [Gameknot dataset](https://huggingface.co/datasets/Waterhorse/chess_data) introduced by [Feng et al. (2023) - ChessGPT](https://arxiv.org/html/2306.09200v2)
+- **Annotated Dataset**: [97,995 labelled positions](https://huggingface.co/datasets/pilipolio/chess-positions-concepts) (28K train, 70K test) available on HuggingFace Hub
+
+This enables concept detection grounded in how chess players naturally describe positions, rather than being constrained to engine evaluation heuristics.
 
 **Key Features:**
 - Interactive Claude skill for analyzing chess positions in natural language
-- ML model detecting 10+ tactical/strategic concepts (pins, forks, weak squares, etc.) from Leela Chess Zero neural network activations
+- Multi‑label classificater using a one-vs-rest layer of logistic regressions detecting concepts from LC0 neural network activations
+- Rigorous model evaluation with per-concept precision/recall/AUC metrics
 - Serverless inference endpoint for real-time concept extraction
-- Labelling and training pipelines with traceability and reproducibility focus
+- Reproducible labelling and training pipelines with version-controlled datasets and models
 
 ## Architecture
 
@@ -21,9 +40,10 @@ Implements research ideas for concept-grounded chess commentary in a production-
    - SVG visualization of positions ([python-chess](https://python-chess.readthedocs.io/))
    - Concept extraction from a bespoke ML exposed via HTTP endpoint
 2. **Extract-Concepts Endpoint** - Serverless [Modal.com](https://modal.com/) HTTP endpoint returning detected concepts and confidence scores from a ML classifier.
-3. **Training Pipeline** - ML model training (local or Modal) for concept extraction:
+3. **Training Pipeline** - ML model training and evaluation (local or Modal) for concept extraction:
    - Trained on [Leela Chess Zero (LC0)](https://lczero.org/) neural network activations
    - Logistic Regression classifiers using [scikit-learn](https://scikit-learn.org/) and [lczerolens](https://lczerolens.readthedocs.io/).
+  - Multi-label classification evaluation with comprehensive metrics (AUC-ROC, precision/recall and subset accuracy with micro/macro/per concepts averages)
 4. **Models and datasets repository** - [HuggingFace](https://huggingface.co/) as centralized storage for datasets and trained models with associated model cards and evaluation metrics.
 5. **CI/CD** - GitHub Actions for code quality checks and gated code/model updates.
 
@@ -31,7 +51,7 @@ Implements research ideas for concept-grounded chess commentary in a production-
 
  * Human and LLM-as-Judge evaluation of generated chess commentaries using standardized quality metrics
  * Data-centric improvements by collecting chess experts' feedback and annotations using https://prodi.gy/
- * Additional board features relevant to extracted concepts
+ * Providing additional board features relevant to extracted concepts to aid comment generation
  * Agentic "chess analyst" to explore moves and engine/human lines 
 
 ## Project 
