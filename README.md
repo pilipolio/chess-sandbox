@@ -139,17 +139,17 @@ r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15
 
 1. Install dependencies:
 
-**CPU-only (default, ~100MB - recommended for most users):**
+**CPU-only (default - recommended for most users):**
 ```bash
-uv sync --group cpu
+uv sync
 ```
 
-**GPU with CUDA support (~7GB - only if you have NVIDIA GPU and want GPU acceleration):**
+**GPU with CUDA support (~7GB - only if you have NVIDIA GPU):**
 ```bash
-UV_INDEX_URL=https://pypi.org/simple uv sync --group gpu
+UV_INDEX_URL=https://pypi.org/simple uv sync
 ```
 
-> **Note:** The CPU version is significantly lighter (saves ~6.9GB) and sufficient for most use cases. Only install the GPU version if you need CUDA acceleration for training or large-scale inference.
+> **Note:** By default, `uv sync` installs CPU-only PyTorch (~1.5GB total). This saves ~5.7GB compared to the GPU version and is sufficient for most use cases. Only use the GPU installation if you need CUDA acceleration for training or large-scale inference.
 
 2. Set environment variables:
 ```bash
