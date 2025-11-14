@@ -5,6 +5,9 @@ import modal
 
 from chess_sandbox.engine.analyse import EngineConfig
 from chess_sandbox.engine.position_analysis import PositionAnalysis, analyze_position
+from chess_sandbox.logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 image = (
     modal.Image.debian_slim()
@@ -24,10 +27,10 @@ _stockfish_engine: chess.engine.SimpleEngine | None = None
 def get_stockfish_engine() -> chess.engine.SimpleEngine:
     global _stockfish_engine
     if _stockfish_engine is None:
-        print("Initializing Stockfish engine...")
+        logger.info("Initializing Stockfish engine...")
         config = EngineConfig.stockfish()
         _stockfish_engine = config.instantiate()
-        print("Stockfish engine initialized successfully")
+        logger.info("Stockfish engine initialized successfully")
     return _stockfish_engine
 
 

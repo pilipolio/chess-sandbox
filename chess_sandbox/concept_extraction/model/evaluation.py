@@ -14,9 +14,12 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_a
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from chess_sandbox.lichess import get_analysis_url
+from chess_sandbox.logging_config import setup_logging
 
 from .dataset import load_dataset_from_hf
 from .inference import ConceptExtractor, hf_hub_options
+
+logger = setup_logging(__name__)
 
 
 class ConceptMetrics(BaseModel):
@@ -330,11 +333,11 @@ def evaluate(
     dataset_ref = f"{dataset_repo_id}/{dataset_filename}"
     if dataset_revision:
         dataset_ref += f"@{dataset_revision}"
-    print("Evaluating concept probe")
-    print(f"  Model: {model_repo_id}")
-    print(f"  Dataset: {dataset_ref}")
+    logger.info("Evaluating concept probe")
+    logger.info(f"  Model: {model_repo_id}")
+    logger.info(f"  Dataset: {dataset_ref}")
 
-    print("\nLoading ConceptExtractor from HuggingFace Hub...")
+    logger.info("\nLoading ConceptExtractor from HuggingFace Hub...")
     extractor = ConceptExtractor.from_hf(
         probe_repo_id=model_repo_id,
         model_repo_id=lc0_repo_id,
@@ -344,10 +347,10 @@ def evaluate(
         force_download=force_download,
         token=token,
     )
-    print(f"Loaded probe: {extractor.probe}")
-    print(f"Concepts: {', '.join(extractor.probe.concept_list)}")
+    logger.info(f"Loaded probe: {extractor.probe}")
+    logger.info(f"Concepts: {', '.join(extractor.probe.concept_list)}")
 
-    print("\nLoading evaluation dataset from HuggingFace Hub...")
+    logger.info("\nLoading evaluation dataset from HuggingFace Hub...")
     labelled_positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
     fens = [p.fen for p in labelled_positions]
@@ -363,15 +366,15 @@ def evaluate(
         sample_labels = [labels[i] for i in sample_indices]
         sample_predictions_with_confidence = [all_predictions_with_confidence[i] for i in sample_indices]
 
-        print(f"\n{'=' * 70}")
-        print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
-        print(f"{'=' * 70}\n")
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f"SAMPLE PREDICTIONS ({n_samples} examples)")
+        logger.info(f"{'=' * 70}\n")
 
         for pos, ground_truth, predicted_concepts in zip(
             sample_fens, sample_labels, sample_predictions_with_confidence, strict=True
         ):
-            print(f"FEN: {pos}")
-            print(f"Lichess: {get_analysis_url(pos)}")
+            logger.info(f"FEN: {pos}")
+            logger.info(f"Lichess: {get_analysis_url(pos)}")
 
             above_threshold_extracted_concept = [c for c, score in predicted_concepts if score >= threshold]
 
@@ -379,18 +382,18 @@ def evaluate(
 
             gt_str = ", ".join(ground_truth) if ground_truth else "(none)"
             pred_str = ", ".join(above_threshold_extracted_concept) if above_threshold_extracted_concept else "(none)"
-            print(f"Ground Truth: {gt_str}")
-            print(f"Prediction:   {pred_str} {match_marker}")
-            print()
+            logger.info(f"Ground Truth: {gt_str}")
+            logger.info(f"Prediction:   {pred_str} {match_marker}")
+            logger.info("")
 
-    print("\nCalculating comprehensive metrics on full dataset...")
-    print(f"Extracting activations for {len(labelled_positions)} positions...")
+    logger.info("\nCalculating comprehensive metrics on full dataset...")
+    logger.info(f"Extracting activations for {len(labelled_positions)} positions...")
 
     y_true, y_score = prepare_predictions(all_predictions_with_confidence, labels, extractor.probe.concept_list)
     metrics = calculate_multilabel_metrics(y_true, y_score, extractor.probe.concept_list, threshold)
 
-    print("\n" + format_metrics_display(metrics))
-    print()
+    logger.info("\n" + format_metrics_display(metrics))
+    logger.info("")
 
 
 if __name__ == "__main__":

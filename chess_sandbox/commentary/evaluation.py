@@ -15,7 +15,10 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from ..lichess import get_analysis_url
+from ..logging_config import setup_logging
 from .commentator import Commentator, print_explanation
+
+logger = setup_logging(__name__)
 
 
 class ThemeJudgement(BaseModel):
@@ -114,19 +117,19 @@ def save_results(results: List[EvaluationResult], output_path: str) -> None:
 
 def print_summary(results_by_config: Dict[str, List[EvaluationResult]]) -> None:
     """Print evaluation summary with average scores."""
-    print("\n" + "=" * 70)
-    print("EVALUATION RESULTS SUMMARY")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("EVALUATION RESULTS SUMMARY")
+    logger.info("=" * 70)
 
     for config_name, results in results_by_config.items():
         scores = [r.score for r in results]
         avg_score = sum(scores) / len(scores) if scores else 0
 
-        print(f"\nConfiguration: {config_name}")
-        print(f"  Positions Evaluated: {len(results)}")
-        print(f"  Average Score: {avg_score:.2f}/100")
-        print(f"  Score Range: {min(scores):.1f} - {max(scores):.1f}")
-        print("-" * 70)
+        logger.info(f"\nConfiguration: {config_name}")
+        logger.info(f"  Positions Evaluated: {len(results)}")
+        logger.info(f"  Average Score: {avg_score:.2f}/100")
+        logger.info(f"  Score Range: {min(scores):.1f} - {max(scores):.1f}")
+        logger.info("-" * 70)
 
 
 def evaluate_position(
@@ -138,7 +141,7 @@ def evaluate_position(
 ) -> EvaluationResult:
     board = chess.Board(fen)
 
-    print(f"\nAnalyzing with {config_name}...")
+    logger.info(f"\nAnalyzing with {config_name}...")
     explanation = commentator.analyze(board)
     print_explanation(explanation)
 
@@ -163,12 +166,12 @@ def run_evaluation(
     results_by_config: Dict[str, List[EvaluationResult]] = {}
 
     for config in configs:
-        print(f"\n{'=' * 70}")
-        print(f"CONFIGURATION: {config.name}")
-        print(f"{'=' * 70}")
-        print(f"Engine: depth={config.params['engine']['depth']}, num_lines={config.params['engine']['num_lines']}")
-        print(f"LLM: {config.params['llm']}")
-        print(f"{'=' * 70}")
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f"CONFIGURATION: {config.name}")
+        logger.info(f"{'=' * 70}")
+        logger.info(f"Engine: depth={config.params['engine']['depth']}, num_lines={config.params['engine']['num_lines']}")
+        logger.info(f"LLM: {config.params['llm']}")
+        logger.info(f"{'=' * 70}")
 
         commentator = Commentator.create(config.params)
         results: List[EvaluationResult] = []
@@ -177,10 +180,10 @@ def run_evaluation(
             fen = item["fen"]
             ground_truth_themes = item["themes"]
 
-            print(f"\n{'=' * 70}")
-            print(f"POSITION {i}/{len(ground_truth_data)}")
-            print(f"{'=' * 70}")
-            print(f"Lichess: {get_analysis_url(fen)}")
+            logger.info(f"\n{'=' * 70}")
+            logger.info(f"POSITION {i}/{len(ground_truth_data)}")
+            logger.info(f"{'=' * 70}")
+            logger.info(f"Lichess: {get_analysis_url(fen)}")
 
             try:
                 result = evaluate_position(
@@ -191,20 +194,20 @@ def run_evaluation(
                     config.name,
                 )
 
-                print(f"\n{'=' * 70}")
-                print("RESULTS")
-                print(f"{'=' * 70}")
-                print(f"Ground Truth Themes: {ground_truth_themes}")
-                print(f"Predicted Themes: {result.predicted_themes}")
-                print(f"Judge Score: {result.score:.1f}/100")
-                print(f"Judge Rationale: {result.rationale}")
+                logger.info(f"\n{'=' * 70}")
+                logger.info("RESULTS")
+                logger.info(f"{'=' * 70}")
+                logger.info(f"Ground Truth Themes: {ground_truth_themes}")
+                logger.info(f"Predicted Themes: {result.predicted_themes}")
+                logger.info(f"Judge Score: {result.score:.1f}/100")
+                logger.info(f"Judge Rationale: {result.rationale}")
 
                 results.append(result)
 
             except Exception as e:
-                print(f"\n{'=' * 70}")
-                print(f"ERROR: {e}")
-                print(f"{'=' * 70}")
+                logger.info(f"\n{'=' * 70}")
+                logger.info(f"ERROR: {e}")
+                logger.info(f"{'=' * 70}")
                 continue
 
         results_by_config[config.name] = results
@@ -212,18 +215,18 @@ def run_evaluation(
         # Save results for this config
         output_path = f"data/results/eval_{config.name}.jsonl"
         save_results(results, output_path)
-        print(f"\n{'=' * 70}")
-        print(f"Results saved to: {output_path}")
-        print(f"{'=' * 70}")
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f"Results saved to: {output_path}")
+        logger.info(f"{'=' * 70}")
 
     return results_by_config
 
 
 def main() -> None:
     ground_truth_path = "data/processed/chessdotcom.jsonl"
-    print(f"Loading ground truth from: {ground_truth_path}")
+    logger.info(f"Loading ground truth from: {ground_truth_path}")
     ground_truth_data = load_ground_truth(ground_truth_path)
-    print(f"Loaded {len(ground_truth_data)} positions")
+    logger.info(f"Loaded {len(ground_truth_data)} positions")
 
     # Define evaluation configurations
     configs = [
@@ -249,9 +252,9 @@ def main() -> None:
 
     print_summary(results_by_config)
 
-    print("\n" + "=" * 70)
-    print("Evaluation complete!")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("Evaluation complete!")
+    logger.info("=" * 70)
 
 
 if __name__ == "__main__":

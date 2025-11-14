@@ -20,11 +20,14 @@ from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 
 from ...git import get_commit_sha
+from ...logging_config import setup_logging
 from .dataset import LabelledPosition, load_dataset_from_hf, rebalance_positions, split_positions
 from .evaluation import calculate_multilabel_metrics, format_metrics_display
 from .features import LczeroModel, extract_features_batch
 from .inference import ConceptProbe
 from .model_artefact import ModelTrainingOutput, generate_probe_name
+
+logger = setup_logging(__name__)
 
 
 def normalize_predict_proba(y_proba: np.ndarray | list[np.ndarray]) -> np.ndarray:
@@ -132,7 +135,7 @@ def train_multiclass(
     Returns:
         Trained ModelTrainingOutput
     """
-    print("\n[1/4] Preparing labels...")
+    logger.info("\n[1/4] Preparing labels...")
     # Filter out positions without concepts (multi-class requires at least one concept)
     train_mask = [len(concepts) > 0 for concepts in y_train_labels]
     test_mask = [len(concepts) > 0 for concepts in y_test_labels]
@@ -149,17 +152,17 @@ def train_multiclass(
         )
 
     labels_flat = [concepts[0] for concepts in y_train_filtered]
-    print(f"Original: Train={X_train.shape[0]}, Test={X_test.shape[0]}")
-    print(f"Filtered (with concepts): Train={X_train_filtered.shape[0]}, Test={X_test_filtered.shape[0]}")
-    print("Flattened multi-label to multi-class (taking first concept)")
+    logger.info(f"Original: Train={X_train.shape[0]}, Test={X_test.shape[0]}")
+    logger.info(f"Filtered (with concepts): Train={X_train_filtered.shape[0]}, Test={X_test_filtered.shape[0]}")
+    logger.info("Flattened multi-label to multi-class (taking first concept)")
 
-    print("\n[2/4] Encoding labels...")
+    logger.info("\n[2/4] Encoding labels...")
     encoder = LabelEncoder()
     y_train_encoded = encoder.fit_transform(labels_flat)
     concept_list = list(encoder.classes_)
-    print(f"Label encoder classes: {encoder.classes_}")
+    logger.info(f"Label encoder classes: {encoder.classes_}")
 
-    print("\n[3/4] Training probe...")
+    logger.info("\n[3/4] Training probe...")
     clf = LogisticRegression(
         C=classifier_c,
         class_weight="balanced" if classifier_class_weight == "balanced" else None,
@@ -168,14 +171,14 @@ def train_multiclass(
         verbose=verbose,
         n_jobs=n_jobs,
     )
-    print(f"Training multi-class classifier with {len(encoder.classes_)} classes")
+    logger.info(f"Training multi-class classifier with {len(encoder.classes_)} classes")
     clf.fit(X_train_filtered, y_train_encoded)
-    print("Training complete!")
+    logger.info("Training complete!")
 
     baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
     baseline.fit(X_train_filtered, y_train_encoded)
 
-    print("\n[4/4] Evaluating...")
+    logger.info("\n[4/4] Evaluating...")
     eval_encoder = MultiLabelBinarizer()
     eval_encoder.fit([concept_list])
     y_test_binary = eval_encoder.transform(y_test_filtered)
@@ -186,7 +189,7 @@ def train_multiclass(
     baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_score_baseline, concept_list)
     probe_metrics = calculate_multilabel_metrics(y_test_binary, y_score_probe, concept_list)
 
-    print(format_metrics_display(probe_metrics, baseline_metrics=baseline_metrics))
+    logger.info(format_metrics_display(probe_metrics, baseline_metrics=baseline_metrics))
 
     probe = ConceptProbe(
         classifier=clf,
@@ -247,17 +250,17 @@ def train_multilabel(
     if not y_train_labels:
         raise ValueError("No validated concepts found! Cannot train without labels.")
 
-    print("\n[1/4] Encoding labels...")
+    logger.info("\n[1/4] Encoding labels...")
     encoder = MultiLabelBinarizer()
     y_train = encoder.fit_transform(y_train_labels)
     y_test_binary = encoder.transform(y_test_labels)
     concept_list = list(encoder.classes_)
-    print(f"Multi-label binarizer classes: {encoder.classes_}")
-    print(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
-    print(f"Binary label matrix shape: {y_train.shape}")
-    print(f"Total labels: {y_train.sum()} ({y_train.sum() / y_train.size * 100:.1f}% density)")
+    logger.info(f"Multi-label binarizer classes: {encoder.classes_}")
+    logger.info(f"Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples")
+    logger.info(f"Binary label matrix shape: {y_train.shape}")
+    logger.info(f"Total labels: {y_train.sum()} ({y_train.sum() / y_train.size * 100:.1f}% density)")
 
-    print("\n[2/4] Training probe...")
+    logger.info("\n[2/4] Training probe...")
     base_clf = LogisticRegression(
         C=classifier_c,
         class_weight="balanced" if classifier_class_weight == "balanced" else None,
@@ -266,32 +269,32 @@ def train_multilabel(
         verbose=verbose,
     )
     clf = OneVsRestClassifier(base_clf, n_jobs=n_jobs, verbose=verbose)
-    print(f"Training multi-label classifier with {len(encoder.classes_)} concepts")
+    logger.info(f"Training multi-label classifier with {len(encoder.classes_)} concepts")
     clf.fit(X_train, y_train)
-    print("Training complete!")
+    logger.info("Training complete!")
 
     baseline = DummyClassifier(strategy="stratified", random_state=random_seed)
     baseline.fit(X_train, y_train)
 
-    print("\n[3/4] Evaluating...")
+    logger.info("\n[3/4] Evaluating...")
 
-    print("=" * 70)
-    print("TRAINING SET")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("TRAINING SET")
+    logger.info("=" * 70)
 
     y_train_proba_baseline = normalize_predict_proba(baseline.predict_proba(X_train))
     y_train_proba_probe = clf.predict_proba(X_train)
 
-    print(
+    logger.info(
         format_metrics_display(
             calculate_multilabel_metrics(y_train, y_train_proba_probe, concept_list),
             baseline_metrics=calculate_multilabel_metrics(y_train, y_train_proba_baseline, concept_list),
         )
     )
 
-    print("=" * 70)
-    print("TEST SET")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("TEST SET")
+    logger.info("=" * 70)
 
     y_pred_baseline = normalize_predict_proba(baseline.predict_proba(X_test))
     y_pred_probe = clf.predict_proba(X_test)
@@ -299,7 +302,7 @@ def train_multilabel(
     baseline_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_baseline, concept_list)
     probe_metrics = calculate_multilabel_metrics(y_test_binary, y_pred_probe, concept_list)
 
-    print(format_metrics_display(probe_metrics, baseline_metrics=baseline_metrics))
+    logger.info(format_metrics_display(probe_metrics, baseline_metrics=baseline_metrics))
 
     probe = ConceptProbe(
         classifier=clf,
@@ -467,30 +470,30 @@ def train(
             --classifier-c 1.0 \\
             --classifier-class-weight none
     """
-    print("Training concept probe...")
+    logger.info("Training concept probe...")
     dataset_ref = f"{dataset_repo_id}/{dataset_filename}"
     if dataset_revision:
         dataset_ref += f"@{dataset_revision}"
-    print(f"  Dataset: {dataset_ref}")
+    logger.info(f"  Dataset: {dataset_ref}")
 
     model_ref = f"{lc0_model_repo_id}/{lc0_model_filename}"
-    print(f"  Model: {model_ref}")
+    logger.info(f"  Model: {model_ref}")
 
-    print(f"  Layer: {layer_name}")
-    print(f"  Classifier mode: {classifier_mode}")
-    print(f"  Classifier C: {classifier_c}")
-    print(f"  Classifier class_weight: {classifier_class_weight}")
-    print(f"  Parallel jobs (n_jobs): {n_jobs}")
+    logger.info(f"  Layer: {layer_name}")
+    logger.info(f"  Classifier mode: {classifier_mode}")
+    logger.info(f"  Classifier C: {classifier_c}")
+    logger.info(f"  Classifier class_weight: {classifier_class_weight}")
+    logger.info(f"  Parallel jobs (n_jobs): {n_jobs}")
 
-    print("\nLoading LC0 model from HuggingFace Hub...")
+    logger.info("\nLoading LC0 model from HuggingFace Hub...")
     lc0_model_path = hf_hub_download(repo_id=lc0_model_repo_id, filename=lc0_model_filename)
     model = LczeroModel.from_path(lc0_model_path)
-    print("Model loaded successfully!")
+    logger.info("Model loaded successfully!")
 
-    print("\nLoading training data from HuggingFace Hub...")
+    logger.info("\nLoading training data from HuggingFace Hub...")
     positions = load_dataset_from_hf(dataset_repo_id, dataset_filename, dataset_revision)
 
-    print("\nSplitting dataset...")
+    logger.info("\nSplitting dataset...")
     indices = np.arange(len(positions))
     train_and_test_indices: list[list[int]] = train_test_split(indices, test_size=test_split, random_state=random_seed)
 
@@ -504,16 +507,16 @@ def train(
         train_positions, _ = split_positions(train_positions)
         # test_positions, _ = split_positions(test_positions)
 
-    print(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
+    logger.info(f"Train: {len(train_positions)} samples, Test: {len(test_positions)} samples")
 
     if save_splits:
-        print("\nSaving dataset splits...")
+        logger.info("\nSaving dataset splits...")
         train_path = save_dataset_split(train_positions, Path("data/splits/train.jsonl"))
         test_path = save_dataset_split(test_positions, Path("data/splits/test.jsonl"))
-        print(f"  Train split: {train_path}")
-        print(f"  Test split: {test_path}")
+        logger.info(f"  Train split: {train_path}")
+        logger.info(f"  Test split: {test_path}")
 
-        print("\nUploading splits to HuggingFace Hub...")
+        logger.info("\nUploading splits to HuggingFace Hub...")
         train_commit = upload_dataset_split(
             train_path,
             dataset_repo_id,
@@ -526,30 +529,30 @@ def train(
             "test.jsonl",
             dataset_revision,
         )
-        print(f"  Train commit: {train_commit}")
-        print(f"  Test commit: {test_commit}")
+        logger.info(f"  Train commit: {train_commit}")
+        logger.info(f"  Test commit: {test_commit}")
 
     # Extract validated concept names from positions
     y_train_labels = [[c.name for c in p.concepts if c.validated_by] for p in train_positions]
     y_test_labels = [[c.name for c in p.concepts if c.validated_by] for p in test_positions]
 
-    print("\nExtracting train activations...")
+    logger.info("\nExtracting train activations...")
     train_fens = [p.fen for p in train_positions]
     X_train = extract_features_batch(
         train_fens,
         layer_name,
         model=model,
     )
-    print(f"Train activation matrix shape: {X_train.shape}")
+    logger.info(f"Train activation matrix shape: {X_train.shape}")
 
-    print("\nExtracting test activations...")
+    logger.info("\nExtracting test activations...")
     test_fens = [p.fen for p in test_positions]
     X_test = extract_features_batch(
         test_fens,
         layer_name,
         model=model,
     )
-    print(f"Test activation matrix shape: {X_test.shape}")
+    logger.info(f"Test activation matrix shape: {X_test.shape}")
 
     if classifier_mode == "multi-class":
         training_output = train_multiclass(
@@ -598,7 +601,7 @@ def train(
     output_path = output or Path("data/models/concept_probes") / generate_probe_name(
         lc0_model_repo_id, layer_name, classifier_mode, dataset_repo_id
     )
-    print(f"  Output: {output_path}")
+    logger.info(f"  Output: {output_path}")
 
     training_output.save(output_path)
 
@@ -610,7 +613,7 @@ def train(
             repo_id=output_repo_id,
             revision=output_revision,
         )
-        print(f"Successfully uploaded: {commit}")
+        logger.info(f"Successfully uploaded: {commit}")
 
 
 if __name__ == "__main__":

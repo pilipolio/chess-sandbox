@@ -16,8 +16,11 @@ from huggingface_hub import hf_hub_download
 from pydantic import BaseModel
 
 from ...config import settings
+from ...logging_config import setup_logging
 from ..labelling.labeller import Concept, LabelledPosition
 from .features import extract_features_batch
+
+logger = setup_logging(__name__)
 
 
 class ConceptResponse(BaseModel):
@@ -272,7 +275,7 @@ class ConceptExtractor:
         cache_dir = cache_dir or settings.HF_CACHE_DIR
         token = token or settings.HF_TOKEN or None
 
-        print(f"Downloading training output from {probe_repo_id}...")
+        logger.info(f"Downloading training output from {probe_repo_id}...")
         training_output = ModelTrainingOutput.from_hf(
             repo_id=probe_repo_id,
             revision=revision,
@@ -281,9 +284,9 @@ class ConceptExtractor:
             token=token,
         )
         probe = training_output.probe
-        print(f"Loaded probe: {probe}")
+        logger.info(f"Loaded probe: {probe}")
 
-        print(f"\nDownloading LC0 model from {model_repo_id}/{model_filename}...")
+        logger.info(f"\nDownloading LC0 model from {model_repo_id}/{model_filename}...")
         model_path = hf_hub_download(
             repo_id=model_repo_id,
             filename=model_filename,
@@ -291,11 +294,11 @@ class ConceptExtractor:
             force_download=force_download,
             token=token,
         )
-        print(f"Model downloaded to: {model_path}")
+        logger.info(f"Model downloaded to: {model_path}")
 
-        print("Loading LC0 model...")
+        logger.info("Loading LC0 model...")
         model = LczeroModel.from_path(model_path)
-        print("Model loaded successfully!")
+        logger.info("Model loaded successfully!")
 
         return cls(
             probe=probe,
@@ -459,7 +462,7 @@ def predict(
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" \\
             --min-confidence 0.3
     """
-    print("Loading ConceptExtractor from HuggingFace Hub...")
+    logger.info("Loading ConceptExtractor from HuggingFace Hub...")
     extractor = ConceptExtractor.from_hf(
         probe_repo_id=model_repo_id,
         model_repo_id=lc0_repo_id,
@@ -470,28 +473,28 @@ def predict(
         token=token,
     )
 
-    print(f"\nExtracting concepts for FEN: {fen}")
+    logger.info(f"\nExtracting concepts for FEN: {fen}")
     predictions_with_confidence = extractor.extract_concepts_with_confidence(fen)
 
     # Sort by confidence descending
     predictions_with_confidence.sort(key=lambda x: x[1], reverse=True)
 
-    print(f"\n{'=' * 70}")
-    print("PREDICTIONS")
-    print(f"{'=' * 70}\n")
-    print(f"FEN: {fen}\n")
+    logger.info(f"\n{'=' * 70}")
+    logger.info("PREDICTIONS")
+    logger.info(f"{'=' * 70}\n")
+    logger.info(f"FEN: {fen}\n")
 
     # Filter by minimum confidence
     filtered_predictions = [(c, conf) for c, conf in predictions_with_confidence if conf >= min_confidence]
 
     if filtered_predictions:
-        print(f"Predicted Concepts (confidence ≥ {min_confidence:.0%}):")
+        logger.info(f"Predicted Concepts (confidence ≥ {min_confidence:.0%}):")
         for concept, confidence in filtered_predictions:
-            print(f"  {concept}: {confidence:.2%}")
+            logger.info(f"  {concept}: {confidence:.2%}")
     else:
-        print(f"No concepts predicted above {min_confidence:.0%} confidence")
+        logger.info(f"No concepts predicted above {min_confidence:.0%} confidence")
 
-    print()
+    logger.info("")
 
 
 @cli.command()
@@ -527,7 +530,7 @@ def batch_predict(
             --classifier-model-repo-id pilipolio/chess-positions-extractor \\
             --data-path data/processed/test_labeled_positions.jsonl
     """
-    print("Loading ConceptExtractor from HuggingFace Hub...")
+    logger.info("Loading ConceptExtractor from HuggingFace Hub...")
     extractor = ConceptExtractor.from_hf(
         probe_repo_id=model_repo_id,
         model_repo_id=lc0_repo_id,
@@ -538,15 +541,15 @@ def batch_predict(
         token=token,
     )
 
-    print("\nLoading positions from JSONL...")
+    logger.info("\nLoading positions from JSONL...")
     positions: list[LabelledPosition] = []
     with data_path.open() as f:
         for line in f:
             positions.append(LabelledPosition.from_dict(json.loads(line)))
 
-    print(f"Loaded {len(positions)} positions")
+    logger.info(f"Loaded {len(positions)} positions")
 
-    print(f"\nExtracting activations for {len(positions)} positions...")
+    logger.info(f"\nExtracting activations for {len(positions)} positions...")
     from .features import extract_features_batch
 
     fens = [p.fen for p in positions]
@@ -556,37 +559,37 @@ def batch_predict(
         model=extractor.model,
         batch_size=batch_size,
     )
-    print(f"Activation matrix shape: {activations.shape}")
+    logger.info(f"Activation matrix shape: {activations.shape}")
 
-    print("\nMaking predictions...")
+    logger.info("\nMaking predictions...")
 
-    print(f"\n{'=' * 70}")
-    print(f"BATCH PREDICTIONS ({len(positions)} positions)")
-    print(f"{'=' * 70}\n")
+    logger.info(f"\n{'=' * 70}")
+    logger.info(f"BATCH PREDICTIONS ({len(positions)} positions)")
+    logger.info(f"{'=' * 70}\n")
 
     for i, pos in enumerate(positions):
         features = activations[i : i + 1]
         predictions_with_confidence = extractor.probe.predict_with_confidence(features)
         predictions_with_confidence.sort(key=lambda x: x[1], reverse=True)
 
-        print(f"Position {i + 1}:")
-        print(f"FEN: {pos.fen}")
+        logger.info(f"Position {i + 1}:")
+        logger.info(f"FEN: {pos.fen}")
 
         # Show ground truth if available
         if pos.concepts:
             validated_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
             if validated_concepts:
-                print(f"Ground Truth: {', '.join(validated_concepts)}")
+                logger.info(f"Ground Truth: {', '.join(validated_concepts)}")
 
         # Show predictions with confidence
         high_confidence = [(c, conf) for c, conf in predictions_with_confidence if conf >= 0.5]
         if high_confidence:
             pred_str = ", ".join(f"{c} ({conf:.2%})" for c, conf in high_confidence)
-            print(f"Predictions:  {pred_str}")
+            logger.info(f"Predictions:  {pred_str}")
         else:
-            print("Predictions:  (none)")
+            logger.info("Predictions:  (none)")
 
-        print()
+        logger.info("")
 
 
 @cli.command()
@@ -637,7 +640,7 @@ def evaluate(
             --data-path data/positions.jsonl \\
             --sample-size 10
     """
-    print("Loading ConceptExtractor from HuggingFace Hub...")
+    logger.info("Loading ConceptExtractor from HuggingFace Hub...")
     extractor = ConceptExtractor.from_hf(
         probe_repo_id=model_repo_id,
         model_repo_id=lc0_repo_id,
@@ -647,17 +650,17 @@ def evaluate(
         force_download=force_download,
         token=token,
     )
-    print(f"Loaded probe: {extractor.probe}")
-    print(f"Concepts: {', '.join(extractor.probe.concept_list)}")
+    logger.info(f"Loaded probe: {extractor.probe}")
+    logger.info(f"Concepts: {', '.join(extractor.probe.concept_list)}")
 
-    print("\nLoading test data...")
+    logger.info("\nLoading test data...")
     positions: list[LabelledPosition] = []
     with data_path.open() as f:
         for line in f:
             positions.append(LabelledPosition.from_dict(json.loads(line)))
 
     positions_with_concepts = [p for p in positions if p.concepts]
-    print(f"Loaded {len(positions)} positions, kept {len(positions_with_concepts)} with concepts")
+    logger.info(f"Loaded {len(positions)} positions, kept {len(positions_with_concepts)} with concepts")
 
     # Filter positions with validated concepts
     filtered_positions: list[LabelledPosition] = []
@@ -666,10 +669,10 @@ def evaluate(
         if validated_concepts:
             filtered_positions.append(pos)
 
-    print(f"Filtered to {len(filtered_positions)} positions with validated concepts")
+    logger.info(f"Filtered to {len(filtered_positions)} positions with validated concepts")
 
     if len(filtered_positions) == 0:
-        print("No positions with validated concepts found!")
+        logger.info("No positions with validated concepts found!")
         return
 
     # Sample random positions
@@ -678,7 +681,7 @@ def evaluate(
     sample_indices = rng.choice(len(filtered_positions), size=n_samples, replace=False)
     sample_positions = [filtered_positions[i] for i in sample_indices]
 
-    print(f"\nExtracting activations for {n_samples} samples...")
+    logger.info(f"\nExtracting activations for {n_samples} samples...")
 
     fens = [p.fen for p in sample_positions]
     activations = extract_features_batch(
@@ -687,17 +690,17 @@ def evaluate(
         model=extractor.model,
         batch_size=batch_size,
     )
-    print(f"Activation matrix shape: {activations.shape}")
+    logger.info(f"Activation matrix shape: {activations.shape}")
 
-    print("\nMaking predictions...")
+    logger.info("\nMaking predictions...")
     predictions_batch = extractor.probe.predict_batch(activations)
 
-    print(f"\n{'=' * 70}")
-    print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
-    print(f"{'=' * 70}\n")
+    logger.info(f"\n{'=' * 70}")
+    logger.info(f"SAMPLE PREDICTIONS ({n_samples} examples)")
+    logger.info(f"{'=' * 70}\n")
 
     for pos, predicted_concepts in zip(sample_positions, predictions_batch, strict=True):
-        print(f"FEN: {pos.fen}")
+        logger.info(f"FEN: {pos.fen}")
 
         # Get ground truth
         ground_truth_concepts = [c.name for c in pos.concepts if c.validated_by is not None]
@@ -708,9 +711,9 @@ def evaluate(
 
         gt_str = ", ".join(ground_truth_concepts) if ground_truth_concepts else "(none)"
         pred_str = ", ".join(predicted_concept_names) if predicted_concept_names else "(none)"
-        print(f"Ground Truth: {gt_str}")
-        print(f"Prediction:   {pred_str} {match_marker}")
-        print()
+        logger.info(f"Ground Truth: {gt_str}")
+        logger.info(f"Prediction:   {pred_str} {match_marker}")
+        logger.info("")
 
     # Calculate overall accuracy
     correct = 0
@@ -721,9 +724,9 @@ def evaluate(
             correct += 1
 
     accuracy = correct / n_samples
-    print(f"{'=' * 70}")
-    print(f"Sample Exact Match Rate: {accuracy:.1%} ({correct}/{n_samples})")
-    print(f"{'=' * 70}")
+    logger.info(f"{'=' * 70}")
+    logger.info(f"Sample Exact Match Rate: {accuracy:.1%} ({correct}/{n_samples})")
+    logger.info(f"{'=' * 70}")
 
 
 if __name__ == "__main__":

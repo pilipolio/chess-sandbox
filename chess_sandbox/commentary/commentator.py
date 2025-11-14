@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field
 from ..engine.analyse import EngineConfig, analyze_variations
 from ..engine.position_analysis import PositionAnalysis
 from ..lichess import get_analysis_url
+from ..logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 
 class ChessPositionExplanation(BaseModel):
@@ -114,20 +117,20 @@ class Commentator:
 
 
 def print_explanation(explanation: ChessPositionExplanationWithInput):
-    print("=" * 70)
-    print("LLM Input")
-    print("=" * 70)
-    print()
-    print(explanation.full_input)
-    print()
+    logger.info("=" * 70)
+    logger.info("LLM Input")
+    logger.info("=" * 70)
+    logger.info("")
+    logger.info(explanation.full_input)
+    logger.info("")
 
-    print("=" * 70)
-    print("Commentary")
-    print("=" * 70)
-    print()
+    logger.info("=" * 70)
+    logger.info("Commentary")
+    logger.info("=" * 70)
+    logger.info("")
 
-    print(explanation.model_dump_json(indent=2, exclude={"fen", "full_input"}))
-    print("=" * 70)
+    logger.info(explanation.model_dump_json(indent=2, exclude={"fen", "full_input"}))
+    logger.info("=" * 70)
 
 
 def main():
@@ -138,7 +141,7 @@ def main():
     }
 
     fen = "8/8/2K5/p1p5/P1P5/1k6/8/8 w - - 0 58"
-    print(get_analysis_url(fen))
+    logger.info(get_analysis_url(fen))
     board = chess.Board(fen)
 
     commentator = Commentator.create(params)

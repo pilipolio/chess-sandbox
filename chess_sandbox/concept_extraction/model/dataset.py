@@ -11,7 +11,10 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
+from ...logging_config import setup_logging
 from ..labelling.labeller import LabelledPosition
+
+logger = setup_logging(__name__)
 
 
 def load_dataset_from_hf(
@@ -91,10 +94,10 @@ def rebalance_positions(positions: list[LabelledPosition], random_state: int = 4
     target_count = len(positions_with_concepts)
     if len(positions_without_concepts) > target_count:
         sampled_without_concepts = random.sample(positions_without_concepts, target_count)
-        print(f"Undersampled to {target_count} positions without concepts for 50/50 balance")
+        logger.info(f"Undersampled to {target_count} positions without concepts for 50/50 balance")
     else:
         sampled_without_concepts = positions_without_concepts
-        print(
+        logger.info(
             f"Warning: Only {len(positions_without_concepts)} positions without concepts "
             f"(less than {target_count} with concepts)"
         )
@@ -102,7 +105,7 @@ def rebalance_positions(positions: list[LabelledPosition], random_state: int = 4
     all_positions = positions_with_concepts + sampled_without_concepts
     random.shuffle(all_positions)
 
-    print(f"Final balanced dataset: {len(all_positions)} positions (50/50 with/without concepts)")
+    logger.info(f"Final balanced dataset: {len(all_positions)} positions (50/50 with/without concepts)")
     return all_positions
 
 
@@ -120,9 +123,9 @@ def split_positions(positions: list[LabelledPosition]) -> tuple[list[LabelledPos
         else:
             positions_without_concepts.append(pos)
 
-    print(f"Splitting {len(positions)} positions:")
-    print(f"  - {len(positions_with_valid_concepts)} with validated concepts")
-    print(f"  - {len(positions_without_concepts)} without validated concepts")
+    logger.info(f"Splitting {len(positions)} positions:")
+    logger.info(f"  - {len(positions_with_valid_concepts)} with validated concepts")
+    logger.info(f"  - {len(positions_without_concepts)} without validated concepts")
 
     return positions_with_valid_concepts, positions_without_concepts
 

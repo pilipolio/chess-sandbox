@@ -3,11 +3,20 @@
 
 import argparse
 import json
+import logging
+import sys
 import urllib.parse
 import urllib.request
 
 import chess
 import chess.svg
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(name)s: %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
 
 
 def query_position_analysis(fen: str, depth: int = 20, num_lines: int = 5) -> dict:
@@ -62,41 +71,41 @@ def main():
 
     args = parser.parse_args()
 
-    print("=" * 70)
-    print("CHESS POSITION ANALYSIS")
-    print("=" * 70)
-    print()
+    logger.info("=" * 70)
+    logger.info("CHESS POSITION ANALYSIS")
+    logger.info("=" * 70)
+    logger.info("")
 
     analysis = None
     try:
         analysis = query_position_analysis(args.fen)
-        print(json.dumps(analysis, indent=2))
+        logger.info(json.dumps(analysis, indent=2))
     except Exception as e:
-        print(f"Error querying position analysis: {e}")
+        logger.info(f"Error querying position analysis: {e}")
 
-    print()
-    print("=" * 70)
-    print("CONCEPT EXTRACTION")
-    print("=" * 70)
-    print()
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("CONCEPT EXTRACTION")
+    logger.info("=" * 70)
+    logger.info("")
 
     try:
         concepts = query_concept_extraction(args.fen, args.threshold)
-        print(json.dumps(concepts, indent=2))
+        logger.info(json.dumps(concepts, indent=2))
     except Exception as e:
-        print(f"Error querying concept extraction: {e}")
+        logger.info(f"Error querying concept extraction: {e}")
 
     if args.output and analysis:
-        print()
-        print("=" * 70)
-        print("SVG VISUALIZATION")
-        print("=" * 70)
-        print()
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("SVG VISUALIZATION")
+        logger.info("=" * 70)
+        logger.info("")
         try:
             generate_svg(args.fen, analysis, args.output)
-            print(f"SVG saved to: {args.output}")
+            logger.info(f"SVG saved to: {args.output}")
         except Exception as e:
-            print(f"Error generating SVG: {e}")
+            logger.info(f"Error generating SVG: {e}")
 
 
 if __name__ == "__main__":
