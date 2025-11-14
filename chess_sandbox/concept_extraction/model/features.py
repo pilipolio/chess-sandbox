@@ -186,6 +186,115 @@ def extract_features_batch(
     return np.array(results)
 
 
+def compute_square_saliency(
+    activations: np.ndarray,
+    aggregation: str = "mean",
+) -> np.ndarray:
+    """
+    Compute per-square saliency from spatial activation maps.
+
+    Takes activation maps from convolutional layers with spatial structure
+    (channels, height, width) and computes a saliency score for each square
+    by aggregating across channels.
+
+    Args:
+        activations: Activation tensor of shape (channels, 8, 8) or (batch, channels, 8, 8)
+        aggregation: Method to aggregate across channels ("mean", "max", "l2")
+
+    Returns:
+        Saliency map of shape (8, 8) or (batch, 8, 8) with scores for each square
+
+    Example:
+        >>> activations = np.random.rand(64, 8, 8)  # doctest: +SKIP
+        >>> saliency = compute_square_saliency(activations)  # doctest: +SKIP
+        >>> saliency.shape  # doctest: +SKIP
+        (8, 8)
+    """
+    if activations.ndim == 3:
+        channels, height, width = activations.shape
+        if height != 8 or width != 8:
+            raise ValueError(f"Expected spatial dimensions of 8x8, got {height}x{width}")
+
+        if aggregation == "mean":
+            return np.mean(np.abs(activations), axis=0)
+        elif aggregation == "max":
+            return np.max(np.abs(activations), axis=0)
+        elif aggregation == "l2":
+            return np.sqrt(np.sum(activations**2, axis=0))
+        else:
+            raise ValueError(f"Unknown aggregation method: {aggregation}")
+
+    elif activations.ndim == 4:
+        batch, channels, height, width = activations.shape
+        if height != 8 or width != 8:
+            raise ValueError(f"Expected spatial dimensions of 8x8, got {height}x{width}")
+
+        if aggregation == "mean":
+            return np.mean(np.abs(activations), axis=1)
+        elif aggregation == "max":
+            return np.max(np.abs(activations), axis=1)
+        elif aggregation == "l2":
+            return np.sqrt(np.sum(activations**2, axis=1))
+        else:
+            raise ValueError(f"Unknown aggregation method: {aggregation}")
+
+    else:
+        raise ValueError(f"Expected 3D or 4D activations, got shape {activations.shape}")
+
+
+def extract_features_and_saliency_batch(
+    fens: list[str],
+    layer_name: str,
+    model: LczeroModel,
+    batch_size: int = 512,
+    saliency_aggregation: str = "mean",
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Extract both flattened features and per-square saliency maps.
+
+    Args:
+        fens: List of chess positions in FEN notation
+        layer_name: Layer to extract from (should be a spatial convolutional layer)
+        model: Pre-loaded LC0 model
+        batch_size: Number of positions to process at once
+        saliency_aggregation: Method to aggregate saliency across channels
+
+    Returns:
+        Tuple of (features, saliency_maps) where:
+        - features: Array of shape (n_positions, n_features)
+        - saliency_maps: Array of shape (n_positions, 8, 8)
+
+    Example:
+        >>> fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"] * 10  # doctest: +SKIP
+        >>> features, saliency = extract_features_and_saliency_batch(  # doctest: +SKIP
+        ...     fens, "block3/conv2/relu", model
+        ... )
+        >>> features.shape, saliency.shape  # doctest: +SKIP
+        ((10, 4096), (10, 8, 8))
+    """
+    print(f"Extracting activations and saliency for {len(fens)} positions in batch of size {batch_size}...")
+
+    features_list: list[np.ndarray] = []
+    saliency_list: list[np.ndarray] = []
+
+    with ActivationExtractor(model, [layer_name]) as extractor:
+        for i in tqdm(range(0, len(fens), batch_size)):
+            batch_fens = fens[i : i + batch_size]
+            boards = [LczeroBoard(fen) for fen in batch_fens]
+            activations = extractor.extract_batch(boards)
+            batch_activations = activations[layer_name].cpu().numpy()
+
+            for j in range(len(batch_fens)):
+                flattened = batch_activations[j].reshape(-1)
+                features_list.append(flattened)
+
+                spatial_activations = batch_activations[j]
+                saliency = compute_square_saliency(spatial_activations, aggregation=saliency_aggregation)
+                saliency_list.append(saliency)
+
+    return np.array(features_list), np.array(saliency_list)
+
+
 def list_available_layers(model_path: str | Path) -> list[str]:
     """
     List all available layer names in a model.

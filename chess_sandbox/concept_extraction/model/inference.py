@@ -71,6 +71,62 @@ class ConceptConfidenceResponse(BaseModel):
         )
 
 
+class SquareSaliency(BaseModel):
+    """Saliency information for a single chess square."""
+
+    square: str
+    saliency: float
+
+
+class ConceptSaliencyResponse(BaseModel):
+    """Response model with concept predictions and square saliency information."""
+
+    fen: str
+    concepts: list[ConceptResponse]
+    threshold: float
+    top_squares: list[SquareSaliency]
+    saliency_map: list[list[float]] | None = None
+
+    @classmethod
+    def from_concepts_and_saliency(
+        cls,
+        fen: str,
+        concepts: list[Concept],
+        threshold: float,
+        saliency_map: np.ndarray,
+        top_k: int = 10,
+        include_full_map: bool = False,
+    ) -> "ConceptSaliencyResponse":
+        """Create response from concepts and saliency map.
+
+        Args:
+            fen: Chess position in FEN notation
+            concepts: Detected concepts
+            threshold: Threshold used for concept detection
+            saliency_map: 8x8 numpy array with saliency scores
+            top_k: Number of top salient squares to include
+            include_full_map: Whether to include the full 8x8 saliency map
+        """
+        import chess
+
+        top_squares: list[SquareSaliency] = []
+        flat_indices = np.argsort(saliency_map.flatten())[::-1][:top_k]
+
+        for idx in flat_indices:
+            row, col = divmod(idx, 8)
+            square_idx = (7 - row) * 8 + col
+            square_name = chess.SQUARE_NAMES[square_idx]
+            top_squares.append(SquareSaliency(square=square_name, saliency=float(saliency_map[row, col])))
+
+        return cls(
+            fen=fen,
+            concepts=[ConceptResponse.from_concept(c) for c in concepts],
+            threshold=threshold,
+            top_squares=top_squares,
+            saliency_map=saliency_map.tolist() if include_full_map else None,
+        )
+
+
 @dataclass
 class ConceptProbe:
     """
@@ -333,6 +389,49 @@ class ConceptExtractor:
 
         return self.probe.predict(features, threshold=threshold)
 
+    def extract_concepts_with_saliency(
+        self,
+        fen: str,
+        threshold: float = 0.5,
+        saliency_aggregation: str = "mean",
+    ) -> tuple[list[Concept], np.ndarray]:
+        """
+        Extract concepts and square saliency from a single FEN position.
+
+        Args:
+            fen: FEN notation of chess position
+            threshold: Probability threshold for concept detection (default: 0.5)
+            saliency_aggregation: Method to aggregate saliency across channels
+
+        Returns:
+            Tuple of (concepts, saliency_map) where:
+            - concepts: List of detected concepts with validated_by="probe"
+            - saliency_map: 8x8 numpy array with saliency scores per square
+
+        Example:
+            >>> # extractor = ConceptExtractor.from_hf(...)
+            >>> # concepts, saliency = extractor.extract_concepts_with_saliency(
+            >>> #     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            >>> # )
+            >>> # len(concepts) >= 0 and saliency.shape == (8, 8)
+            True
+        """
+        from .features import extract_features_and_saliency_batch
+
+        features_batch, saliency_batch = extract_features_and_saliency_batch(
+            fens=[fen],
+            layer_name=self.layer_name,
+            model=self.model,
+            batch_size=1,
+            saliency_aggregation=saliency_aggregation,
+        )
+
+        features = features_batch[0]
+        saliency_map = saliency_batch[0]
+        concepts = self.probe.predict(features, threshold=threshold)
+
+        return concepts, saliency_map
+
     def extract_concepts_with_confidence(
         self, fen: str | list[str]
     ) -> list[tuple[str, float]] | list[list[tuple[str, float]]]:
@@ -587,6 +686,91 @@ def batch_predict(
             print("Predictions:  (none)")
 
         print()
+
+
+@cli.command()
+@click.argument("fen", type=str)
+@hf_hub_options
+@click.option(
+    "--threshold",
+    default=0.5,
+    type=float,
+    help="Concept detection threshold (default: 0.5)",
+)
+@click.option(
+    "--saliency-aggregation",
+    default="mean",
+    type=click.Choice(["mean", "max", "l2"]),
+    help="Method to aggregate saliency across channels (default: mean)",
+)
+@click.option(
+    "--top-k",
+    default=10,
+    type=int,
+    help="Number of top salient squares to display (default: 10)",
+)
+def predict_with_saliency(
+    fen: str,
+    model_repo_id: str,
+    lc0_repo_id: str,
+    lc0_filename: str,
+    threshold: float,
+    saliency_aggregation: str,
+    top_k: int,
+    revision: str | None,
+    cache_dir: Path | None,
+    force_download: bool,
+    token: str | None,
+) -> None:
+    """
+    Predict concepts and extract square saliency for a FEN position.
+
+    Example:
+        uv run python -m chess_sandbox.concept_extraction.model.inference predict-with-saliency \\
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+        # With custom parameters:
+        uv run python -m chess_sandbox.concept_extraction.model.inference predict-with-saliency \\
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" \\
+            --threshold 0.3 --saliency-aggregation max --top-k 15
+    """
+    print("Loading ConceptExtractor from HuggingFace Hub...")
+    extractor = ConceptExtractor.from_hf(
+        probe_repo_id=model_repo_id,
+        model_repo_id=lc0_repo_id,
+        model_filename=lc0_filename,
+        revision=revision,
+        cache_dir=cache_dir,
+        force_download=force_download,
+        token=token,
+    )
+
+    print(f"\nExtracting concepts and saliency for FEN: {fen}")
+    concepts, saliency_map = extractor.extract_concepts_with_saliency(
+        fen=fen, threshold=threshold, saliency_aggregation=saliency_aggregation
+    )
+
+    print(f"\n{'=' * 70}")
+    print("CONCEPT PREDICTIONS WITH SALIENCY")
+    print(f"{'=' * 70}\n")
+    print(f"FEN: {fen}\n")
+
+    if concepts:
+        print(f"Detected Concepts (threshold={threshold}):")
+        for concept in concepts:
+            print(f"  - {concept.name}")
+    else:
+        print(f"No concepts detected above threshold {threshold}")
+
+    print(f"\nTop {top_k} Salient Squares (aggregation={saliency_aggregation}):")
+    response = ConceptSaliencyResponse.from_concepts_and_saliency(
+        fen=fen, concepts=concepts, threshold=threshold, saliency_map=saliency_map, top_k=top_k
+    )
+
+    for i, square_sal in enumerate(response.top_squares, 1):
+        print(f"  {i}. {square_sal.square}: {square_sal.saliency:.4f}")
+
+    print()
 
 
 @cli.command()
