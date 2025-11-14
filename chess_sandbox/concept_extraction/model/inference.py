@@ -508,7 +508,8 @@ def hf_hub_options(f):
     f = click.option(
         "--revision",
         type=str,
-        help="Git revision for model (tag, branch, commit). Defaults to 'main'",
+        default="production",
+        help="Git revision for model (tag, branch, commit). Defaults to 'production'",
     )(f)
     f = click.option(
         "--model-repo-id",
