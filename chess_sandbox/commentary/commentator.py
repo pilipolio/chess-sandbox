@@ -22,6 +22,7 @@ from ..engine.analyse import EngineConfig, analyze_variations
 from ..engine.position_analysis import PositionAnalysis
 from ..lichess import get_analysis_url
 from ..logging_config import setup_logging
+from .tactical_patterns import TacticalPatternDetector
 
 logger = setup_logging(__name__)
 
@@ -46,6 +47,8 @@ class Commentator:
         You are a chess grandmaster analyzing a position. Below is a chess position:
 
         {analysis_text}
+
+        {tactical_context}
 
         Please provide a structured analysis with:
         1. **assessment**: Overall position evaluation as -1 (Black is better), 0 (Equal), or +1 (White is better)
@@ -87,7 +90,17 @@ class Commentator:
             )
             analysis_text = position_analysis.format_as_text()
 
-            prompt = self.PROMPT.format(analysis_text=analysis_text)
+            # Detect tactical patterns using python-chess API
+            detector = TacticalPatternDetector(board)
+            tactical_context = detector.get_tactical_context()
+
+            # Add tactical context section if patterns detected
+            if tactical_context:
+                tactical_context = f"\n{tactical_context}\n"
+            else:
+                tactical_context = ""
+
+            prompt = self.PROMPT.format(analysis_text=analysis_text, tactical_context=tactical_context)
 
             response = self.client.responses.parse(
                 model=self.llm_model,
