@@ -211,7 +211,7 @@ def compute_square_saliency(
         (8, 8)
     """
     if activations.ndim == 3:
-        channels, height, width = activations.shape
+        _channels, height, width = activations.shape
         if height != 8 or width != 8:
             raise ValueError(f"Expected spatial dimensions of 8x8, got {height}x{width}")
 
@@ -225,7 +225,7 @@ def compute_square_saliency(
             raise ValueError(f"Unknown aggregation method: {aggregation}")
 
     elif activations.ndim == 4:
-        batch, channels, height, width = activations.shape
+        _batch, _channels, height, width = activations.shape
         if height != 8 or width != 8:
             raise ValueError(f"Expected spatial dimensions of 8x8, got {height}x{width}")
 

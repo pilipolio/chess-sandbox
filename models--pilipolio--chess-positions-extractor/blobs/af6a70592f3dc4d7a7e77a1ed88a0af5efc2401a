@@ -1,0 +1,77 @@
+---
+library_name: sklearn
+tags:
+- chess
+- concept-detection
+- interpretability
+- lc0
+- multi-label-classification
+model_type: concept-probe
+language:
+- en
+license: mit
+---
+
+# Chess Concept Probe
+
+Trained multi-label classifier for detecting chess concepts from LC0 layer activations.
+
+## Model Description
+
+Detects 12 chess concepts from internal activations of Leela Chess Zero (LC0) models:
+
+`discovered_attack`, `exposed_king`, `fork`, `initiative`, `mating_threat`, `outpost`, `passed_pawn`, `pin`, `sacrifice`, `skewer`, `weak_square`, `zugzwang`
+
+**Layer:** `block3/conv2/relu`
+**Mode:** multi-label
+**Training Date:** 2025-11-03
+
+## Performance
+
+- **Exact Match: 26.8%**
+- 
+
+### Per-Concept Performance
+
+| Concept | Accuracy | F1 Score | Support |
+|---------|----------|----------|---------|
+| discovered_attack | 0.945 | 0.077 | 208 |
+| exposed_king | 0.987 | 0.021 | 66 |
+| fork | 0.844 | 0.283 | 888 |
+| initiative | 0.929 | 0.061 | 275 |
+| mating_threat | 0.749 | 0.607 | 2383 |
+| outpost | 0.965 | 0.169 | 166 |
+| passed_pawn | 0.905 | 0.306 | 464 |
+| pin | 0.774 | 0.466 | 1634 |
+| sacrifice | 0.835 | 0.195 | 890 |
+| skewer | 0.983 | 0.093 | 78 |
+| weak_square | 0.916 | 0.095 | 332 |
+| zugzwang | 0.992 | 0.247 | 42 |
+
+## Usage
+
+```python
+from chess_sandbox.concept_extraction.model.model_artefact import ModelTrainingOutput
+
+# Load training output from HF Hub
+output = ModelTrainingOutput.from_hub("pilipolio/chess-sandbox-concept-probes")
+probe = output.probe
+
+# Extract features
+from chess_sandbox.concept_extraction.model.features import extract_features
+features = extract_features(
+    fen="rnbqkb1r/pp1ppppp/5n2/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+    model_path="path/to/maia-1500.onnx",
+    layer_name="block3/conv2/relu"
+)
+
+# Predict concepts
+concepts = probe.predict(features)
+```
+
+## Training Details
+
+- **Training samples:** 28,052
+- **Test samples:** 7,014
+- **Test split:** 20.0%
+- **Random seed:** 42
