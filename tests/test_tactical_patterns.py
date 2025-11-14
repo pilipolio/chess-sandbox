@@ -121,6 +121,35 @@ class TestPinDetection:
         assert pin.valuable_square is not None
         assert chess.square_name(pin.valuable_square) == "h1"
 
+    def test_pin_with_multiple_attackers_on_ray(self):
+        """Test correct pinner detection when multiple enemy sliders are on the pin ray.
+
+        Regression test: with multiple enemy sliders on the same ray, we must select
+        the closest one to the pinned piece (not the first in global iteration order).
+
+        Position: King e8, Bishop e7 (white), Rook e5 (black), Rook e1 (black)
+        The bishop is pinned by the rook on e5 (not e1).
+        """
+        board = chess.Board("4K3/4B3/8/4r3/8/8/8/4r3 w - - 0 1")
+        detector = TacticalPatternDetector(board)
+        pins = detector.detect_pins()
+
+        # Should detect one pin
+        assert len(pins) == 1
+        pin = pins[0]
+
+        # Verify it's the bishop on e7
+        assert chess.square_name(pin.pinned_square) == "e7"
+        assert pin.pinned_piece.piece_type == chess.BISHOP
+
+        # Verify the pinner is the closer rook on e5, not e1
+        assert chess.square_name(pin.pinner_square) == "e5"
+        assert pin.pinner_piece.piece_type == chess.ROOK
+
+        # It's pinned to the king
+        assert pin.king_square is not None
+        assert chess.square_name(pin.king_square) == "e8"
+
 
 class TestForkDetection:
     """Tests for fork detection."""

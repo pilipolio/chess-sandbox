@@ -28,13 +28,13 @@ class PinInfo:
         pinned_sq = chess.square_name(self.pinned_square)
         pinner_sq = chess.square_name(self.pinner_square)
 
-        if self.king_square:
+        if self.king_square is not None:
             king_sq = chess.square_name(self.king_square)
             return (
                 f"{pinned_name.capitalize()} on {pinned_sq} is pinned to the king on {king_sq} "
                 f"by {pinner_name} on {pinner_sq}"
             )
-        elif self.valuable_square:
+        elif self.valuable_square is not None:
             valuable_sq = chess.square_name(self.valuable_square)
             return (
                 f"{pinned_name.capitalize()} on {pinned_sq} is pinned to valuable piece on {valuable_sq} "
@@ -100,28 +100,43 @@ class TacticalPatternDetector:
                 pin_mask = self.board.pin(color, square)
 
                 # Find the pinner along the pin ray
-                # Check opponent pieces on the pin ray for sliding pieces
+                # The pinner must be beyond the pinned piece (not between king and pinned piece)
+                between_squares = chess.SquareSet.between(king_square, square)
+
+                # Collect all candidate pinners (enemy sliders on the ray, beyond the pinned piece)
+                candidate_pinners: list[tuple[chess.Square, chess.Piece]] = []
                 for pinner_square in pin_mask:
+                    # Skip if it's the king, pinned piece, or between them
+                    if pinner_square in (king_square, square) or pinner_square in between_squares:
+                        continue
+
                     pinner_piece = self.board.piece_at(pinner_square)
                     if (
                         pinner_piece
                         and pinner_piece.color == opponent_color
                         and pinner_piece.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]
                     ):
-                        pinned_piece = self.board.piece_at(square)
-                        assert pinned_piece is not None
+                        candidate_pinners.append((pinner_square, pinner_piece))
 
-                        pins.append(
-                            PinInfo(
-                                pinned_square=square,
-                                pinned_piece=pinned_piece,
-                                pinner_square=pinner_square,
-                                pinner_piece=pinner_piece,
-                                king_square=king_square,
-                                valuable_square=None,
-                            )
+                # The actual pinner is the closest one to the pinned piece
+                if candidate_pinners:
+                    actual_pinner_square, actual_pinner_piece = min(
+                        candidate_pinners, key=lambda p: chess.square_distance(square, p[0])
+                    )
+
+                    pinned_piece = self.board.piece_at(square)
+                    assert pinned_piece is not None
+
+                    pins.append(
+                        PinInfo(
+                            pinned_square=square,
+                            pinned_piece=pinned_piece,
+                            pinner_square=actual_pinner_square,
+                            pinner_piece=actual_pinner_piece,
+                            king_square=king_square,
+                            valuable_square=None,
                         )
-                        break  # Only one pinner per pin
+                    )
 
         # Phase 2: Detect relative pins to valuable pieces
         potential_pinners = (
