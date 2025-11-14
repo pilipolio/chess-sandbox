@@ -257,14 +257,12 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "scikit-learn" },
     { name = "scikit-learn-stubs" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
     { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
-cpu = [
-    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
-]
 dev = [
     { name = "poethepoet" },
     { name = "pyright" },
@@ -273,10 +271,6 @@ dev = [
     { name = "respx" },
     { name = "ruff" },
     { name = "types-tqdm" },
-]
-gpu = [
-    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
 
 [package.metadata]
@@ -298,11 +292,11 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "scikit-learn-stubs", specifier = ">=0.0.3" },
+    { name = "torch", specifier = ">=2.9.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
 [package.metadata.requires-dev]
-cpu = [{ name = "torch", specifier = ">=2.9.0", index = "https://download.pytorch.org/whl/cpu" }]
 dev = [
     { name = "poethepoet", specifier = ">=0.32.0" },
     { name = "pyright", specifier = ">=1.1.391" },
@@ -312,7 +306,6 @@ dev = [
     { name = "ruff", specifier = ">=0.8.5" },
     { name = "types-tqdm", specifier = ">=4.67.0.20250809" },
 ]
-gpu = [{ name = "torch", specifier = ">=2.9.0", index = "https://download.pytorch.org/whl/cpu" }]
 
 [[package]]
 name = "click"
