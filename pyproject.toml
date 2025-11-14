@@ -39,24 +39,16 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "tqdm>=4.67.1",
     "scikit-learn>=1.7.2",
-    # torch moved to dependency groups (cpu/gpu) to optimize installation size
+    "torch>=2.9.0",  # CPU-only by default via pytorch-cpu index (see [tool.uv.sources])
     "scikit-learn-stubs>=0.0.3",
     "joblib-stubs>=1.5.2.0.20250831",
     "jinja2>=3.1.6",
 ]
 
 [dependency-groups]
-# CPU-only dependencies (lightweight, ~100MB vs 7GB with GPU)
-# Install with: uv sync --group cpu
-cpu = [
-    "torch>=2.9.0",
-]
-
-# GPU dependencies with CUDA support (~7GB)
-# Install with: uv sync --group gpu
-gpu = [
-    "torch>=2.9.0",
-]
+# Note: torch is now in main dependencies as CPU-only by default
+# For GPU support, override the index: UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync
+# See [tool.uv.sources] for CPU index configuration
 
 dev = [
     "poethepoet>=0.32.0",
@@ -86,12 +78,9 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true  # Only used when explicitly referenced
 
 [tool.uv.sources]
-# Default to CPU-only PyTorch from pytorch-cpu index (saves ~6.9GB)
-# Both torch and torchvision must come from same index for compatibility
-# For GPU support, override with: UV_INDEX_URL=https://pypi.org/simple uv sync --group gpu
+# Use CPU-only PyTorch from pytorch-cpu index (saves ~6.9GB vs GPU builds)
+# For GPU support, override with: UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync
 torch = { index = "pytorch-cpu" }
-# Temporarily disable torchvision from CPU index due to compatibility issues
-# torchvision = { index = "pytorch-cpu" }
 
 [tool.ruff]
 # if this is a library, enter the _minimum_ version you
