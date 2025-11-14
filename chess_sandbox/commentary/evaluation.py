@@ -169,7 +169,9 @@ def run_evaluation(
         logger.info(f"\n{'=' * 70}")
         logger.info(f"CONFIGURATION: {config.name}")
         logger.info(f"{'=' * 70}")
-        logger.info(f"Engine: depth={config.params['engine']['depth']}, num_lines={config.params['engine']['num_lines']}")
+        logger.info(
+            f"Engine: depth={config.params['engine']['depth']}, num_lines={config.params['engine']['num_lines']}"
+        )
         logger.info(f"LLM: {config.params['llm']}")
         logger.info(f"{'=' * 70}")
 
