@@ -59,6 +59,23 @@ class TestPinDetection:
         assert "d2" in description.lower()
         assert "pinned" in description.lower()
 
+    def test_real_game_position_with_diagonal_pin(self):
+        """Test detection in a real game position with diagonal pin."""
+        # Position from real game: pawn on f2 pinned to king on g1 by bishop on d4
+        board = chess.Board("r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15")
+        detector = TacticalPatternDetector(board)
+        pins = detector.detect_pins()
+
+        # White to move, so we detect white's pinned pieces
+        assert len(pins) == 1
+        pin = pins[0]
+        assert chess.square_name(pin.pinned_square) == "f2"
+        assert pin.pinned_piece.piece_type == chess.PAWN
+        assert chess.square_name(pin.pinner_square) == "d4"
+        assert pin.pinner_piece.piece_type == chess.BISHOP
+        assert pin.king_square is not None
+        assert chess.square_name(pin.king_square) == "g1"
+
 
 class TestForkDetection:
     """Tests for fork detection."""
