@@ -60,21 +60,66 @@ class TestPinDetection:
         assert "pinned" in description.lower()
 
     def test_real_game_position_with_diagonal_pin(self):
-        """Test detection in a real game position with diagonal pin."""
-        # Position from real game: pawn on f2 pinned to king on g1 by bishop on d4
+        """Test detection in a real game position with diagonal pins.
+
+        Position has two pins by the same bishop on d4:
+        1. f2 pawn pinned to g1 king (absolute pin)
+        2. Nc3 knight pinned to a1 rook (relative pin)
+        """
         board = chess.Board("r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15")
         detector = TacticalPatternDetector(board)
         pins = detector.detect_pins()
 
-        # White to move, so we detect white's pinned pieces
+        # White to move, should detect both pinned pieces
+        assert len(pins) == 2
+
+        # Find the pawn pin and knight pin (order may vary)
+        pawn_pin = next((p for p in pins if p.pinned_piece.piece_type == chess.PAWN), None)
+        knight_pin = next((p for p in pins if p.pinned_piece.piece_type == chess.KNIGHT), None)
+
+        # Check f2 pawn pinned to king
+        assert pawn_pin is not None
+        assert chess.square_name(pawn_pin.pinned_square) == "f2"
+        assert chess.square_name(pawn_pin.pinner_square) == "d4"
+        assert pawn_pin.pinner_piece.piece_type == chess.BISHOP
+        assert pawn_pin.king_square is not None
+        assert chess.square_name(pawn_pin.king_square) == "g1"
+
+        # Check Nc3 knight pinned to a1 rook
+        assert knight_pin is not None
+        assert chess.square_name(knight_pin.pinned_square) == "c3"
+        assert chess.square_name(knight_pin.pinner_square) == "d4"
+        assert knight_pin.pinner_piece.piece_type == chess.BISHOP
+        assert knight_pin.valuable_square is not None
+        assert chess.square_name(knight_pin.valuable_square) == "a1"
+
+    def test_relative_pin_to_bishop_on_file(self):
+        """Ensure pins to bishops along a file are flagged."""
+        # Rook on c8 pins pawn on c2 to bishop on c1
+        board = chess.Board("2r4k/8/8/8/8/8/2P5/2B2K2 w - - 0 1")
+        detector = TacticalPatternDetector(board)
+        pins = detector.detect_pins()
+
         assert len(pins) == 1
         pin = pins[0]
-        assert chess.square_name(pin.pinned_square) == "f2"
-        assert pin.pinned_piece.piece_type == chess.PAWN
-        assert chess.square_name(pin.pinner_square) == "d4"
-        assert pin.pinner_piece.piece_type == chess.BISHOP
-        assert pin.king_square is not None
-        assert chess.square_name(pin.king_square) == "g1"
+        assert chess.square_name(pin.pinned_square) == "c2"
+        assert pin.pinner_piece.piece_type == chess.ROOK
+        assert pin.valuable_square is not None
+        assert chess.square_name(pin.valuable_square) == "c1"
+
+    def test_relative_pin_to_knight_on_rank(self):
+        """Ensure pins to knights along a rank are flagged."""
+        # Rook on a1 pins bishop on d1 to knight on h1
+        board = chess.Board("4k3/8/8/8/8/8/6K1/r2B3N w - - 0 1")
+        detector = TacticalPatternDetector(board)
+        pins = detector.detect_pins()
+
+        assert len(pins) == 1
+        pin = pins[0]
+        assert chess.square_name(pin.pinned_square) == "d1"
+        assert pin.pinner_piece.piece_type == chess.ROOK
+        assert pin.valuable_square is not None
+        assert chess.square_name(pin.valuable_square) == "h1"
 
 
 class TestForkDetection:
