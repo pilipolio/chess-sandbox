@@ -151,6 +151,8 @@ UV_INDEX_URL=https://pypi.org/simple uv sync
 
 > **Note:** By default, `uv sync` installs CPU-only PyTorch (~1.5GB total). This saves ~5.7GB compared to the GPU version and is sufficient for most use cases. Only use the GPU installation if you need CUDA acceleration for training or large-scale inference.
 
+> **Known Issue (Linux x86_64 only):** There's currently a torchvision compatibility issue on Linux x86_64 with CPU-only builds due to UV's resolution of local version identifiers from PyTorch's custom index. The workaround is to use GPU builds or await UV improvements. This doesn't affect development on macOS or ARM64 platforms.
+
 2. Set environment variables:
 ```bash
 cp .env.example .env

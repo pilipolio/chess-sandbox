@@ -14,7 +14,8 @@ jobs:
         with:
           version: "0.5.14"
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --all-extras --locked # abort if the lockfile changes
+      # Use GPU builds in CI to avoid torchvision CPU compatibility issues on Linux x86_64
+      - run: UV_INDEX_URL=https://pypi.org/simple uv sync --all-extras --locked
       - run: uv run poe ci:fmt             # check formatting is correct
       - run: uv run poe ci:lint            # and linting
       - run: uv run poe check              # typecheck too
