@@ -138,9 +138,20 @@ r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15
 ### Setup
 
 1. Install dependencies:
+
+**CPU-only (default, ~100MB - recommended for most users):**
 ```bash
 uv sync
 ```
+
+> **Note:** PyTorch installs as CPU-only by default (~100MB), saving ~6.9GB compared to GPU builds. This is sufficient for most use cases including inference and model evaluation.
+
+**GPU with CUDA support (~7GB - only if you have NVIDIA GPU):**
+```bash
+UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync
+```
+
+> **Note:** GPU support requires overriding the default PyTorch index. Replace `cu124` with your desired CUDA version. Only needed for GPU-accelerated training or large-scale inference.
 
 2. Set environment variables:
 ```bash
