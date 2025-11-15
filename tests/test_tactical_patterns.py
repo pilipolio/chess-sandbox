@@ -150,6 +150,23 @@ class TestPinDetection:
         assert pin.king_square is not None
         assert chess.square_name(pin.king_square) == "e8"
 
+    def test_detects_pins_for_both_sides(self):
+        """Pins should be reported even when the pinned side is not to move."""
+        board = chess.Board("r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/4RRK1 b kq - 3 15")
+        detector = TacticalPatternDetector(board)
+        pins = detector.detect_pins()
+
+        pinned_squares = {chess.square_name(pin.pinned_square) for pin in pins}
+        assert "f2" in pinned_squares
+
+    def test_does_not_flag_equal_value_relative_pins(self):
+        """Ignore trivial 'pins' where both pieces have the same value."""
+        board = chess.Board("r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/4RRK1 b kq - 3 15")
+        detector = TacticalPatternDetector(board)
+        pins = detector.detect_pins()
+
+        assert all(chess.square_name(pin.pinned_square) != "e5" for pin in pins)
+
 
 class TestForkDetection:
     """Tests for fork detection."""

@@ -74,52 +74,45 @@ class TacticalPatternDetector:
         Uses O(1) bitboard operations instead of O(n²) iteration with board copies.
         """
         pins: List[PinInfo] = []
-        color = self.board.turn
-        opponent_color = not color
-        king_square = self.board.king(color)
 
-        if not king_square:
-            return pins
+        for color in (chess.WHITE, chess.BLACK):
+            opponent_color = not color
+            king_square = self.board.king(color)
+            if king_square is None:
+                continue
 
-        # Get all friendly pieces (excluding king)
-        friendly_pieces = (
-            self.board.pieces(chess.PAWN, color)
-            | self.board.pieces(chess.KNIGHT, color)
-            | self.board.pieces(chess.BISHOP, color)
-            | self.board.pieces(chess.ROOK, color)
-            | self.board.pieces(chess.QUEEN, color)
-        )
+            friendly_pieces = (
+                self.board.pieces(chess.PAWN, color)
+                | self.board.pieces(chess.KNIGHT, color)
+                | self.board.pieces(chess.BISHOP, color)
+                | self.board.pieces(chess.ROOK, color)
+                | self.board.pieces(chess.QUEEN, color)
+            )
 
-        # Track pieces already found pinned to avoid duplicates
-        pinned_to_king: set[chess.Square] = set()
+            pinned_to_king: set[chess.Square] = set()
 
-        # Phase 1: Detect absolute pins to king using native API
-        for square in friendly_pieces:
-            if self.board.is_pinned(color, square):
-                pinned_to_king.add(square)
-                pin_mask = self.board.pin(color, square)
+            for square in friendly_pieces:
+                if self.board.is_pinned(color, square):
+                    pinned_to_king.add(square)
+                    pin_mask = self.board.pin(color, square)
+                    between_squares = chess.SquareSet.between(king_square, square)
 
-                # Find the pinner along the pin ray
-                # The pinner must be beyond the pinned piece (not between king and pinned piece)
-                between_squares = chess.SquareSet.between(king_square, square)
+                    candidate_pinners: list[tuple[chess.Square, chess.Piece]] = []
+                    for pinner_square in pin_mask:
+                        if pinner_square in (king_square, square) or pinner_square in between_squares:
+                            continue
 
-                # Collect all candidate pinners (enemy sliders on the ray, beyond the pinned piece)
-                candidate_pinners: list[tuple[chess.Square, chess.Piece]] = []
-                for pinner_square in pin_mask:
-                    # Skip if it's the king, pinned piece, or between them
-                    if pinner_square in (king_square, square) or pinner_square in between_squares:
+                        pinner_piece = self.board.piece_at(pinner_square)
+                        if (
+                            pinner_piece
+                            and pinner_piece.color == opponent_color
+                            and pinner_piece.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]
+                        ):
+                            candidate_pinners.append((pinner_square, pinner_piece))
+
+                    if not candidate_pinners:
                         continue
 
-                    pinner_piece = self.board.piece_at(pinner_square)
-                    if (
-                        pinner_piece
-                        and pinner_piece.color == opponent_color
-                        and pinner_piece.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]
-                    ):
-                        candidate_pinners.append((pinner_square, pinner_piece))
-
-                # The actual pinner is the closest one to the pinned piece
-                if candidate_pinners:
                     actual_pinner_square, actual_pinner_piece = min(
                         candidate_pinners, key=lambda p: chess.square_distance(square, p[0])
                     )
@@ -138,34 +131,31 @@ class TacticalPatternDetector:
                         )
                     )
 
-        # Phase 2: Detect relative pins to valuable pieces
-        potential_pinners = (
-            self.board.pieces(chess.BISHOP, opponent_color)
-            | self.board.pieces(chess.ROOK, opponent_color)
-            | self.board.pieces(chess.QUEEN, opponent_color)
-        )
+            potential_pinners = (
+                self.board.pieces(chess.BISHOP, opponent_color)
+                | self.board.pieces(chess.ROOK, opponent_color)
+                | self.board.pieces(chess.QUEEN, opponent_color)
+            )
 
-        for pinner_square in potential_pinners:
-            pinner_piece = self.board.piece_at(pinner_square)
-            assert pinner_piece is not None
+            for pinner_square in potential_pinners:
+                pinner_piece = self.board.piece_at(pinner_square)
+                assert pinner_piece is not None
 
-            direct_attacks = self.board.attacks(pinner_square)
+                direct_attacks = self.board.attacks(pinner_square)
 
-            for attacked_square in direct_attacks & friendly_pieces:
-                # Skip if already pinned to king
-                if attacked_square in pinned_to_king:
-                    continue
+                for attacked_square in direct_attacks & friendly_pieces:
+                    if attacked_square in pinned_to_king:
+                        continue
 
-                attacked_piece = self.board.piece_at(attacked_square)
-                assert attacked_piece is not None
+                    attacked_piece = self.board.piece_at(attacked_square)
+                    assert attacked_piece is not None
 
-                # Calculate X-ray attacks through this piece
-                temp_occupied = chess.SquareSet(self.board.occupied & ~chess.BB_SQUARES[attacked_square])
-                xray_attacks = self._get_slider_attacks(pinner_square, pinner_piece.piece_type, temp_occupied)
+                    temp_occupied = chess.SquareSet(self.board.occupied & ~chess.BB_SQUARES[attacked_square])
+                    xray_attacks = self._get_slider_attacks(pinner_square, pinner_piece.piece_type, temp_occupied)
+                    ray = chess.SquareSet.ray(pinner_square, attacked_square)
+                    if not ray:
+                        continue
 
-                # Check for valuable piece behind
-                ray = chess.SquareSet.ray(pinner_square, attacked_square)
-                if ray:
                     for target_square in (xray_attacks & ray) - direct_attacks:
                         target_piece = self.board.piece_at(target_square)
 
@@ -184,7 +174,7 @@ class TacticalPatternDetector:
                                     valuable_square=target_square,
                                 )
                             )
-                            break  # Only first piece behind counts
+                            break
 
         return pins
 
@@ -207,8 +197,8 @@ class TacticalPatternDetector:
     def _is_valuable_enough(self, valuable_piece: chess.Piece, pinned_piece: chess.Piece) -> bool:
         """Check if a piece behind is valuable enough to warrant flagging the pin.
 
-        For relative pins, we flag pins when the piece behind is at least as valuable
-        as the pinned piece (>=), not just more valuable (>).
+        Allow equal-value pins only when the pieces are minor pieces or better to
+        avoid trivial pawn-to-pawn \"pins\" that are not meaningful tactically.
         """
         piece_values = {
             chess.PAWN: 1,
@@ -219,7 +209,13 @@ class TacticalPatternDetector:
             chess.KING: 100,
         }
 
-        return piece_values.get(valuable_piece.piece_type, 0) >= piece_values.get(pinned_piece.piece_type, 0)
+        valuable_value = piece_values.get(valuable_piece.piece_type, 0)
+        pinned_value = piece_values.get(pinned_piece.piece_type, 0)
+
+        if valuable_value > pinned_value:
+            return True
+
+        return valuable_value == pinned_value and valuable_value >= piece_values[chess.BISHOP]
 
     def _get_slider_attacks(
         self, square: chess.Square, piece_type: chess.PieceType, occupied: chess.SquareSet
