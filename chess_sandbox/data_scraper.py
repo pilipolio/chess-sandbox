@@ -11,6 +11,10 @@ from typing import List
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from chess_sandbox.logging_config import setup_logging
+
+logger = setup_logging(__name__)
+
 
 class ThemedChessPosition(BaseModel):
     themes: List[str] = Field(
@@ -55,7 +59,7 @@ HTML content:
             if position.fen in html_content:
                 f.write(json.dumps(position.model_dump()) + "\n")
             else:
-                print(f"WARNING: FEN not found in HTML: {position.fen}")
+                logger.info(f"WARNING: FEN not found in HTML: {position.fen}")
 
 
 def main() -> None:
@@ -67,9 +71,9 @@ def main() -> None:
 
     for html_file in raw_dir.glob("*.html"):
         output_file = processed_dir / f"{html_file.stem}.jsonl"
-        print(f"Processing {html_file.name}...")
+        logger.info(f"Processing {html_file.name}...")
         scrape_html_file(str(html_file), str(output_file))
-        print(f"Written to {output_file}")
+        logger.info(f"Written to {output_file}")
 
 
 if __name__ == "__main__":

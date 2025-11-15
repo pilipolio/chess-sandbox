@@ -11,6 +11,9 @@ from chess_sandbox.engine.analyse import (
     analyze_moves,
     analyze_variations,
 )
+from chess_sandbox.logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 
 class PositionAnalysis(BaseModel):
@@ -139,7 +142,7 @@ def cli(fen: str, next_move: str | None, depth: int, num_lines: int, with_maia: 
             maia_engine=maia_engine,
             maia_nodes=maia_nodes,
         )
-        print(result.formatted_text)
+        logger.info(result.formatted_text)
     finally:
         stockfish_engine.quit()
         if maia_engine is not None:

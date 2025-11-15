@@ -18,6 +18,10 @@ import os
 import sys
 from pathlib import Path
 
+from chess_sandbox.logging_config import setup_logging
+
+logger = setup_logging(__name__)
+
 from huggingface_hub import HfApi
 
 # Configuration
@@ -34,20 +38,20 @@ if __name__ == "__main__":
 
     # Check for HF token
     if not os.getenv("HF_TOKEN"):
-        print("ERROR: HF_TOKEN environment variable not set", file=sys.stderr)
-        print("\nPlease set a HuggingFace token with WRITE access:", file=sys.stderr)
-        print("  export HF_TOKEN=hf_xxx", file=sys.stderr)
-        print("\nOr login with:", file=sys.stderr)
-        print("  huggingface-cli login", file=sys.stderr)
+        logger.error("ERROR: HF_TOKEN environment variable not set")
+        logger.error("\nPlease set a HuggingFace token with WRITE access:")
+        logger.error("  export HF_TOKEN=hf_xxx")
+        logger.error("\nOr login with:")
+        logger.error("  huggingface-cli login")
         sys.exit(1)
 
-    print(f"Uploading {LOCAL_FILE} to {REPO_ID}/{HF_FILENAME}")
-    print(f"Revision: {REVISION}")
-    print(f"File size: {LOCAL_FILE.stat().st_size:,} bytes")
+    logger.info(f"Uploading {LOCAL_FILE} to {REPO_ID}/{HF_FILENAME}")
+    logger.info(f"Revision: {REVISION}")
+    logger.info(f"File size: {LOCAL_FILE.stat().st_size:,} bytes")
 
     with open(LOCAL_FILE) as f:
         num_lines = sum(1 for _ in f)
-    print(f"Number of positions: {num_lines}")
+    logger.info(f"Number of positions: {num_lines}")
 
     api = HfApi()
 
@@ -63,13 +67,13 @@ if __name__ == "__main__":
             commit_message=COMMIT_MESSAGE,
         )
 
-        print(f"\n✓ Success! Uploaded to: {result}")
-        print("\nYou can now use:")
-        print(f"  --dataset-repo-id {REPO_ID}")
-        print(f"  --dataset-filename {HF_FILENAME}")
-        print(f"  --dataset-revision {REVISION}")
+        logger.info(f"\n✓ Success! Uploaded to: {result}")
+        logger.info("\nYou can now use:")
+        logger.info(f"  --dataset-repo-id {REPO_ID}")
+        logger.info(f"  --dataset-filename {HF_FILENAME}")
+        logger.info(f"  --dataset-revision {REVISION}")
 
     except Exception as e:
-        print(f"\n✗ Upload failed: {e}", file=sys.stderr)
-        print("\nMake sure your HF_TOKEN has WRITE permissions", file=sys.stderr)
+        logger.error(f"\n✗ Upload failed: {e}")
+        logger.error("\nMake sure your HF_TOKEN has WRITE permissions")
         sys.exit(1)

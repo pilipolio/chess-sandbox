@@ -5,6 +5,9 @@ from pydantic import BaseModel
 
 from chess_sandbox.concept_extraction.model.inference import ConceptExtractor
 from chess_sandbox.config import settings
+from chess_sandbox.logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 
 class ConceptPrediction(BaseModel):
@@ -65,7 +68,7 @@ def get_extractor() -> ConceptExtractor:
     if _extractor is None:
         model_repo_id = settings.HF_CONCEPT_EXTRACTOR_REPO_ID
         model_revision = settings.HF_CONCEPT_EXTRACTOR_REVISION
-        print(f"Initializing ConceptExtractor from {model_repo_id}@{model_revision}...")
+        logger.info(f"Initializing ConceptExtractor from {model_repo_id}@{model_revision}...")
         _extractor = ConceptExtractor.from_hf(probe_repo_id=model_repo_id, revision=model_revision)
-        print("ConceptExtractor initialized successfully")
+        logger.info("ConceptExtractor initialized successfully")
     return _extractor
