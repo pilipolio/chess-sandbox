@@ -1,4 +1,7 @@
 # --- Stage 1: Build Stockfish (rarely changes, cached longer) ---
+# Platform note: CI/CD and Modal use linux/amd64. Local dev on Apple Silicon uses linux/arm64.
+# Both platforms supported via torchvision 0.23.0 (see pyproject.toml for compatibility notes).
+# To force a specific platform: docker build --platform=linux/amd64 ...
 FROM python:3.13-slim-bookworm AS stockfish-builder
 
 ARG VERSION=17.1
@@ -25,7 +28,7 @@ FROM python:3.13-slim-bookworm AS python-deps
 ENV PYTHONUNBUFFERED=True
 WORKDIR /app
 
-# Install uv
+# Install uv (from linux/amd64 variant)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy project definition files for caching

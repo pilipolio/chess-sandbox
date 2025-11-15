@@ -15,6 +15,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 from chess_sandbox.lichess import get_analysis_url
 
+from ..labelling.labeller import LabelledPosition
 from .dataset import load_dataset_from_hf
 from .inference import ConceptExtractor, hf_hub_options
 
@@ -250,6 +251,37 @@ def prepare_predictions(
     return y_true, y_score
 
 
+def get_top_scoring_samples_per_concept(
+    predictions_with_confidence: list[list[tuple[str, float]]],
+    positions: list[LabelledPosition],
+    concept_list: list[str],
+) -> dict[str, list[tuple[LabelledPosition, float]]]:
+    """
+    Get top-scoring samples for each concept.
+
+    Args:
+        predictions_with_confidence: List of predictions per sample with (concept, confidence)
+        positions: List of LabelledPosition objects
+        concept_list: Complete list of all possible concepts
+
+    Returns:
+        Dictionary mapping concept name to list of (position, confidence) tuples,
+        sorted by confidence in descending order
+    """
+    concept_samples: dict[str, list[tuple[LabelledPosition, float]]] = {concept: [] for concept in concept_list}
+
+    for position, predictions in zip(positions, predictions_with_confidence, strict=True):
+        for concept, confidence in predictions:
+            if concept in concept_samples:
+                concept_samples[concept].append((position, confidence))
+
+    # Sort each concept's samples by confidence (descending)
+    for concept in concept_samples:
+        concept_samples[concept].sort(key=lambda x: x[1], reverse=True)
+
+    return concept_samples
+
+
 @click.group()
 def cli() -> None:
     """Evaluation commands for concept probes."""
@@ -296,6 +328,11 @@ def cli() -> None:
     type=float,
     help="Confidence threshold for positive predictions",
 )
+@click.option(
+    "--show-top-samples/--no-show-top-samples",
+    default=False,
+    help="Show top-scoring samples per concept instead of random samples",
+)
 def evaluate(
     model_repo_id: str,
     revision: str | None,
@@ -311,6 +348,7 @@ def evaluate(
     random_seed: int,
     show_samples: bool,
     threshold: float,
+    show_top_samples: bool,
 ) -> None:
     """
     Evaluate trained concept probe on test data with comprehensive metrics.
@@ -357,31 +395,86 @@ def evaluate(
 
     if show_samples:
         n_samples = min(sample_size, len(labelled_positions))
-        rng = np.random.RandomState(random_seed)
-        sample_indices = list[int](rng.choice(len(labelled_positions), size=n_samples, replace=False))
-        sample_fens = [fens[i] for i in sample_indices]
-        sample_labels = [labels[i] for i in sample_indices]
-        sample_predictions_with_confidence = [all_predictions_with_confidence[i] for i in sample_indices]
 
-        print(f"\n{'=' * 70}")
-        print(f"SAMPLE PREDICTIONS ({n_samples} examples)")
-        print(f"{'=' * 70}\n")
+        if show_top_samples:
+            # Show top-scoring samples per concept
+            print(f"\n{'=' * 70}")
+            print(f"TOP-SCORING SAMPLES PER CONCEPT (up to {n_samples} total)")
+            print(f"{'=' * 70}\n")
 
-        for pos, ground_truth, predicted_concepts in zip(
-            sample_fens, sample_labels, sample_predictions_with_confidence, strict=True
-        ):
-            print(f"FEN: {pos}")
-            print(f"Lichess: {get_analysis_url(pos)}")
+            concept_samples = get_top_scoring_samples_per_concept(
+                all_predictions_with_confidence, labelled_positions, extractor.probe.concept_list
+            )
 
-            above_threshold_extracted_concept = [c for c, score in predicted_concepts if score >= threshold]
+            samples_shown = 0
+            for concept in sorted(concept_samples.keys()):
+                if samples_shown >= n_samples:
+                    break
 
-            match_marker = "✓" if set(ground_truth) == set(above_threshold_extracted_concept) else "✗"
+                top_samples = concept_samples[concept]
+                if not top_samples:
+                    continue
 
-            gt_str = ", ".join(ground_truth) if ground_truth else "(none)"
-            pred_str = ", ".join(above_threshold_extracted_concept) if above_threshold_extracted_concept else "(none)"
-            print(f"Ground Truth: {gt_str}")
-            print(f"Prediction:   {pred_str} {match_marker}")
-            print()
+                print(f"--- Concept: {concept} ---\n")
+
+                for position, confidence in top_samples:
+                    if samples_shown >= n_samples:
+                        break
+
+                    # Get ground truth for this position
+                    ground_truth = [c.name for c in position.concepts if c.validated_by] if position.concepts else []
+
+                    # Get predictions for this position
+                    pos_idx = labelled_positions.index(position)
+                    predicted_concepts = all_predictions_with_confidence[pos_idx]
+                    above_threshold_extracted_concept = [c for c, score in predicted_concepts if score >= threshold]
+
+                    match_marker = "✓" if set(ground_truth) == set(above_threshold_extracted_concept) else "✗"
+
+                    print(f"FEN: {position.fen}")
+                    print(f"Lichess: {get_analysis_url(position.fen)}")
+                    print(f"Comment: {position.comment}")
+                    print(f"Confidence: {confidence:.3f}")
+
+                    gt_str = ", ".join(ground_truth) if ground_truth else "(none)"
+                    pred_str = (
+                        ", ".join(above_threshold_extracted_concept) if above_threshold_extracted_concept else "(none)"
+                    )
+                    print(f"Ground Truth: {gt_str}")
+                    print(f"Prediction:   {pred_str} {match_marker}")
+                    print()
+
+                    samples_shown += 1
+        else:
+            # Show random samples
+            rng = np.random.RandomState(random_seed)
+            sample_indices = list[int](rng.choice(len(labelled_positions), size=n_samples, replace=False))
+            sample_positions = [labelled_positions[i] for i in sample_indices]
+            sample_labels = [labels[i] for i in sample_indices]
+            sample_predictions_with_confidence = [all_predictions_with_confidence[i] for i in sample_indices]
+
+            print(f"\n{'=' * 70}")
+            print(f"RANDOM SAMPLE PREDICTIONS ({n_samples} examples)")
+            print(f"{'=' * 70}\n")
+
+            for position, ground_truth, predicted_concepts in zip(
+                sample_positions, sample_labels, sample_predictions_with_confidence, strict=True
+            ):
+                print(f"FEN: {position.fen}")
+                print(f"Lichess: {get_analysis_url(position.fen)}")
+                print(f"Comment: {position.comment}")
+
+                above_threshold_extracted_concept = [c for c, score in predicted_concepts if score >= threshold]
+
+                match_marker = "✓" if set(ground_truth) == set(above_threshold_extracted_concept) else "✗"
+
+                gt_str = ", ".join(ground_truth) if ground_truth else "(none)"
+                pred_str = (
+                    ", ".join(above_threshold_extracted_concept) if above_threshold_extracted_concept else "(none)"
+                )
+                print(f"Ground Truth: {gt_str}")
+                print(f"Prediction:   {pred_str} {match_marker}")
+                print()
 
     print("\nCalculating comprehensive metrics on full dataset...")
     print(f"Extracting activations for {len(labelled_positions)} positions...")
