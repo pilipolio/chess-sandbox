@@ -100,7 +100,9 @@ class Stockfish8Config:
                 self.stockfish_path = Path(settings.STOCKFISH_8_PATH)
             else:
                 # Default path relative to project root
-                default_path = Path(__file__).parent.parent.parent / "data" / "engines" / "stockfish-8" / "src" / "stockfish"
+                default_path = (
+                    Path(__file__).parent.parent.parent / "data" / "engines" / "stockfish-8" / "src" / "stockfish"
+                )
                 self.stockfish_path = default_path
         else:
             self.stockfish_path = Path(stockfish_8_path)
@@ -214,10 +216,7 @@ class Stockfish8ConceptExtractor:
         total_mg = self._parse_score(total_scores[0])
         total_eg = self._parse_score(total_scores[1])
 
-        if any(
-            score is None
-            for score in [white_mg, white_eg, black_mg, black_eg, total_mg, total_eg]
-        ):
+        if any(score is None for score in [white_mg, white_eg, black_mg, black_eg, total_mg, total_eg]):
             # Handle lines with --- values (which map to None)
             # For consistency, if any component is None, we might still want to track
             # But for now, let's use 0.0 as default for missing values
@@ -306,9 +305,7 @@ class Stockfish8ConceptExtractor:
             raise RuntimeError(f"Failed to run Stockfish: {e}") from e
 
         if result.returncode != 0:
-            raise RuntimeError(
-                f"Stockfish exited with code {result.returncode}: {result.stderr}"
-            )
+            raise RuntimeError(f"Stockfish exited with code {result.returncode}: {result.stderr}")
 
         # Parse output
         return self._parse_eval_output(result.stdout)

@@ -60,7 +60,7 @@ def main() -> None:
                 f"  - King safety {'advantage' if concepts.king_safety.total_advantage > 0 else 'disadvantage'}"
             )
         if concepts.passed_pawns and abs(concepts.passed_pawns.total_advantage) > 0.3:
-            interesting.append(f"  - Passed pawn advantage")
+            interesting.append("  - Passed pawn advantage")
 
         if interesting:
             print("Notable concepts:")
