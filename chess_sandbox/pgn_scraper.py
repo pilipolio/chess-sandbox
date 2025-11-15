@@ -2,6 +2,7 @@
 
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import click
@@ -56,8 +57,8 @@ def extract_pgn_links(html: str, base_url: str) -> list[dict[str, str]]:
     return links
 
 
-def download_pgn(url: str, output_dir: Path) -> Path | None:
-    """Download a PGN file from URL.
+def download_file(url: str, output_dir: Path) -> Path | None:
+    """Download a file from URL.
 
     Args:
         url: URL to download from
@@ -82,6 +83,34 @@ def download_pgn(url: str, output_dir: Path) -> Path | None:
     except Exception as e:
         click.echo(f"Error downloading {url}: {e}", err=True)
         return None
+
+
+def extract_zip_file(zip_path: Path, extract_dir: Path) -> list[Path]:
+    """Extract PGN files from a ZIP archive.
+
+    Args:
+        zip_path: Path to ZIP file
+        extract_dir: Directory to extract to
+
+    Returns:
+        List of extracted PGN file paths
+    """
+    pgn_files: list[Path] = []
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            # Extract all files
+            zip_ref.extractall(extract_dir)
+
+            # Find all PGN files in the extracted content
+            for extracted_file in extract_dir.rglob("*"):
+                if extracted_file.is_file() and extracted_file.suffix.lower() == ".pgn":
+                    pgn_files.append(extracted_file)
+
+    except Exception as e:
+        click.echo(f"Error extracting {zip_path}: {e}", err=True)
+
+    return pgn_files
 
 
 def process_pgn_file(pgn_path: Path) -> list[LabelledPosition]:
@@ -161,7 +190,7 @@ def upload_to_hf(
         repo_id=repo_id,
         repo_type="dataset",
         revision=revision,
-        commit_message=f"Add {filename} from beginchess.com scrape",
+        commit_message=f"Add {filename} from PGN scrape",
     )
 
     return result  # type: ignore[no-any-return]
@@ -171,7 +200,7 @@ def upload_to_hf(
 @click.option(
     "--url",
     type=str,
-    default="https://beginchess.com/downloads/",
+    default="https://www.angelfire.com/games3/smartbridge/",
     help="URL to scrape PGN files from",
 )
 @click.option(
@@ -254,39 +283,56 @@ def main(
         return
 
     links = extract_pgn_links(html, url)
-    # Filter to only .pgn files (exclude .zip for now)
-    pgn_links = [link for link in links if link["url"].lower().endswith(".pgn")]
 
-    if not pgn_links:
-        click.echo("No PGN files found on the page.", err=True)
+    if not links:
+        click.echo("No PGN or ZIP files found on the page.", err=True)
         return
 
-    click.echo(f"Found {len(pgn_links)} PGN files")
+    click.echo(f"Found {len(links)} files (PGN and ZIP)")
 
     if limit:
-        pgn_links = pgn_links[:limit]
+        links = links[:limit]
         click.echo(f"Limited to first {limit} files")
 
-    # Step 2: Download PGN files
-    click.echo("Downloading PGN files...")
+    # Step 2: Download files (PGN and ZIP)
+    click.echo("Downloading files...")
     downloaded_files: list[Path] = []
-    for link in tqdm(pgn_links, desc="Downloading"):
-        pgn_path = download_pgn(link["url"], output_dir)
-        if pgn_path:
-            downloaded_files.append(pgn_path)
+    for link in tqdm(links, desc="Downloading"):
+        file_path = download_file(link["url"], output_dir)
+        if file_path:
+            downloaded_files.append(file_path)
 
     click.echo(f"Successfully downloaded {len(downloaded_files)} files")
 
-    # Step 3: Process PGN files and extract positions
+    # Step 3: Extract ZIP files and collect all PGN files
+    click.echo("Processing files and extracting ZIPs...")
+    pgn_files: list[Path] = []
+    extract_dir = output_dir / "extracted"
+
+    for file_path in tqdm(downloaded_files, desc="Processing"):
+        if file_path.suffix.lower() == ".zip":
+            # Extract ZIP and add extracted PGN files
+            extracted_dir = extract_dir / file_path.stem
+            extracted_dir.mkdir(parents=True, exist_ok=True)
+            extracted_pgns = extract_zip_file(file_path, extracted_dir)
+            pgn_files.extend(extracted_pgns)
+        elif file_path.suffix.lower() == ".pgn":
+            # Direct PGN file
+            pgn_files.append(file_path)
+
+    zip_count = len([f for f in downloaded_files if f.suffix.lower() == ".zip"])
+    click.echo(f"Found {len(pgn_files)} PGN files (including {zip_count} from ZIPs)")
+
+    # Step 4: Extract annotated positions from all PGN files
     click.echo("Extracting annotated positions...")
     all_positions: list[LabelledPosition] = []
-    for pgn_file in tqdm(downloaded_files, desc="Processing"):
+    for pgn_file in tqdm(pgn_files, desc="Extracting positions"):
         positions = process_pgn_file(pgn_file)
         all_positions.extend(positions)
 
     click.echo(f"Extracted {len(all_positions)} annotated positions")
 
-    # Step 4: Save to JSONL
+    # Step 5: Save to JSONL
     if all_positions:
         save_positions_to_jsonl(all_positions, output_jsonl)
         click.echo(f"Saved positions to {output_jsonl}")
@@ -294,7 +340,7 @@ def main(
         click.echo("No annotated positions found in downloaded files.", err=True)
         return
 
-    # Step 5: Upload to HuggingFace (optional)
+    # Step 6: Upload to HuggingFace (optional)
     if upload_to_hub:
         click.echo(f"Uploading to HuggingFace dataset {hf_repo_id}...")
         try:
