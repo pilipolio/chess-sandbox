@@ -14,6 +14,7 @@ except ImportError:
 
 class Settings(BaseSettings):
     STOCKFISH_PATH: str = "/usr/local/bin/stockfish"
+    STOCKFISH_8_PATH: str = "data/engines/stockfish-8/src/stockfish"
     LC0_PATH: str = "/opt/homebrew/bin/lc0"
     MAIA_WEIGHTS_PATH: str = "data/raw/maia-1500.pb.gz"
 
