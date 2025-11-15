@@ -42,6 +42,9 @@ class PositionState(BaseModel):
     """Complete state of a chess position including evaluation, concepts, and tactical patterns."""
 
     evaluation: float = Field(description="Stockfish evaluation in pawns (positive = White advantage)")
+    evaluation_category: str = Field(
+        description="Human-readable evaluation category (winning/advantage/slight advantage/equal/etc.)"
+    )
     concepts: dict[str, float] = Field(description="Chess concepts detected with confidence scores (0.0-1.0)")
     tactical_patterns: dict[str, list[str]] = Field(
         description="Tactical patterns detected (pins, forks) with descriptions"
@@ -49,25 +52,22 @@ class PositionState(BaseModel):
     best_moves: list[str] = Field(description="Top engine moves in SAN notation")
 
 
-class PositionDiff(BaseModel):
+class PositionDiffThoughts(BaseModel):
     """Differences between pre-move and post-move positions."""
 
     concepts_gained: list[str] = Field(description="New concepts appearing after the move")
     concepts_lost: list[str] = Field(description="Concepts no longer present after the move")
-    evaluation_change: float = Field(description="Change in evaluation in pawns (positive = improved for side to move)")
-    tactical_changes: str = Field(description="Description of changes in tactical patterns")
-    move_comment: str = Field(
-        description="Concise 1-2 sentence explanation of why this move was played and how it changed the position"
+    evaluation_change_category: str = Field(
+        description="Human-readable evaluation change (significant improvement/minor improvement/roughly equal/etc.)"
     )
+    tactical_changes: str = Field(description="Description of changes in tactical patterns")
 
 
 class MoveExplanation(BaseModel):
     """Complete analysis of a chess move comparing pre and post-move positions."""
 
     move_san: str = Field(description="The move played in SAN notation")
-    pre_move_state: PositionState = Field(description="Position state before the move")
-    post_move_state: PositionState = Field(description="Position state after the move")
-    differences: PositionDiff = Field(description="What changed between positions")
+    differences: PositionDiffThoughts = Field(description="What changed between positions")
     move_comment: str = Field(
         description="Concise 1-2 sentence explanation of why this move was played and how it changed the position"
     )
@@ -76,6 +76,52 @@ class MoveExplanation(BaseModel):
 @dataclass
 class Commentator:
     """Chess position commentator combining Stockfish analysis with LLM explanations."""
+
+    @staticmethod
+    def _categorize_evaluation(evaluation: float) -> str:
+        """Categorize a chess position evaluation into human-readable categories.
+
+        Args:
+            evaluation: Evaluation in pawns (positive = advantage, negative = disadvantage)
+
+        Returns:
+            Category string like "winning", "advantage", "equal", etc.
+        """
+        if evaluation > 3.0:
+            return "winning"
+        elif evaluation >= 1.0:
+            return "advantage"
+        elif evaluation >= 0.2:
+            return "slight advantage"
+        elif evaluation > -0.2:
+            return "equal"
+        elif evaluation > -1.0:
+            return "slight disadvantage"
+        elif evaluation > -3.0:
+            return "disadvantage"
+        else:
+            return "losing"
+
+    @staticmethod
+    def _categorize_evaluation_change(change: float) -> str:
+        """Categorize change in evaluation into human-readable categories.
+
+        Args:
+            change: Change in evaluation (positive = improvement, negative = worsening)
+
+        Returns:
+            Category string like "significant improvement", "roughly equal", etc.
+        """
+        if change >= 1.0:
+            return "significant improvement"
+        elif change >= 0.2:
+            return "minor improvement"
+        elif change > -0.2:
+            return "roughly equal"
+        elif change > -1.0:
+            return "minor worsening"
+        else:
+            return "significant worsening"
 
     PROMPT = dedent("""
         You are a chess grandmaster analyzing a position. Below is a chess position:
@@ -98,23 +144,25 @@ class Commentator:
 
     MOVE_ANALYSIS_PROMPT = dedent("""
         You are a chess grandmaster analyzing a move. Compare the position before and after the move,
-        and identify ONLY the SIGNIFICANT changes that matter.
+        and provides a concise explanation of the move.
 
         MOVE PLAYED: {move_san}
 
         PRE-MOVE POSITION:
-        - Evaluation: {pre_eval:+.1f}
+        - Position evaluation: {pre_eval_category}
         - Concepts: {pre_concepts}
         - Tactical patterns: {pre_tactics}
         - Best moves: {pre_best_moves}
 
         POST-MOVE POSITION:
-        - Evaluation: {post_eval:+.1f}
+        - Position evaluation: {post_eval_category}
         - Concepts: {post_concepts}
         - Tactical patterns: {post_tactics}
         - Best moves: {post_best_moves}
 
-        IMPORTANT: Only report MEANINGFUL changes. Ignore minor fluctuations.
+        EVALUATION CHANGE: {eval_change_category}
+
+        IMPORTANT: Only report MEANINGFUL changes. Ignore minor fluctuations and don't mention when things (evaluation, concepts, tactical patterns) stayed the same.
 
         1. **concepts_gained**: List ONLY strategically significant concepts that appeared
            (empty list if no meaningful concepts were gained)
@@ -122,7 +170,8 @@ class Commentator:
         2. **concepts_lost**: List ONLY strategically significant concepts that disappeared
            (empty list if no meaningful concepts were lost)
 
-        3. **evaluation_change**: Numeric change in evaluation (post - pre)
+        3. **evaluation_change_category**: The provided evaluation change category
+           ({eval_change_category})
 
         4. **tactical_changes**: Describe ONLY significant tactical shifts:
            - New tactical threats or opportunities created
@@ -132,7 +181,7 @@ class Commentator:
         5. **move_comment**: One concise sentence explaining the move's purpose:
            - If the move creates/addresses tactical threats, mention that
            - If the move improves strategic position (concepts), mention that
-           - If evaluation changed significantly, mention whether it's an improvement/mistake
+           - Reference the evaluation change if significant (improvement/worsening)
            - Be specific about what changed, not what stayed the same
 
         Be selective. Only highlight changes that actually matter to understanding the move.
@@ -217,6 +266,7 @@ class Commentator:
 
         return PositionState(
             evaluation=best_eval,
+            evaluation_category=self._categorize_evaluation(best_eval),
             concepts=concepts_dict,
             tactical_patterns=tactical_patterns,
             best_moves=best_moves,
@@ -301,12 +351,18 @@ class Commentator:
 
             # Adjust post-move evaluation to be from original side's perspective
             # After the move, it's the opponent's turn, so negate to compare apples-to-apples
+            post_move_evaluation = -post_move_state_raw.evaluation
             post_move_state = PositionState(
-                evaluation=-post_move_state_raw.evaluation,
+                evaluation=post_move_evaluation,
+                evaluation_category=self._categorize_evaluation(post_move_evaluation),
                 concepts=post_move_state_raw.concepts,
                 tactical_patterns=post_move_state_raw.tactical_patterns,
                 best_moves=post_move_state_raw.best_moves,
             )
+
+            # Compute evaluation change and categorize it
+            evaluation_change = post_move_state.evaluation - pre_move_state.evaluation
+            evaluation_change_category = self._categorize_evaluation_change(evaluation_change)
 
             # Format concepts for prompt
             def format_concepts(concepts: dict[str, float]) -> str:
@@ -326,21 +382,22 @@ class Commentator:
             # Create prompt with all context
             prompt = self.MOVE_ANALYSIS_PROMPT.format(
                 move_san=move_san,
-                pre_eval=pre_move_state.evaluation,
+                pre_eval_category=pre_move_state.evaluation_category,
                 pre_concepts=format_concepts(pre_move_state.concepts),
                 pre_tactics=format_tactics(pre_move_state.tactical_patterns),
                 pre_best_moves=", ".join(pre_move_state.best_moves),
-                post_eval=post_move_state.evaluation,
+                post_eval_category=post_move_state.evaluation_category,
                 post_concepts=format_concepts(post_move_state.concepts),
                 post_tactics=format_tactics(post_move_state.tactical_patterns),
                 post_best_moves=", ".join(post_move_state.best_moves),
+                eval_change_category=evaluation_change_category,
             )
 
             # Call LLM with structured output
             response = self.client.responses.parse(
                 model=self.llm_model,
                 input=prompt,
-                text_format=PositionDiff,
+                text_format=MoveExplanation,
                 reasoning=Reasoning(effort=self.llm_reasoning_effort),
             )
 
@@ -356,17 +413,8 @@ class Commentator:
             if not text.parsed:  # type: ignore[attr-defined]
                 raise Exception("Could not parse LLM response into PositionDiff")
 
-            # Get the parsed differences
-            parsed_diff: PositionDiff = text.parsed  # type: ignore[attr-defined]
+            return text.parsed
 
-            # Return complete move explanation
-            return MoveExplanation(
-                move_san=move_san,
-                pre_move_state=pre_move_state,
-                post_move_state=post_move_state,
-                differences=parsed_diff,
-                move_comment=parsed_diff.move_comment,
-            )
         finally:
             engine.quit()
 
