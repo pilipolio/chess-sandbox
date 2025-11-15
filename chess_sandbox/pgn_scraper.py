@@ -160,6 +160,34 @@ def save_positions_to_jsonl(positions: list[LabelledPosition], output_path: Path
             f.write(json.dumps(data) + "\n")
 
 
+def save_pgn_index(index_entries: list[dict[str, str]], index_path: Path) -> None:
+    """Save PGN file index to JSONL.
+
+    Args:
+        index_entries: List of index entries with metadata
+        index_path: Path to index JSONL file
+    """
+    with index_path.open("w") as f:
+        for entry in index_entries:
+            f.write(json.dumps(entry) + "\n")
+
+
+def load_pgn_index(index_path: Path) -> list[dict[str, str]]:
+    """Load PGN file index from JSONL.
+
+    Args:
+        index_path: Path to index JSONL file
+
+    Returns:
+        List of index entries
+    """
+    entries: list[dict[str, str]] = []
+    with index_path.open() as f:
+        for line in f:
+            entries.append(json.loads(line))
+    return entries
+
+
 def upload_to_hf(
     file_path: Path,
     repo_id: str,
@@ -196,7 +224,13 @@ def upload_to_hf(
     return result  # type: ignore[no-any-return]
 
 
-@click.command()
+@click.group()
+def cli() -> None:
+    """PGN scraping and processing pipeline."""
+    pass
+
+
+@cli.command()
 @click.option(
     "--url",
     type=str,
@@ -206,20 +240,130 @@ def upload_to_hf(
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
-    default="data/pgn_downloads",
+    default="data/pgn_raw",
     help="Directory to save downloaded PGN files",
 )
 @click.option(
-    "--output-jsonl",
+    "--index-file",
     type=click.Path(path_type=Path),
-    default="data/scraped_positions.jsonl",
-    help="Output JSONL file for extracted positions",
+    default="data/pgn_index.jsonl",
+    help="Index file to track downloaded PGNs",
 )
 @click.option(
     "--limit",
     type=int,
     default=None,
-    help="Limit number of PGN files to download (for testing)",
+    help="Limit number of files to download (for testing)",
+)
+def scrape(
+    url: str,
+    output_dir: Path,
+    index_file: Path,
+    limit: int | None,
+) -> None:
+    """Step 1: Scrape and download PGN files with metadata index.
+
+    Downloads PGN files (including extraction from ZIP archives) and creates
+    an index file tracking source URLs and metadata.
+    """
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Scrape webpage for links
+    click.echo(f"Scraping {url} for PGN/ZIP files...")
+    try:
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            html = response.text
+    except Exception as e:
+        click.echo(f"Error fetching URL: {e}", err=True)
+        return
+
+    links = extract_pgn_links(html, url)
+
+    if not links:
+        click.echo("No PGN or ZIP files found on the page.", err=True)
+        return
+
+    click.echo(f"Found {len(links)} files (PGN and ZIP)")
+
+    if limit:
+        links = links[:limit]
+        click.echo(f"Limited to first {limit} files")
+
+    # Step 2: Download files
+    click.echo("Downloading files...")
+    downloaded_files: list[Path] = []
+    for link in tqdm(links, desc="Downloading"):
+        file_path = download_file(link["url"], output_dir)
+        if file_path:
+            downloaded_files.append(file_path)
+
+    click.echo(f"Successfully downloaded {len(downloaded_files)} files")
+
+    # Step 3: Extract ZIP files and collect all PGN files
+    click.echo("Processing files and extracting ZIPs...")
+    index_entries: list[dict[str, str]] = []
+    extract_dir = output_dir / "extracted"
+
+    for file_path in tqdm(downloaded_files, desc="Processing"):
+        if file_path.suffix.lower() == ".zip":
+            # Extract ZIP and add extracted PGN files to index
+            extracted_dir = extract_dir / file_path.stem
+            extracted_dir.mkdir(parents=True, exist_ok=True)
+            extracted_pgns = extract_zip_file(file_path, extracted_dir)
+
+            for pgn_file in extracted_pgns:
+                # Find original link for this file
+                original_link = next((link for link in links if file_path.name in link["url"]), None)
+                index_entries.append(
+                    {
+                        "pgn_path": str(pgn_file.relative_to(output_dir)),
+                        "source_url": original_link["url"] if original_link else "",
+                        "source_website": url,
+                        "archive_name": file_path.name,
+                        "file_type": "pgn_from_zip",
+                    }
+                )
+
+        elif file_path.suffix.lower() == ".pgn":
+            # Direct PGN file
+            original_link = next((link for link in links if file_path.name in link["url"]), None)
+            index_entries.append(
+                {
+                    "pgn_path": str(file_path.relative_to(output_dir)),
+                    "source_url": original_link["url"] if original_link else "",
+                    "source_website": url,
+                    "archive_name": "",
+                    "file_type": "pgn_direct",
+                }
+            )
+
+    # Step 4: Save index
+    save_pgn_index(index_entries, index_file)
+    click.echo(f"Saved index with {len(index_entries)} PGN files to {index_file}")
+
+
+@cli.command()
+@click.option(
+    "--index-file",
+    type=click.Path(exists=True, path_type=Path),
+    default="data/pgn_index.jsonl",
+    help="Index file with PGN metadata",
+)
+@click.option(
+    "--pgn-dir",
+    type=click.Path(path_type=Path),
+    default="data/pgn_raw",
+    help="Base directory containing PGN files",
+)
+@click.option(
+    "--output-jsonl",
+    type=click.Path(path_type=Path),
+    default="data/labeled_positions.jsonl",
+    help="Output JSONL file for labeled positions",
 )
 @click.option(
     "--upload-to-hub",
@@ -245,102 +389,61 @@ def upload_to_hf(
     default=None,
     help="HuggingFace API token (uses HF_TOKEN env var if not provided)",
 )
-def main(
-    url: str,
-    output_dir: Path,
+def extract(
+    index_file: Path,
+    pgn_dir: Path,
     output_jsonl: Path,
-    limit: int | None,
     upload_to_hub: bool,
     hf_repo_id: str | None,
     hf_revision: str | None,
     hf_token: str | None,
 ) -> None:
-    """Scrape PGN files from a webpage and extract annotated positions.
+    """Step 2: Extract labeled positions from downloaded PGN files.
 
-    This pipeline:
-    1. Scrapes a webpage for PGN download links
-    2. Downloads the PGN files
-    3. Extracts positions with comments/annotations
-    4. Saves to JSONL format
-    5. Optionally uploads to HuggingFace dataset
+    Reads PGN files from the index and extracts annotated positions,
+    saving them to JSONL format with optional HuggingFace upload.
     """
     if upload_to_hub and not hf_repo_id:
         raise click.UsageError("--hf-repo-id is required when --upload-to-hub is set")
 
     # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Scrape webpage for PGN links
-    click.echo(f"Scraping {url} for PGN files...")
+    # Step 1: Load index
+    click.echo(f"Loading PGN index from {index_file}...")
     try:
-        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            html = response.text
+        index_entries = load_pgn_index(index_file)
     except Exception as e:
-        click.echo(f"Error fetching URL: {e}", err=True)
+        click.echo(f"Error loading index: {e}", err=True)
         return
 
-    links = extract_pgn_links(html, url)
+    click.echo(f"Found {len(index_entries)} PGN files in index")
 
-    if not links:
-        click.echo("No PGN or ZIP files found on the page.", err=True)
-        return
-
-    click.echo(f"Found {len(links)} files (PGN and ZIP)")
-
-    if limit:
-        links = links[:limit]
-        click.echo(f"Limited to first {limit} files")
-
-    # Step 2: Download files (PGN and ZIP)
-    click.echo("Downloading files...")
-    downloaded_files: list[Path] = []
-    for link in tqdm(links, desc="Downloading"):
-        file_path = download_file(link["url"], output_dir)
-        if file_path:
-            downloaded_files.append(file_path)
-
-    click.echo(f"Successfully downloaded {len(downloaded_files)} files")
-
-    # Step 3: Extract ZIP files and collect all PGN files
-    click.echo("Processing files and extracting ZIPs...")
-    pgn_files: list[Path] = []
-    extract_dir = output_dir / "extracted"
-
-    for file_path in tqdm(downloaded_files, desc="Processing"):
-        if file_path.suffix.lower() == ".zip":
-            # Extract ZIP and add extracted PGN files
-            extracted_dir = extract_dir / file_path.stem
-            extracted_dir.mkdir(parents=True, exist_ok=True)
-            extracted_pgns = extract_zip_file(file_path, extracted_dir)
-            pgn_files.extend(extracted_pgns)
-        elif file_path.suffix.lower() == ".pgn":
-            # Direct PGN file
-            pgn_files.append(file_path)
-
-    zip_count = len([f for f in downloaded_files if f.suffix.lower() == ".zip"])
-    click.echo(f"Found {len(pgn_files)} PGN files (including {zip_count} from ZIPs)")
-
-    # Step 4: Extract annotated positions from all PGN files
+    # Step 2: Extract annotated positions from all PGN files
     click.echo("Extracting annotated positions...")
     all_positions: list[LabelledPosition] = []
-    for pgn_file in tqdm(pgn_files, desc="Extracting positions"):
-        positions = process_pgn_file(pgn_file)
+
+    for entry in tqdm(index_entries, desc="Processing PGNs"):
+        pgn_path = pgn_dir / entry["pgn_path"]
+
+        if not pgn_path.exists():
+            click.echo(f"Warning: PGN file not found: {pgn_path}", err=True)
+            continue
+
+        positions = process_pgn_file(pgn_path)
         all_positions.extend(positions)
 
     click.echo(f"Extracted {len(all_positions)} annotated positions")
 
-    # Step 5: Save to JSONL
+    # Step 3: Save to JSONL
     if all_positions:
         save_positions_to_jsonl(all_positions, output_jsonl)
         click.echo(f"Saved positions to {output_jsonl}")
     else:
-        click.echo("No annotated positions found in downloaded files.", err=True)
+        click.echo("No annotated positions found in PGN files.", err=True)
         return
 
-    # Step 6: Upload to HuggingFace (optional)
+    # Step 4: Upload to HuggingFace (optional)
     if upload_to_hub:
         click.echo(f"Uploading to HuggingFace dataset {hf_repo_id}...")
         try:
@@ -356,4 +459,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    cli()
