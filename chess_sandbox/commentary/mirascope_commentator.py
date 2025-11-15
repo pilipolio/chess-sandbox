@@ -14,7 +14,7 @@ from typing import Any
 import chess
 import chess.engine
 import lilypad
-from mirascope import llm
+from mirascope.core.openai import openai_call
 from pydantic import BaseModel, Field
 
 from ..engine.analyse import EngineConfig, analyze_variations
@@ -78,16 +78,20 @@ ANALYSIS_PROMPT = dedent("""
 """).strip()
 
 
-@llm.call(provider="openai", format=ChessPositionExplanation)  # type: ignore[misc]
-@lilypad.trace(versioning="automatic")  # type: ignore[misc]
-def analyze_position_with_llm(analysis_text: str, tactical_context: str, model_id: str) -> str:
+def analyze_position_with_llm(analysis_text: str, tactical_context: str, model: str) -> ChessPositionExplanation:
     """
     Analyze a chess position using an LLM.
 
-    This function is decorated with both @llm.call and @lilypad.trace to enable
-    automatic LLM calling via Mirascope and automatic versioning/tracing via Lilypad.
+    This function uses Mirascope's @openai_call decorator (added dynamically) and
+    Lilypad's @lilypad.trace decorator for automatic versioning/tracing.
     """
-    return ANALYSIS_PROMPT.format(analysis_text=analysis_text, tactical_context=tactical_context)
+
+    @openai_call(model=model, response_model=ChessPositionExplanation)  # type: ignore[misc]
+    @lilypad.trace(versioning="automatic")  # type: ignore[misc]
+    def _inner_call() -> str:
+        return ANALYSIS_PROMPT.format(analysis_text=analysis_text, tactical_context=tactical_context)
+
+    return _inner_call()
 
 
 class MirascopeCommentator:
@@ -120,51 +124,48 @@ class MirascopeCommentator:
         Returns:
             ChessPositionExplanationWithInput containing the analysis
         """
-        config = EngineConfig.stockfish(num_lines=self.config.engine_num_lines, depth=self.config.engine_depth)
-        engine = config.instantiate()
+        # Prepare analysis text
+        if self.config.engine_num_lines > 0:
+            # Use Stockfish engine for analysis
+            config = EngineConfig.stockfish(num_lines=self.config.engine_num_lines, depth=self.config.engine_depth)
+            engine = config.instantiate()
+            try:
+                limit = chess.engine.Limit(depth=self.config.engine_depth)
+                analysis_results = analyze_variations(board, engine, self.config.engine_num_lines, limit)
+                position_analysis = PositionAnalysis(
+                    fen=board.fen(), next_move=None, principal_variations=analysis_results, human_moves=None
+                )
+                analysis_text = position_analysis.format_as_text()
+            finally:
+                engine.quit()
+        else:
+            # Skip engine analysis - just provide the FEN
+            analysis_text = f"Position (FEN): {board.fen()}"
 
-        try:
-            # Get engine analysis
-            limit = chess.engine.Limit(depth=self.config.engine_depth)
-            analysis_results = analyze_variations(board, engine, self.config.engine_num_lines, limit)
-            position_analysis = PositionAnalysis(
-                fen=board.fen(), next_move=None, principal_variations=analysis_results, human_moves=None
-            )
-            analysis_text = position_analysis.format_as_text()
+        # Detect tactical patterns
+        tactical_context = ""
+        if self.config.include_tactical_patterns:
+            detector = TacticalPatternDetector(board)
+            tactical_context = detector.get_tactical_context()
+            if tactical_context:
+                tactical_context = f"\n{tactical_context}\n"
 
-            # Detect tactical patterns
-            tactical_context = ""
-            if self.config.include_tactical_patterns:
-                detector = TacticalPatternDetector(board)
-                tactical_context = detector.get_tactical_context()
-                if tactical_context:
-                    tactical_context = f"\n{tactical_context}\n"
+        # Call the LLM via Mirascope (with Lilypad tracing)
+        explanation = analyze_position_with_llm(
+            analysis_text=analysis_text, tactical_context=tactical_context, model=self.config.llm_model
+        )
 
-            # Call the LLM via Mirascope (with Lilypad tracing)
-            explanation = analyze_position_with_llm(
-                analysis_text=analysis_text, tactical_context=tactical_context, model_id=self.config.llm_model
-            )
-
-            # Extract fields from explanation (Mirascope returns structured output)
-            explanation_dict: dict[str, Any] = (
-                explanation.model_dump()  # type: ignore[union-attr]
-                if hasattr(explanation, "model_dump")
-                else explanation.__dict__  # type: ignore[union-attr]
-            )
-
-            return ChessPositionExplanationWithInput(
-                fen=board.fen(),
-                full_input=analysis_text,
-                analysis_config={
-                    "engine_depth": self.config.engine_depth,
-                    "engine_num_lines": self.config.engine_num_lines,
-                    "llm_model": self.config.llm_model,
-                    "include_tactical_patterns": self.config.include_tactical_patterns,
-                },
-                **explanation_dict,
-            )
-        finally:
-            engine.quit()
+        return ChessPositionExplanationWithInput(
+            fen=board.fen(),
+            full_input=analysis_text,
+            analysis_config={
+                "engine_depth": self.config.engine_depth,
+                "engine_num_lines": self.config.engine_num_lines,
+                "llm_model": self.config.llm_model,
+                "include_tactical_patterns": self.config.include_tactical_patterns,
+            },
+            **explanation.model_dump(),
+        )
 
 
 def main():

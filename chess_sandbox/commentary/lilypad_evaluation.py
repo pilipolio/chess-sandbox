@@ -17,7 +17,7 @@ from typing import Any
 
 import chess
 import lilypad
-from mirascope import llm
+from mirascope.core.openai import openai_call
 from pydantic import BaseModel, Field
 
 from ..lichess import get_analysis_url
@@ -52,17 +52,19 @@ class EvalConfig:
     version: str = "v1"
 
 
-# Use Mirascope's @llm.call decorator for the judge
-@llm.call(provider="openai", format=ThemeJudgement)  # type: ignore[misc]
-@lilypad.trace(versioning="automatic")  # type: ignore[misc]
-def judge_themes(ground_truth: list[str], predicted: list[str], model_id: str = "gpt-4o-mini") -> str:
+# Use Mirascope's @openai_call decorator for the judge
+def judge_themes(ground_truth: list[str], predicted: list[str], model: str = "gpt-4o-mini") -> ThemeJudgement:
     """
     Compare predicted themes with ground truth using semantic similarity.
 
-    This function is decorated with both @llm.call and @lilypad.trace to enable
-    automatic evaluation and tracking via Lilypad.
+    This function uses Mirascope's @openai_call decorator (added dynamically) and
+    Lilypad's @lilypad.trace decorator for automatic versioning/tracing.
     """
-    return f"""You are an expert chess judge evaluating theme predictions.
+
+    @openai_call(model=model, response_model=ThemeJudgement)  # type: ignore[misc]
+    @lilypad.trace(versioning="automatic")  # type: ignore[misc]
+    def _inner_call() -> str:
+        return f"""You are an expert chess judge evaluating theme predictions.
 
 Ground Truth Themes: {json.dumps(ground_truth)}
 Predicted Themes: {json.dumps(predicted)}
@@ -82,6 +84,8 @@ Consider:
 4. Specificity (are themes appropriately detailed?)
 
 Provide a score and clear rationale explaining your evaluation."""
+
+    return _inner_call()
 
 
 def load_ground_truth(jsonl_path: str) -> list[dict[str, Any]]:
@@ -147,22 +151,18 @@ def evaluate_single_position(
     print(f"Predicted: {predicted_themes}")
 
     # Judge the themes
-    judgement = judge_themes(ground_truth=ground_truth_themes, predicted=predicted_themes, model_id=judge_model)
+    judgement = judge_themes(ground_truth=ground_truth_themes, predicted=predicted_themes, model=judge_model)
 
-    # Extract score and rationale (handle potential type checking issues with decorated function)
-    score = judgement.score if hasattr(judgement, "score") else 0.0  # type: ignore[union-attr]
-    rationale = judgement.rationale if hasattr(judgement, "rationale") else "No rationale"  # type: ignore[union-attr]
-
-    print(f"Judge Score: {score:.1f}/100")
-    print(f"Rationale: {rationale}")
+    print(f"Judge Score: {judgement.score:.1f}/100")
+    print(f"Rationale: {judgement.rationale}")
 
     return EvaluationResult(
         config_name=config_name,
         fen=fen,
         ground_truth_themes=ground_truth_themes,
         predicted_themes=predicted_themes,
-        score=score,
-        rationale=rationale,
+        score=judgement.score,
+        rationale=judgement.rationale,
     )
 
 

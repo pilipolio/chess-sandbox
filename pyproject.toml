@@ -22,7 +22,7 @@ authors = [
 ]
 keywords = ["chess", "stockfish", "llm", "openai", "claude", "commentary", "analysis"]
 
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "chess>=1.11.2",
     "click>=8.3.0",
@@ -32,7 +32,7 @@ dependencies = [
     "joblib>=1.4.0",
     "lczerolens>=0.3.3",
     "modal>=1.2.1",
-    "openai>=2.6.1",
+    "openai>=1.6.0,<2",
     "pydantic>=2.10.4",
     "pydantic-settings>=2.11.0",
     "pyright>=1.1.391",
@@ -44,7 +44,7 @@ dependencies = [
     "scikit-learn-stubs>=0.0.3",
     "joblib-stubs>=1.5.2.0.20250831",
     "jinja2>=3.1.6",
-    "mirascope[openai]>=2.0.0a1",
+    "mirascope[openai]>=1.25.7",
     "lilypad-sdk[openai]>=0.10.4",
 ]
 
@@ -119,7 +119,7 @@ known-first-party = ["chess_sandbox"]
 [tool.pyright]
 venvPath = "."          # uv installs the venv in the current dir
 venv = ".venv"          #       in a folder called `.venv`
-pythonVersion = "3.13"  # if library, specify the _lowest_ you support
+pythonVersion = "3.12"  # if library, specify the _lowest_ you support
 include = ["chess_sandbox", "tests"]
 strict = ["**/*.py"]    # use 'strict' checking on most files
 exclude = [

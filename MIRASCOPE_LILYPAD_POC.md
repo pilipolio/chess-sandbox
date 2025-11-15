@@ -2,16 +2,17 @@
 
 This POC demonstrates how to use **Mirascope** and **Lilypad** to build an evaluation loop around the chess commentary system.
 
-## ⚠️ Important Compatibility Note
+## ✅ Python 3.12 Required
 
-**Current Status**: This POC uses Mirascope 2.0.0a1 (alpha/pre-release) which has a known compatibility issue with Python 3.13. The library imports successfully but cannot be run directly due to a typing error in the mirascope package itself.
+**Status**: This POC uses Mirascope 1.25.7 (stable) which is **fully compatible with Python 3.12**.
 
-**Recommendation**: This POC is provided as a **code reference and architecture demonstration**. To run it in production:
-1. Wait for Mirascope 2.0 stable release with Python 3.13 support
-2. Use Python 3.11 or 3.12 instead
-3. Monitor https://github.com/Mirascope/mirascope for compatibility updates
+**Requirements**:
+- Python 3.12 (tested and working)
+- Mirascope 1.25.7
+- OpenAI API <2 (1.109.1 tested)
+- Lilypad SDK 0.10.4
 
-The code structure, API usage patterns, and integration approach demonstrated here will remain valid once compatibility is resolved.
+The code is production-ready and has been tested end-to-end with Python 3.12.
 
 ## Overview
 
@@ -82,9 +83,15 @@ The POC consists of two main components:
 
 ### 1. Install Dependencies
 
-Dependencies are already installed (done via `uv add --prerelease=allow`):
-- `mirascope[openai]` (v2.0.0a1)
-- `lilypad-sdk[openai]` (v0.10.4)
+Dependencies are specified in `pyproject.toml`:
+- `mirascope[openai]>=1.25.7` (stable)
+- `lilypad-sdk[openai]>=0.10.4`
+- `openai>=1.6.0,<2` (for compatibility)
+
+Install with:
+```bash
+uv sync
+```
 
 ### 2. Configure Lilypad
 
@@ -236,18 +243,18 @@ Warning: LILYPAD_PROJECT_ID and LILYPAD_API_KEY not set.
 Running without Lilypad tracing.
 ```
 
-### Python 3.13 Compatibility Issue
+### Python Version
 
-The current version of Mirascope (2.0.0a1) has a typing compatibility issue with Python 3.13. You may see:
+This POC requires Python 3.12. To set it up:
 
+```bash
+# Pin Python version
+uv python pin 3.12
+
+# Reinstall dependencies
+rm -rf .venv
+uv sync
 ```
-TypeError: can only concatenate list (not "tuple") to list
-```
-
-**Solutions**:
-- Downgrade to Python 3.11 or 3.12
-- Wait for Mirascope 2.0 stable release
-- Use the POC as a code reference while waiting for compatibility fixes
 
 ### Missing Ground Truth Data
 
