@@ -1,7 +1,7 @@
 """Chess commentary generation using LLMs and Stockfish engine analysis."""
 
 from .cli import print_explanation
-from .context import MoveContext, PositionContextBuilder, PositionState
+from .context import MoveContext, PositionContext, PositionContextBuilder, PositionState
 from .evaluation import EvalConfig, EvaluationResult, ThemeJudge, ThemeJudgement
 from .llm import (
     ChessPositionExplanation,
@@ -17,6 +17,7 @@ __all__ = [
     "print_explanation",
     # Context
     "MoveContext",
+    "PositionContext",
     "PositionContextBuilder",
     "PositionState",
     # LLM

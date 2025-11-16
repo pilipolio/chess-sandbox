@@ -10,14 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
-import chess
 from openai import OpenAI
 from openai.types.shared.reasoning_effort import ReasoningEffort
 from pydantic import BaseModel, Field
 
+from ..concept_extraction.model.inference import ConceptExtractor
 from ..engine.analyse import EngineConfig
 from ..lichess import get_analysis_url
 from .cli import print_explanation
+from .context import PositionContextBuilder
 from .llm import summarize_position
 
 
@@ -133,7 +134,7 @@ def print_summary(results_by_config: Dict[str, List[EvaluationResult]]) -> None:
 
 
 def evaluate_position(
-    engine_config: EngineConfig,
+    context_builder: PositionContextBuilder,
     client: OpenAI,
     model: str,
     reasoning_effort: str | None,
@@ -142,13 +143,15 @@ def evaluate_position(
     ground_truth_themes: List[str],
     config_name: str,
 ) -> EvaluationResult:
-    board = chess.Board(fen)
-
     print(f"\nAnalyzing with {config_name}...")
+
+    # Build position context using single context-building path
+    position_context = context_builder.build_position_context(fen)
+
+    # Analyze with LLM
     reasoning_effort_typed: ReasoningEffort | None = reasoning_effort  # type: ignore[assignment]
     explanation = summarize_position(
-        board=board,
-        engine_config=engine_config,
+        context=position_context,
         client=client,
         model=model,
         reasoning_effort=reasoning_effort_typed,
@@ -183,11 +186,18 @@ def run_evaluation(
         print(f"LLM: {config.params['llm']}")
         print(f"{'=' * 70}")
 
-        # Create engine config and OpenAI client
+        # Create context builder (reused across all positions in this config)
         engine_config = EngineConfig.stockfish(
             num_lines=config.params["engine"]["num_lines"],
             depth=config.params["engine"]["depth"],
         )
+        concept_extractor = ConceptExtractor.from_hf(
+            probe_repo_id="pilipolio/chess-positions-extractor",
+            revision="production",
+        )
+        context_builder = PositionContextBuilder(engine_config, concept_extractor)
+
+        # Create OpenAI client and LLM config
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         model = config.params["llm"]["model"]
         reasoning_effort = config.params["llm"].get("reasoning_effort")
@@ -205,7 +215,7 @@ def run_evaluation(
 
             try:
                 result = evaluate_position(
-                    engine_config=engine_config,
+                    context_builder=context_builder,
                     client=client,
                     model=model,
                     reasoning_effort=reasoning_effort,
