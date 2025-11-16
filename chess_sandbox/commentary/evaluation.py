@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from openai import OpenAI
-from openai.types.shared.reasoning_effort import ReasoningEffort
 from pydantic import BaseModel, Field
 
 from ..concept_extraction.model.inference import ConceptExtractor
@@ -135,7 +134,6 @@ def print_summary(results_by_config: Dict[str, List[EvaluationResult]]) -> None:
 
 def evaluate_position(
     context_builder: PositionContextBuilder,
-    client: OpenAI,
     model: str,
     reasoning_effort: str | None,
     judge: ThemeJudge,
@@ -149,12 +147,10 @@ def evaluate_position(
     position_context = context_builder.build_position_context(fen)
 
     # Analyze with LLM
-    reasoning_effort_typed: ReasoningEffort | None = reasoning_effort  # type: ignore[assignment]
     explanation = summarize_position(
         context=position_context,
-        client=client,
         model=model,
-        reasoning_effort=reasoning_effort_typed,
+        reasoning_effort=reasoning_effort,
     )
     print_explanation(explanation)
 
@@ -197,8 +193,7 @@ def run_evaluation(
         )
         context_builder = PositionContextBuilder(engine_config, concept_extractor)
 
-        # Create OpenAI client and LLM config
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        # Get LLM config
         model = config.params["llm"]["model"]
         reasoning_effort = config.params["llm"].get("reasoning_effort")
 
@@ -216,7 +211,6 @@ def run_evaluation(
             try:
                 result = evaluate_position(
                     context_builder=context_builder,
-                    client=client,
                     model=model,
                     reasoning_effort=reasoning_effort,
                     judge=judge,

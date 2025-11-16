@@ -31,6 +31,7 @@ dependencies = [
     "huggingface-hub>=0.27.0",
     "joblib>=1.4.0",
     "lczerolens>=0.3.3",
+    "mirascope[openai]>=2.0.0a2",
     "modal>=1.2.1",
     "openai>=2.6.1",
     "pydantic>=2.10.4",
@@ -127,6 +128,7 @@ exclude = [
     "**/concept_extraction/model/evaluation.py",         # ML evaluation code with sklearn
     "**/concept_extraction/model/dataset.py",            # Dataset loading with HF Hub
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
+    "**/commentary/llm.py",                              # Mirascope v2 alpha - no type stubs
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 

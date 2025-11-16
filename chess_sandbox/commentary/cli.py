@@ -5,11 +5,7 @@ This module provides the Click command-line interface for analyzing chess positi
 and moves. It composes the context building and LLM modules.
 """
 
-import os
-
 import click
-from openai import OpenAI
-from openai.types.shared.reasoning_effort import ReasoningEffort
 
 from ..concept_extraction.model.inference import ConceptExtractor
 from ..engine.analyse import EngineConfig
@@ -80,13 +76,10 @@ def main(fen: str, move: str, depth: int, num_lines: int, model: str, reasoning_
     move_ctx = context_builder.build_move_context(fen, move)
 
     # Analyze with LLM
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    reasoning_effort_typed: ReasoningEffort | None = reasoning_effort  # type: ignore[assignment]
     move_explanation = explain_move(
         move_ctx=move_ctx,
-        client=client,
         model=model,
-        reasoning_effort=reasoning_effort_typed,
+        reasoning_effort=reasoning_effort,
     )
 
     # Print results

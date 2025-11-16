@@ -1,15 +1,13 @@
 """
-LLM workflow module for chess position analysis.
+LLM workflow module for chess position analysis using Mirascope v2.
 
-This module manages prompts, response parsing, and OpenAI client configuration.
+This module manages prompts, response parsing, and LLM client configuration.
 It consumes PositionState and MoveContext data classes from the context module.
 """
 
 from textwrap import dedent
 
-from openai import OpenAI
-from openai.types.shared.reasoning_effort import ReasoningEffort
-from openai.types.shared_params.reasoning import Reasoning
+from mirascope import llm
 from pydantic import BaseModel, Field
 
 from .context import MoveContext, PositionContext
@@ -120,9 +118,8 @@ MOVE_PROMPT = dedent("""
 
 def summarize_position(
     context: PositionContext,
-    client: OpenAI,
     model: str = "gpt-4o-2024-08-06",
-    reasoning_effort: ReasoningEffort | None = None,
+    reasoning_effort: str | None = None,
 ) -> ChessPositionExplanationWithInput:
     """Analyze a chess position using pre-built context and LLM.
 
@@ -132,67 +129,48 @@ def summarize_position(
 
     Args:
         context: Pre-built position context with analysis text and tactical patterns
-        client: OpenAI client
         model: LLM model to use
-        reasoning_effort: Optional reasoning effort for models that support it
+        reasoning_effort: Optional reasoning effort for models that support it (e.g., "low", "medium", "high")
 
     Returns:
         ChessPositionExplanationWithInput with complete analysis
     """
-    # Format tactical context for prompt
     tactical_context = f"\n{context.tactical_context}\n" if context.tactical_context else ""
-
-    # Build prompt using pre-formatted context
     prompt = POSITION_PROMPT.format(analysis_text=context.analysis_text, tactical_context=tactical_context)
 
-    # Call LLM with structured output
-    response = client.responses.parse(
-        model=model,
-        input=prompt,
-        text_format=ChessPositionExplanation,
-        reasoning=Reasoning(effort=reasoning_effort),
-    )
+    kwargs = {"provider": "openai", "model_id": model, "format": ChessPositionExplanation}
+    if reasoning_effort:
+        kwargs["reasoning"] = {"effort": reasoning_effort}
 
-    # When using reasoning models, the first item is a ReasoningItem, followed by the message
-    message = next((item for item in response.output if item.type == "message"), None)  # type: ignore[attr-defined]
+    decorator = llm.call(**kwargs)
 
-    if not message:
-        raise Exception("No message found in response output")
+    @decorator
+    def _analyze_position() -> str:
+        return prompt
 
-    text = message.content[0]  # type: ignore[attr-defined]
-    assert text.type == "output_text", "Unexpected content type"  # type: ignore[attr-defined]
+    result = _analyze_position()
 
-    if not text.parsed:  # type: ignore[attr-defined]
-        raise Exception("Could not parse LLM response into CommentaryOutput")
-
-    parsed_data: ChessPositionExplanation = text.parsed  # type: ignore[attr-defined]
-    return ChessPositionExplanationWithInput(
-        fen=context.fen, full_input=context.analysis_text, **parsed_data.model_dump()
-    )
+    return ChessPositionExplanationWithInput(fen=context.fen, full_input=context.analysis_text, **result.model_dump())
 
 
 def explain_move(
     move_ctx: MoveContext,
-    client: OpenAI,
     model: str = "gpt-4o-2024-08-06",
-    reasoning_effort: ReasoningEffort | None = None,
+    reasoning_effort: str | None = None,
 ) -> MoveExplanation:
     """Analyze a chess move using pre/post position context and LLM.
 
     Args:
         move_ctx: MoveContext with pre/post position states
-        client: OpenAI client
         model: LLM model to use
-        reasoning_effort: Optional reasoning effort for models that support it
+        reasoning_effort: Optional reasoning effort for models that support it (e.g., "low", "medium", "high")
 
     Returns:
         MoveExplanation with complete move analysis
     """
-    # Format pre/post states for prompt
     pre_dict = move_ctx.pre_move_state.to_prompt_dict()
     post_dict = move_ctx.post_move_state.to_prompt_dict()
 
-    # Create prompt with all context
     prompt = MOVE_PROMPT.format(
         move_san=move_ctx.move_san,
         pre_eval_category=pre_dict["eval_category"],
@@ -206,24 +184,14 @@ def explain_move(
         eval_change_category=move_ctx.evaluation_change_category,
     )
 
-    # Call LLM with structured output
-    response = client.responses.parse(
-        model=model,
-        input=prompt,
-        text_format=MoveExplanation,
-        reasoning=Reasoning(effort=reasoning_effort),
-    )
+    kwargs = {"provider": "openai", "model_id": model, "format": MoveExplanation}
+    if reasoning_effort:
+        kwargs["reasoning"] = {"effort": reasoning_effort}
 
-    # Extract parsed response
-    message = next((item for item in response.output if item.type == "message"), None)  # type: ignore[attr-defined]
+    decorator = llm.call(**kwargs)
 
-    if not message:
-        raise Exception("No message found in response output")
+    @decorator
+    def _analyze_move() -> str:
+        return prompt
 
-    text = message.content[0]  # type: ignore[attr-defined]
-    assert text.type == "output_text", "Unexpected content type"  # type: ignore[attr-defined]
-
-    if not text.parsed:  # type: ignore[attr-defined]
-        raise Exception("Could not parse LLM response into PositionDiff")
-
-    return text.parsed
+    return _analyze_move()
