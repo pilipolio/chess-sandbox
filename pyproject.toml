@@ -129,13 +129,13 @@ exclude = [
     "**/concept_extraction/model/evaluation.py",         # ML evaluation code with sklearn
     "**/concept_extraction/model/dataset.py",            # Dataset loading with HF Hub
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
-    "**/commentary/mirascope_commentator.py",            # Mirascope POC (pre-release lib, no type stubs)
-    "**/commentary/lilypad_evaluation.py",               # Lilypad POC (pre-release lib, no type stubs)
+    "**/commentary/commentator_mirascope.py",            # Mirascope POC (stable lib, no type stubs)
+    "**/commentary/evaluation_mirascope.py",             # Lilypad POC (stable lib, no type stubs)
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py --ignore=chess_sandbox/commentary/mirascope_commentator.py --ignore=chess_sandbox/commentary/lilypad_evaluation.py"
+addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py --ignore=chess_sandbox/commentary/commentator_mirascope.py --ignore=chess_sandbox/commentary/evaluation_mirascope.py"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: marks tests as integration tests requiring Stockfish (deselect with '-m \"not integration\"')",

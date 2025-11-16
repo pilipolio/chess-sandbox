@@ -21,7 +21,7 @@ from mirascope.core.openai import openai_call
 from pydantic import BaseModel, Field
 
 from ..lichess import get_analysis_url
-from .mirascope_commentator import MirascopeCommentator
+from .commentator_mirascope import MirascopeCommentator
 
 
 class ThemeJudgement(BaseModel):
@@ -226,7 +226,7 @@ def run_evaluation_loop(
         results_by_config[config.name] = results
 
         # Save results for this config
-        output_path = f"data/results/lilypad_eval_{config.name}.jsonl"
+        output_path = f"data/results/mirascope_eval_{config.name}.jsonl"
         save_results(results, output_path)
         print(f"\n{'=' * 70}")
         print(f"Results saved to: {output_path}")

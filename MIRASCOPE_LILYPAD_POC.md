@@ -18,12 +18,12 @@ The code is production-ready and has been tested end-to-end with Python 3.12.
 
 The POC consists of two main components:
 
-1. **MirascopeCommentator** (`chess_sandbox/commentary/mirascope_commentator.py`):
-   - Uses Mirascope's `@llm.call` decorator for clean LLM integration
+1. **MirascopeCommentator** (`chess_sandbox/commentary/commentator_mirascope.py`):
+   - Uses Mirascope's `@openai_call` decorator for clean LLM integration
    - Uses Lilypad's `@lilypad.trace` decorator for automatic versioning and tracing
-   - Maintains compatibility with the existing commentary system
+   - Parallel implementation alongside existing commentary system
 
-2. **Lilypad Evaluation Loop** (`chess_sandbox/commentary/lilypad_evaluation.py`):
+2. **Lilypad Evaluation Loop** (`chess_sandbox/commentary/evaluation_mirascope.py`):
    - Runs systematic evaluations across different configurations
    - Automatically traces all LLM calls (both commentary generation and evaluation)
    - Versions different approaches for comparison
@@ -126,16 +126,16 @@ Ensure you have ground truth data at `data/processed/chessdotcom.jsonl` with thi
 
 ```bash
 # Run the full POC (limited to 3 positions for quick testing)
-uv run python -m chess_sandbox.commentary.lilypad_evaluation
+uv run python -m chess_sandbox.commentary.evaluation_mirascope
 
 # Or run directly
-uv run chess_sandbox/commentary/lilypad_evaluation.py
+uv run chess_sandbox/commentary/evaluation_mirascope.py
 ```
 
 ### Using the Mirascope Commentator Standalone
 
 ```python
-from chess_sandbox.commentary.mirascope_commentator import MirascopeCommentator
+from chess_sandbox.commentary.commentator_mirascope import MirascopeCommentator
 import chess
 
 # Configure
@@ -197,7 +197,7 @@ The POC evaluates three different configurations:
 2. **gpt-4o-mini with engine**: LLM + Stockfish analysis
 3. **gpt-4o with engine, no tactical patterns**: Different model + feature ablation
 
-Results are saved to `data/results/lilypad_eval_{config_name}.jsonl`
+Results are saved to `data/results/mirascope_eval_{config_name}.jsonl`
 
 ## Viewing Results
 
@@ -217,10 +217,10 @@ Results are saved as JSONL files in `data/results/`:
 
 ```bash
 # View results for a specific configuration
-cat data/results/lilypad_eval_gpt4o_mini_with_engine.jsonl | jq
+cat data/results/mirascope_eval_gpt4o_mini_with_engine.jsonl | jq
 
 # Calculate average score
-cat data/results/lilypad_eval_*.jsonl | jq -s 'map(.score) | add / length'
+cat data/results/mirascope_eval_*.jsonl | jq -s 'map(.score) | add / length'
 ```
 
 ## Next Steps
