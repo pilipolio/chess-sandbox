@@ -7,16 +7,12 @@ It consumes PositionState and MoveContext data classes from the context module.
 
 from textwrap import dedent
 
-import chess
 from openai import OpenAI
 from openai.types.shared.reasoning_effort import ReasoningEffort
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import BaseModel, Field
 
-from ..engine.analyse import EngineConfig, analyze_variations
-from ..engine.position_analysis import PositionAnalysis
-from .context import MoveContext
-from .tactical_patterns import TacticalPatternDetector
+from .context import MoveContext, PositionContext
 
 
 class ChessPositionExplanation(BaseModel):
@@ -123,17 +119,19 @@ MOVE_PROMPT = dedent("""
 
 
 def summarize_position(
-    board: chess.Board,
-    engine_config: EngineConfig,
+    context: PositionContext,
     client: OpenAI,
     model: str = "gpt-4o-2024-08-06",
     reasoning_effort: ReasoningEffort | None = None,
 ) -> ChessPositionExplanationWithInput:
-    """Analyze a chess position using Stockfish and LLM.
+    """Analyze a chess position using pre-built context and LLM.
+
+    This function consumes a PositionContext built by PositionContextBuilder,
+    ensuring a single context-building path. It mirrors the pattern used in
+    explain_move which accepts MoveContext.
 
     Args:
-        board: Chess position to analyze
-        engine_config: Configuration for Stockfish engine
+        context: Pre-built position context with analysis text and tactical patterns
         client: OpenAI client
         model: LLM model to use
         reasoning_effort: Optional reasoning effort for models that support it
@@ -141,50 +139,36 @@ def summarize_position(
     Returns:
         ChessPositionExplanationWithInput with complete analysis
     """
-    engine = engine_config.instantiate()
+    # Format tactical context for prompt
+    tactical_context = f"\n{context.tactical_context}\n" if context.tactical_context else ""
 
-    try:
-        analysis_results = analyze_variations(board, engine, engine_config.num_lines, engine_config.limit)
-        position_analysis = PositionAnalysis(
-            fen=board.fen(), next_move=None, principal_variations=analysis_results, human_moves=None
-        )
-        analysis_text = position_analysis.format_as_text()
+    # Build prompt using pre-formatted context
+    prompt = POSITION_PROMPT.format(analysis_text=context.analysis_text, tactical_context=tactical_context)
 
-        # Detect tactical patterns using python-chess API
-        detector = TacticalPatternDetector(board)
-        tactical_context = detector.get_tactical_context()
+    # Call LLM with structured output
+    response = client.responses.parse(
+        model=model,
+        input=prompt,
+        text_format=ChessPositionExplanation,
+        reasoning=Reasoning(effort=reasoning_effort),
+    )
 
-        # Add tactical context section if patterns detected
-        if tactical_context:
-            tactical_context = f"\n{tactical_context}\n"
-        else:
-            tactical_context = ""
+    # When using reasoning models, the first item is a ReasoningItem, followed by the message
+    message = next((item for item in response.output if item.type == "message"), None)  # type: ignore[attr-defined]
 
-        prompt = POSITION_PROMPT.format(analysis_text=analysis_text, tactical_context=tactical_context)
+    if not message:
+        raise Exception("No message found in response output")
 
-        response = client.responses.parse(
-            model=model,
-            input=prompt,
-            text_format=ChessPositionExplanation,
-            reasoning=Reasoning(effort=reasoning_effort),
-        )
+    text = message.content[0]  # type: ignore[attr-defined]
+    assert text.type == "output_text", "Unexpected content type"  # type: ignore[attr-defined]
 
-        # When using reasoning models, the first item is a ReasoningItem, followed by the message
-        message = next((item for item in response.output if item.type == "message"), None)  # type: ignore[attr-defined]
+    if not text.parsed:  # type: ignore[attr-defined]
+        raise Exception("Could not parse LLM response into CommentaryOutput")
 
-        if not message:
-            raise Exception("No message found in response output")
-
-        text = message.content[0]  # type: ignore[attr-defined]
-        assert text.type == "output_text", "Unexpected content type"  # type: ignore[attr-defined]
-
-        if not text.parsed:  # type: ignore[attr-defined]
-            raise Exception("Could not parse LLM response into CommentaryOutput")
-
-        parsed_data: ChessPositionExplanation = text.parsed  # type: ignore[attr-defined]
-        return ChessPositionExplanationWithInput(fen=board.fen(), full_input=analysis_text, **parsed_data.model_dump())
-    finally:
-        engine.quit()
+    parsed_data: ChessPositionExplanation = text.parsed  # type: ignore[attr-defined]
+    return ChessPositionExplanationWithInput(
+        fen=context.fen, full_input=context.analysis_text, **parsed_data.model_dump()
+    )
 
 
 def explain_move(

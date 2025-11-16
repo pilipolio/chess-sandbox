@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..concept_extraction.model.inference import ConceptExtractor
 from ..engine.analyse import EngineConfig, analyze_variations
+from ..engine.position_analysis import PositionAnalysis
 from .tactical_patterns import TacticalPatternDetector
 
 
@@ -66,6 +67,15 @@ class MoveContext(BaseModel):
     evaluation_change_category: str = Field(
         description="Human-readable evaluation change category (significant improvement/minor improvement/etc.)"
     )
+
+
+class PositionContext(BaseModel):
+    """Complete context for position analysis including formatted text for LLM prompts."""
+
+    fen: str = Field(description="Position in FEN notation")
+    position_state: PositionState = Field(description="Raw position state (evaluation, concepts, tactics)")
+    analysis_text: str = Field(description="Formatted engine analysis text from PositionAnalysis")
+    tactical_context: str = Field(description="Formatted tactical patterns text")
 
 
 class PositionContextBuilder:
@@ -207,6 +217,48 @@ class PositionContextBuilder:
 
         try:
             return self._extract_position_context(board, engine, self.engine_config.limit)
+        finally:
+            engine.quit()
+
+    def build_position_context(self, fen: str) -> PositionContext:
+        """Build complete context for position analysis including formatted text for LLM prompts.
+
+        This is the single source of truth for context building. It creates both the
+        structured PositionState and the formatted text needed for LLM prompts.
+
+        Args:
+            fen: Position in FEN notation
+
+        Returns:
+            PositionContext with PositionState, analysis text, and tactical context
+        """
+        board = chess.Board(fen)
+        engine = self.engine_config.instantiate()
+
+        try:
+            # Get engine analysis (single call)
+            analysis_results = analyze_variations(board, engine, self.engine_config.num_lines, self.engine_config.limit)
+
+            # Build PositionState (reuse existing logic)
+            position_state = self._extract_position_context(board, engine, self.engine_config.limit)
+
+            # Format analysis text for LLM prompt
+            position_analysis = PositionAnalysis(
+                fen=fen, next_move=None, principal_variations=analysis_results, human_moves=None
+            )
+            analysis_text = position_analysis.format_as_text()
+
+            # Get tactical context text
+            detector = TacticalPatternDetector(board)
+            tactical_context = detector.get_tactical_context()
+
+            return PositionContext(
+                fen=fen,
+                position_state=position_state,
+                analysis_text=analysis_text,
+                tactical_context=tactical_context,
+            )
+
         finally:
             engine.quit()
 
