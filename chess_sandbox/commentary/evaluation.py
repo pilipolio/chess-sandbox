@@ -12,10 +12,13 @@ from typing import Any, Dict, List
 
 import chess
 from openai import OpenAI
+from openai.types.shared.reasoning_effort import ReasoningEffort
 from pydantic import BaseModel, Field
 
+from ..engine.analyse import EngineConfig
 from ..lichess import get_analysis_url
-from .commentator import Commentator, print_explanation
+from .cli import print_explanation
+from .llm import summarize_position
 
 
 class ThemeJudgement(BaseModel):
@@ -130,7 +133,10 @@ def print_summary(results_by_config: Dict[str, List[EvaluationResult]]) -> None:
 
 
 def evaluate_position(
-    commentator: Commentator,
+    engine_config: EngineConfig,
+    client: OpenAI,
+    model: str,
+    reasoning_effort: str | None,
     judge: ThemeJudge,
     fen: str,
     ground_truth_themes: List[str],
@@ -139,7 +145,14 @@ def evaluate_position(
     board = chess.Board(fen)
 
     print(f"\nAnalyzing with {config_name}...")
-    explanation = commentator.analyze(board)
+    reasoning_effort_typed: ReasoningEffort | None = reasoning_effort  # type: ignore[assignment]
+    explanation = summarize_position(
+        board=board,
+        engine_config=engine_config,
+        client=client,
+        model=model,
+        reasoning_effort=reasoning_effort_typed,
+    )
     print_explanation(explanation)
 
     predicted_themes = explanation.themes
@@ -170,7 +183,15 @@ def run_evaluation(
         print(f"LLM: {config.params['llm']}")
         print(f"{'=' * 70}")
 
-        commentator = Commentator.create(config.params)
+        # Create engine config and OpenAI client
+        engine_config = EngineConfig.stockfish(
+            num_lines=config.params["engine"]["num_lines"],
+            depth=config.params["engine"]["depth"],
+        )
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        model = config.params["llm"]["model"]
+        reasoning_effort = config.params["llm"].get("reasoning_effort")
+
         results: List[EvaluationResult] = []
 
         for i, item in enumerate(ground_truth_data, 1):
@@ -184,11 +205,14 @@ def run_evaluation(
 
             try:
                 result = evaluate_position(
-                    commentator,
-                    judge,
-                    fen,
-                    ground_truth_themes,
-                    config.name,
+                    engine_config=engine_config,
+                    client=client,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                    judge=judge,
+                    fen=fen,
+                    ground_truth_themes=ground_truth_themes,
+                    config_name=config.name,
                 )
 
                 print(f"\n{'=' * 70}")
