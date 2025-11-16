@@ -204,7 +204,7 @@ class ConceptProbe:
         return [(name, float(prob)) for name, prob in zip(self.concept_list, probas, strict=True)]
 
     def __repr__(self) -> str:
-        return f"ConceptProbe(concepts={len(self.concept_list)}, " f"layer={self.layer_name})"
+        return f"ConceptProbe(concepts={len(self.concept_list)}, layer={self.layer_name})"
 
 
 @dataclass
@@ -374,7 +374,7 @@ class ConceptExtractor:
         return results[0] if is_single_fen else results
 
     def __repr__(self) -> str:
-        return f"ConceptExtractor(probe={self.probe}, " f"layer={self.layer_name})"
+        return f"ConceptExtractor(probe={self.probe}, layer={self.layer_name})"
 
 
 def hf_hub_options(f):

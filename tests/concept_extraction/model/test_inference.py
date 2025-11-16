@@ -49,9 +49,9 @@ def test_predict_single_fen(tmp_path: Path) -> None:
     assert result.exit_code == 0, f"CLI failed with output:\n{result.output}"
 
     # Assert output contains predictions
-    assert (
-        "Predicted concepts" in result.output or "concepts" in result.output.lower()
-    ), f"Expected predictions in output, got:\n{result.output}"
+    assert "Predicted concepts" in result.output or "concepts" in result.output.lower(), (
+        f"Expected predictions in output, got:\n{result.output}"
+    )
 
     # Assert output contains confidence scores (predictions should have confidence >= 0.1)
     assert any(char.isdigit() for char in result.output), f"Expected confidence scores in output, got:\n{result.output}"
