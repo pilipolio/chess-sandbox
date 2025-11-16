@@ -1,5 +1,5 @@
 """
-LLM workflow module for chess position analysis using Mirascope v2.
+LLM workflow module for chess position analysis using Mirascope v1.
 
 This module manages prompts, response parsing, and LLM client configuration.
 It consumes PositionState and MoveContext data classes from the context module.
@@ -7,7 +7,7 @@ It consumes PositionState and MoveContext data classes from the context module.
 
 from textwrap import dedent
 
-from mirascope import llm
+from mirascope.core import openai
 from pydantic import BaseModel, Field
 
 from .context import MoveContext, PositionContext
@@ -138,13 +138,11 @@ def summarize_position(
     tactical_context = f"\n{context.tactical_context}\n" if context.tactical_context else ""
     prompt = POSITION_PROMPT.format(analysis_text=context.analysis_text, tactical_context=tactical_context)
 
-    kwargs = {"provider": "openai", "model_id": model, "format": ChessPositionExplanation}
+    call_params = {}
     if reasoning_effort:
-        kwargs["reasoning"] = {"effort": reasoning_effort}
+        call_params["reasoning"] = {"effort": reasoning_effort}
 
-    decorator = llm.call(**kwargs)
-
-    @decorator
+    @openai.call(model, response_model=ChessPositionExplanation, call_params=call_params)
     def _analyze_position() -> str:
         return prompt
 
@@ -184,13 +182,11 @@ def explain_move(
         eval_change_category=move_ctx.evaluation_change_category,
     )
 
-    kwargs = {"provider": "openai", "model_id": model, "format": MoveExplanation}
+    call_params = {}
     if reasoning_effort:
-        kwargs["reasoning"] = {"effort": reasoning_effort}
+        call_params["reasoning"] = {"effort": reasoning_effort}
 
-    decorator = llm.call(**kwargs)
-
-    @decorator
+    @openai.call(model, response_model=MoveExplanation, call_params=call_params)
     def _analyze_move() -> str:
         return prompt
 
