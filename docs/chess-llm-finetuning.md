@@ -22,7 +22,7 @@ A two-stage training pipeline combining Supervised Fine-Tuning (SFT) with Group 
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Motivation:** Even strong reasoning models like GPT-4o and o1 lack chess board awareness and frequently produce illegal moves. LLMs, like humans, benefit from drilling patterns and board visualization ("System 1" intuition) before developing calculation and strategic understanding ("System 2" reasoning). The two-stage approach grounds the model in legal chess patterns through SFT, then refines play quality and look-ahead capabilities using verifiable rewards (GRPO).
+**Motivation:** Even strong reasoning models like GPT-5 lack chess board awareness and frequently produce illegal moves ([benchmark](https://blog.mathieuacher.com/GPT5-IllegalChessBench/)). We posit that LLMs, like humans, benefit from drilling patterns and board visualization ("System 1" intuition) before developing calculation and strategic understanding ("System 2" reasoning). The two-stage approach grounds the model in legal chess patterns through SFT, then refines look-ahead capabilities and strategic awareness through RL with verifiable rewards (GRPO).
 
 ## Stage 1: Supervised Fine-Tuning (SFT)
 
@@ -251,26 +251,36 @@ The chess-sandbox codebase provides useful components:
 
 4. **GRPO hyperparameters**: Optimal `num_generations`, `kl_coef` for chess? DeepSeek used 64 samples - feasible with engine verification?
 
+5. **Multi-stage vs mixed datasets**: Train sequentially (legal moves → puzzles → GRPO) or mix all SFT tasks together? Does staged curriculum prevent catastrophic forgetting or is interleaving more robust?
+
+6. **Annotated reasoning data**: Use human-annotated puzzle explanations or synthetic CoT from GPT-5 as RL signal? Example format:
+   ```
+   Q: Solve puzzle FEN 1r4k1/4nppp/8/4Pb2/8/1P5P/r1PR4/3R3K w - - 0 27
+   Long: 27. Rd8+ {Back-rank mate in two: force rook to d8 with check} Rxd8 {Forced} 28. Rxd8# {Mate}
+   Short: 27. Rd8+ Rxd8 28. Rxd8#
+   ```
+   Could reward both correctness (short) and reasoning quality (long matches engine analysis).
+
 ### Evaluation
 
-5. **Beyond Elo**: How to evaluate intermediate checkpoints without full games?
+7. **Beyond Elo**: How to evaluate intermediate checkpoints without full games?
    - Puzzle accuracy by rating bucket?
    - Legal move rate?
    - Blunder rate (moves losing >100cp)?
 
-6. **Engine calibration**: What Stockfish depth/settings for fair Elo estimation?
+8. **Engine calibration**: What Stockfish depth/settings for fair Elo estimation?
 
 ### Representation
 
-7. **Vision models**: With Ministral's vision capability, is `FEN + board image` better than FEN alone?
+9. **Vision models**: With Ministral's vision capability, is `FEN + board image` better than FEN alone?
 
-8. **Move legality in output**: Should the model output move + confidence, or just move?
+10. **Move legality in output**: Should the model output move + confidence, or just move?
 
 ### Architecture
 
-9. **Reasoning overhead**: Does CoT reasoning improve play quality enough to justify 10x token cost?
+11. **Reasoning overhead**: Does CoT reasoning improve play quality enough to justify 10x token cost?
 
-10. **Multi-task training**: Train single model for puzzles + games, or separate specialists?
+12. **Multi-task training**: Train single model for puzzles + games, or separate specialists?
 
 ## References
 
