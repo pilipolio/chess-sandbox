@@ -96,7 +96,7 @@ def get_training_config(
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",
         "warmup_ratio": 0.1,
-        "max_seq_length": 512,
+        "max_length": 512,
         "logging_steps": 10,
         "save_steps": 500,
         "save_total_limit": 2,

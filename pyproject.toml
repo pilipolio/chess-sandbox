@@ -61,15 +61,24 @@ dev = [
     "types-tqdm>=4.67.0.20250809",
 ]
 
+sft = [
+    "transformers>=4.40.0",
+    "trl>=0.8.0",
+    "datasets>=2.18.0",
+    "peft>=0.12.0",
+    "accelerate>=0.30.0",
+    "bitsandbytes>=0.43.0; sys_platform == 'linux'",  # 4-bit quantization (Linux only)
+]
+
 [tool.uv]
 # tell uv we're building a package
-# (i.e. something we can distribute for others to use)
-# uncomment this to use project.scripts
-# package = true
+package = true
 
-# [project.scripts]
-# running `postmodern` will run the `postmodern.main` function
-# postmodern = "postmodern.hello:main"
+[tool.setuptools.packages.find]
+include = ["chess_sandbox*"]
+
+[project.scripts]
+puzzles-trainer = "chess_sandbox.puzzles_trainer.cli:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
@@ -127,6 +136,8 @@ exclude = [
     "**/concept_extraction/model/evaluation.py",         # ML evaluation code with sklearn
     "**/concept_extraction/model/dataset.py",            # Dataset loading with HF Hub
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
+    "**/puzzles_trainer/trainer.py",                     # SFT training with TRL
+    "**/puzzles_trainer/dataset.py",                     # Dataset loading with HF datasets
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
