@@ -251,26 +251,28 @@ The chess-sandbox codebase provides useful components:
 
 4. **GRPO hyperparameters**: Optimal `num_generations`, `kl_coef` for chess? DeepSeek used 64 samples - feasible with engine verification?
 
+5. **Multi-stage vs mixed datasets**: Train sequentially (legal moves → puzzles → GRPO) or mix all SFT tasks together? Does staged curriculum prevent catastrophic forgetting or is interleaving more robust?
+
 ### Evaluation
 
-5. **Beyond Elo**: How to evaluate intermediate checkpoints without full games?
+6. **Beyond Elo**: How to evaluate intermediate checkpoints without full games?
    - Puzzle accuracy by rating bucket?
    - Legal move rate?
    - Blunder rate (moves losing >100cp)?
 
-6. **Engine calibration**: What Stockfish depth/settings for fair Elo estimation?
+7. **Engine calibration**: What Stockfish depth/settings for fair Elo estimation?
 
 ### Representation
 
-7. **Vision models**: With Ministral's vision capability, is `FEN + board image` better than FEN alone?
+8. **Vision models**: With Ministral's vision capability, is `FEN + board image` better than FEN alone?
 
-8. **Move legality in output**: Should the model output move + confidence, or just move?
+9. **Move legality in output**: Should the model output move + confidence, or just move?
 
 ### Architecture
 
-9. **Reasoning overhead**: Does CoT reasoning improve play quality enough to justify 10x token cost?
+10. **Reasoning overhead**: Does CoT reasoning improve play quality enough to justify 10x token cost?
 
-10. **Multi-task training**: Train single model for puzzles + games, or separate specialists?
+11. **Multi-task training**: Train single model for puzzles + games, or separate specialists?
 
 ## References
 
