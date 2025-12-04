@@ -29,6 +29,9 @@ def format_puzzle(example: dict) -> dict:
             {"role": "assistant", "content": example["answer"]},
         ],
         "task_type": "puzzle",
+        "fen": example["fen"],
+        "question": example["question"],
+        "answer": example["answer"],
     }
 
 
@@ -54,6 +57,7 @@ FEN: {fen}"""
             {"role": "assistant", "content": ascii_output},
         ],
         "task_type": "ascii_board",
+        "fen": fen,
     }
 
 
@@ -91,6 +95,7 @@ FEN: {fen}"""
                     {"role": "assistant", "content": san_moves},
                 ],
                 "task_type": "legal_moves",
+                "fen": fen,
             }
 
     return None
@@ -111,6 +116,7 @@ FEN: {fen}"""
             {"role": "assistant", "content": themes_str},
         ],
         "task_type": "concept_detection",
+        "fen": fen,
     }
 
 
@@ -143,6 +149,7 @@ FEN: {fen}"""
             {"role": "assistant", "content": output},
         ],
         "task_type": "piece_positions",
+        "fen": fen,
     }
 
 

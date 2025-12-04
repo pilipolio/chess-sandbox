@@ -1,8 +1,10 @@
-"""Chess validation callback for puzzle SFT training."""
+"""Chess validation callback for multi-task SFT training."""
 
 from __future__ import annotations
 
+import json
 import re
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import chess
@@ -15,11 +17,11 @@ if TYPE_CHECKING:
 
 class ChessValidationCallback(TrainerCallback):
     """
-    Callback to run chess move validation during training evaluation.
+    Callback to run validation during training for all task types.
 
-    Validates puzzle solutions by:
+    Validates predictions by:
     1. Generating predictions on test samples
-    2. Validating moves using python-chess
+    2. Computing exact match and task-specific metrics
     3. Logging metrics and examples to W&B
     """
 
@@ -27,8 +29,8 @@ class ChessValidationCallback(TrainerCallback):
         self,
         tokenizer: PreTrainedTokenizerBase,
         test_dataset: Dataset | None,
-        num_validation_samples: int = 50,
-        log_examples: int = 20,
+        num_validation_samples: int = 10,
+        log_examples: int = 10,
     ):
         self.tokenizer = tokenizer
         self.test_dataset = test_dataset
@@ -42,7 +44,7 @@ class ChessValidationCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs: Any,
     ) -> None:
-        """Run chess validation after each evaluation step."""
+        """Run validation after each evaluation step."""
         if not args.report_to or "wandb" not in args.report_to:
             return
 
@@ -53,103 +55,94 @@ class ChessValidationCallback(TrainerCallback):
         import wandb  # pyright: ignore[reportMissingImports]
 
         print(f"\n{'='*60}")
-        print(f"Running chess validation at step {state.global_step}")
+        print(f"Running validation at step {state.global_step}")
         print(f"{'='*60}")
 
         was_training = model.training
         model.eval()
 
-        num_samples = min(self.num_validation_samples, len(self.test_dataset))  # pyright: ignore[reportArgumentType]
+        # Sample from all task types
+        num_samples = min(self.num_validation_samples, len(self.test_dataset))
         test_samples = self.test_dataset.select(range(num_samples))  # pyright: ignore[reportUnknownMemberType]
 
         validation_results = self._run_validation(model, test_samples)
-        valid_results = [r for r in validation_results if r.get("valid", False)]
 
-        if valid_results:
-            metrics = {
-                "chess_puzzle/num_samples": len(validation_results),
-                "chess_puzzle/num_valid": len(valid_results),
-                "chess_puzzle/exact_match_accuracy": sum(r["exact_match"] for r in valid_results) / len(valid_results),
-                "chess_puzzle/legal_move_rate": sum(r["is_legal"] for r in valid_results) / len(valid_results),
-                "chess_puzzle/format_error_rate": sum(r["format_error"] for r in valid_results) / len(valid_results),
-            }
+        # Group results by task type
+        results_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for r in validation_results:
+            results_by_type[r.get("task_type", "unknown")].append(r)
 
-            print("\nChess Validation Results:")
-            print(f"  Valid evaluations: {metrics['chess_puzzle/num_valid']}/{metrics['chess_puzzle/num_samples']}")
-            print(f"  Exact match accuracy: {metrics['chess_puzzle/exact_match_accuracy']:.1%}")
-            print(f"  Legal move rate: {metrics['chess_puzzle/legal_move_rate']:.1%}")
-            print(f"  Format error rate: {metrics['chess_puzzle/format_error_rate']:.1%}")
+        # Compute overall and per-task metrics
+        all_exact_matches = [r["exact_match"] for r in validation_results]
+        metrics: dict[str, Any] = {
+            "eval/num_samples": len(validation_results),
+            "eval/exact_match": sum(all_exact_matches) / len(all_exact_matches) if all_exact_matches else 0,
+        }
 
-            wandb.log(metrics, step=state.global_step)  # pyright: ignore[reportUnknownMemberType]
+        print("\nValidation Results:")
+        print(f"  Total samples: {metrics['eval/num_samples']}")
+        print(f"  Overall exact match: {metrics['eval/exact_match']:.1%}")
 
-            # Create examples table
-            table_data: list[list[Any]] = []
-            for i, r in enumerate(validation_results[: self.log_examples]):
-                sample: dict[str, Any] = dict(test_samples[i]) if i < len(test_samples) else {}  # pyright: ignore[reportUnknownArgumentType,reportArgumentType]
+        # Per-task metrics
+        for task_type, results in results_by_type.items():
+            exact_matches = [r["exact_match"] for r in results]
+            task_exact_match = sum(exact_matches) / len(exact_matches) if exact_matches else 0
+            metrics[f"eval/{task_type}/exact_match"] = task_exact_match
+            metrics[f"eval/{task_type}/num_samples"] = len(results)
 
-                error_type = "None"
-                if not r.get("valid", False):
-                    error_type = r.get("error", "Unknown")
-                elif r.get("format_error", False):
-                    error_type = "Format"
-                elif not r.get("is_legal", False):
-                    error_type = "Illegal"
+            # Task-specific metrics
+            if task_type == "puzzle":
+                legal_moves = [r.get("is_legal", False) for r in results]
+                legal_rate = sum(legal_moves) / len(legal_moves) if legal_moves else 0
+                metrics[f"eval/{task_type}/legal_move_rate"] = legal_rate
+                print(f"  {task_type}: {task_exact_match:.1%} exact, {legal_rate:.1%} legal ({len(results)})")
+            else:
+                print(f"  {task_type}: {task_exact_match:.1%} exact ({len(results)})")
 
-                table_data.append(
-                    [
-                        r.get("fen", "")[:50],
-                        sample.get("rating", "N/A"),
-                        ", ".join(sample.get("themes", [])[:3]) if "themes" in sample else "N/A",
-                        r.get("predicted_move", "")[:20],
-                        r.get("expected_move", "")[:20],
-                        r.get("exact_match", False),
-                        r.get("is_legal", False),
-                        error_type,
-                    ]
-                )
+        wandb.log(metrics, step=state.global_step)  # pyright: ignore[reportUnknownMemberType]
 
-            table = wandb.Table(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-                columns=[
-                    "FEN",
-                    "Rating",
-                    "Themes",
-                    "Predicted Move",
-                    "Expected Move",
-                    "Exact Match",
-                    "Is Legal",
-                    "Error Type",
-                ],
-                data=table_data,
-            )
-            wandb.log({"eval/examples": table}, step=state.global_step)  # pyright: ignore[reportUnknownMemberType]
-
-            # Log histograms
-            exact_matches = [1 if r["exact_match"] else 0 for r in valid_results]
-            legal_moves = [1 if r["is_legal"] else 0 for r in valid_results]
-            wandb.log(  # pyright: ignore[reportUnknownMemberType]
-                {
-                    "chess_puzzle/exact_match_distribution": wandb.Histogram(exact_matches),  # pyright: ignore[reportUnknownMemberType]
-                    "chess_puzzle/legal_move_distribution": wandb.Histogram(legal_moves),  # pyright: ignore[reportUnknownMemberType]
-                },
-                step=state.global_step,
+        # Create examples table
+        table_data: list[list[Any]] = []
+        for r in validation_results[: self.log_examples]:
+            table_data.append(
+                [
+                    r.get("task_type", ""),
+                    r.get("fen", "")[:40],
+                    r.get("predicted", "")[:60],
+                    r.get("expected", "")[:60],
+                    r.get("exact_match", False),
+                ]
             )
 
-            print("Logged metrics, examples table, and histograms to W&B\n")
-        else:
-            print("No valid validation results\n")
+        table = wandb.Table(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+            columns=["Task", "FEN", "Predicted", "Expected", "Exact Match"],
+            data=table_data,
+        )
+        print(f"Logging {json.dumps(table_data, indent=2)} examples to W&B")
+        print(table_data)
+        wandb.log({"eval/examples": table}, step=state.global_step)  # pyright: ignore[reportUnknownMemberType]
+
+        print("Logged metrics and examples to W&B\n")
 
         if was_training:
             model.train()
 
     def _run_validation(self, model: Any, test_samples: Any) -> list[dict[str, Any]]:
-        """Run chess validation on test samples."""
+        """Run validation on test samples."""
         validation_results: list[dict[str, Any]] = []
 
         # Build prompts using chat template
         prompts: list[str] = []
         for example in test_samples:
-            messages = [{"role": "user", "content": example["question"]}]
-            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)  # pyright: ignore[reportUnknownMemberType]
+            question = example.get("question", "")
+            if not question:
+                # Fall back to extracting from messages
+                messages = example.get("messages", [])
+                if messages and len(messages) > 0:
+                    question = messages[0].get("content", "")
+
+            chat_messages = [{"role": "user", "content": question}]
+            prompt = self.tokenizer.apply_chat_template(chat_messages, tokenize=False, add_generation_prompt=True)  # pyright: ignore[reportUnknownMemberType]
             prompts.append(str(prompt))
 
         # Batch inference
@@ -167,7 +160,7 @@ class ChessValidationCallback(TrainerCallback):
 
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=64,
+                    max_new_tokens=128,  # Increased for longer outputs like ascii_board
                     do_sample=False,
                     pad_token_id=self.tokenizer.pad_token_id,  # pyright: ignore[reportUnknownMemberType]
                 )
@@ -176,20 +169,79 @@ class ChessValidationCallback(TrainerCallback):
                 for j, output in enumerate(outputs):
                     input_len = int(inputs["input_ids"][j].shape[0])  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
                     generated = self.tokenizer.decode(output[input_len:], skip_special_tokens=True)  # pyright: ignore[reportUnknownMemberType]
+                    # Strip <think>...</think> blocks (Qwen3 style reasoning)
+                    generated = re.sub(r"<think>.*?</think>", "", generated, flags=re.DOTALL)
                     all_outputs.append(generated.strip())
 
-        print("  Validating moves with python-chess...")
+        print("  Validating outputs...")
 
         for example, output in zip(test_samples, all_outputs):
-            validation = self._validate_puzzle_solution(
-                fen=str(example["fen"]),
-                output=output,
-                expected_move=str(example.get("first_move", example.get("answer", ""))),
-            )
-            validation["fen"] = example["fen"]
-            validation_results.append(validation)
+            task_type = example.get("task_type", "unknown")
+            expected = self._get_expected(example)
+            result = self._validate_output(task_type, example, output, expected)
+            validation_results.append(result)
 
         return validation_results
+
+    def _get_expected(self, example: dict[str, Any]) -> str:
+        """Extract expected output from example."""
+        # First check for answer field
+        if "answer" in example:
+            return str(example["answer"])
+
+        # Fall back to messages
+        messages = example.get("messages", [])
+        if len(messages) >= 2:
+            return str(messages[1].get("content", ""))
+
+        return ""
+
+    def _validate_output(
+        self,
+        task_type: str,
+        example: dict[str, Any],
+        output: str,
+        expected: str,
+    ) -> dict[str, Any]:
+        """Validate output based on task type."""
+        result: dict[str, Any] = {
+            "task_type": task_type,
+            "fen": example.get("fen", ""),
+            "predicted": output,
+            "expected": expected,
+            "exact_match": self._normalize(output) == self._normalize(expected),
+        }
+
+        # Task-specific validation
+        if task_type == "puzzle":
+            result.update(self._validate_puzzle(example, output, expected))
+
+        return result
+
+    def _normalize(self, text: str) -> str:
+        """Normalize text for comparison."""
+        return " ".join(text.lower().split())
+
+    def _validate_puzzle(
+        self,
+        example: dict[str, Any],
+        output: str,
+        expected: str,
+    ) -> dict[str, Any]:
+        """Validate puzzle solution (UCI move)."""
+        fen = example.get("fen", "")
+        predicted_move = self._parse_uci_move(output)
+
+        is_legal = False
+        if fen and predicted_move and len(predicted_move) >= 4:
+            try:
+                board = chess.Board(fen)
+                move = chess.Move.from_uci(predicted_move)
+                is_legal = move in board.legal_moves
+            except (ValueError, chess.InvalidMoveError):
+                pass
+
+        return {"is_legal": is_legal, "predicted_move": predicted_move}
 
     def _parse_uci_move(self, output: str) -> str:
         """Extract a single UCI move from model output."""
@@ -206,48 +258,3 @@ class ChessValidationCallback(TrainerCallback):
 
         words = output.split()
         return words[0] if words else ""
-
-    def _validate_puzzle_solution(
-        self,
-        fen: str,
-        output: str,
-        expected_move: str,
-    ) -> dict[str, Any]:
-        """Validate puzzle solution (single UCI move)."""
-        try:
-            board = chess.Board(fen)
-        except Exception as e:
-            return {
-                "valid": False,
-                "error": f"Invalid FEN: {e}",
-                "exact_match": False,
-                "is_legal": False,
-                "format_error": True,
-                "predicted_move": "",
-                "expected_move": expected_move,
-            }
-
-        predicted_move = self._parse_uci_move(output)
-
-        format_error = False
-        is_legal = False
-
-        if not predicted_move or len(predicted_move) < 4:
-            format_error = True
-        else:
-            try:
-                move = chess.Move.from_uci(predicted_move)
-                is_legal = move in board.legal_moves
-            except (ValueError, chess.InvalidMoveError):
-                format_error = True
-
-        exact_match = predicted_move == expected_move
-
-        return {
-            "valid": True,
-            "exact_match": exact_match,
-            "is_legal": is_legal,
-            "format_error": format_error,
-            "predicted_move": predicted_move,
-            "expected_move": expected_move,
-        }

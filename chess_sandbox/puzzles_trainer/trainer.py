@@ -10,11 +10,7 @@ from trl import SFTConfig, SFTTrainer
 from chess_sandbox.puzzles_trainer.callbacks import ChessValidationCallback
 from chess_sandbox.puzzles_trainer.dataset import load_puzzle_dataset
 
-MODELS = {
-    "qwen3-0.6b": "Qwen/Qwen3-0.6B",
-    "qwen3-4b": "Qwen/Qwen3-4B-Instruct-2507",
-}
-DEFAULT_MODEL = "qwen3-0.6b"
+DEFAULT_MODEL = "Qwen/Qwen3-0.6B"  # "Qwen/Qwen3-4B-Instruct-2507
 DEFAULT_OUTPUT_DIR = Path("data/models/chess-sft")
 
 
@@ -83,6 +79,7 @@ def get_lora_config() -> LoraConfig:
 def get_training_config(
     output_dir: Path,
     max_steps: int | None = None,
+    eval_steps: int | None = None,
     wandb_project: str | None = None,
     wandb_run_name: str | None = None,
 ) -> SFTConfig:
@@ -106,7 +103,7 @@ def get_training_config(
         "fp16": device == "mps",
         "optim": "adamw_torch",
         "eval_strategy": "steps",
-        "eval_steps": 100,
+        "eval_steps": eval_steps or 100,
     }
 
     if wandb_project:
@@ -125,17 +122,21 @@ def get_training_config(
 
 
 def train(
-    model_name: str = DEFAULT_MODEL,
+    model_id: str = DEFAULT_MODEL,
     output_dir: Path | None = None,
     use_4bit: bool = False,
     max_steps: int | None = None,
+    eval_steps: int | None = None,
     wandb_project: str | None = None,
     wandb_run_name: str | None = None,
 ) -> None:
     """Train a chess puzzle SFT model."""
-    model_id = MODELS[model_name]
-    output_dir = output_dir or DEFAULT_OUTPUT_DIR / model_name
+    model_short_name = model_id.split("/")[-1].lower()
+    output_dir = output_dir or DEFAULT_OUTPUT_DIR / model_short_name
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if wandb_project and not wandb_run_name:
+        wandb_run_name = model_short_name
 
     if wandb_project:
         import wandb
@@ -148,6 +149,7 @@ def train(
     training_config = get_training_config(
         output_dir,
         max_steps=max_steps,
+        eval_steps=eval_steps,
         wandb_project=wandb_project,
         wandb_run_name=wandb_run_name,
     )
