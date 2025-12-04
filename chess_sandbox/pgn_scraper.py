@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 import httpx
-from huggingface_hub import HfApi
+from huggingface_hub import DatasetCard, DatasetCardData, HfApi
 from tqdm import tqdm
 
 from chess_sandbox.concept_extraction.labelling.labeller import LabelledPosition
@@ -224,6 +224,210 @@ def upload_to_hf(
     return result  # type: ignore[no-any-return]
 
 
+def create_pgn_archive(
+    pgn_dir: Path,
+    index_file: Path,
+    output_archive: Path,
+) -> None:
+    """Create a ZIP archive of PGN directory and metadata.
+
+    Args:
+        pgn_dir: Directory containing PGN files
+        index_file: Path to index JSONL file
+        output_archive: Output path for ZIP archive
+    """
+    output_archive.parent.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(output_archive, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # Add all files from pgn_dir
+        for file_path in pgn_dir.rglob("*"):
+            if file_path.is_file():
+                arcname = file_path.relative_to(pgn_dir.parent)
+                zipf.write(file_path, arcname)
+
+        # Add index file at root
+        if index_file.exists():
+            zipf.write(index_file, index_file.name)
+
+
+def create_dataset_card(
+    index_file: Path,
+    output_jsonl: Path,
+    output_archive: Path,
+    source_url: str,
+    readme_path: Path,
+) -> None:
+    """Create a HuggingFace DatasetCard with pgn_index metadata.
+
+    Args:
+        index_file: Path to pgn_index.jsonl file
+        output_jsonl: Path to labeled positions JSONL
+        output_archive: Path to PGN archive ZIP
+        source_url: Source website URL
+        readme_path: Output path for README.md
+    """
+    # Load index to compute statistics
+    index_entries = load_pgn_index(index_file)
+    total_files = len(index_entries)
+    file_types: dict[str, int] = {}
+    source_urls: set[str] = set()
+
+    for entry in index_entries:
+        file_type = entry.get("file_type", "unknown")
+        file_types[file_type] = file_types.get(file_type, 0) + 1
+        source_url_value = entry.get("source_url")
+        if source_url_value:
+            source_urls.add(source_url_value)
+
+    # Count positions in JSONL
+    total_positions = 0
+    if output_jsonl.exists():
+        with output_jsonl.open() as f:
+            total_positions = sum(1 for _ in f)
+
+    # Create metadata with custom fields
+    card_data = DatasetCardData(
+        language=["en"],
+        license="apache-2.0",
+        task_categories=["text-generation"],
+        pretty_name="Smartbridge Annotated Chess PGNs",
+        size_categories=["1K<n<10K"] if total_positions < 10000 else ["10K<n<100K"],
+        # Custom metadata for pgn_index
+        pgn_index_file="pgn_index.jsonl",
+        pgn_index_format="jsonl",
+        pgn_index_total_files=total_files,
+        pgn_index_schema=json.dumps(
+            {
+                "pgn_path": "Relative path to PGN file within archive",
+                "source_url": "Original download URL",
+                "source_website": "Source website URL",
+                "archive_name": "Original ZIP filename if extracted from archive",
+                "file_type": "Type: pgn_direct (direct download) or pgn_from_zip (extracted)",
+            }
+        ),
+    )
+
+    # Sample index entries (first 3)
+    sample_entries = index_entries[:3]
+    sample_table = "| PGN Path | Source URL | File Type |\n|----------|------------|----------|\n"
+    for entry in sample_entries:
+        pgn_path = entry.get("pgn_path", "")[:50]  # Truncate long paths
+        source = entry.get("source_url", "")[:40]
+        file_type = entry.get("file_type", "")
+        sample_table += f"| {pgn_path} | {source} | {file_type} |\n"
+
+    # Create markdown content
+    markdown_content = f"""# Smartbridge Annotated Chess PGNs
+
+## Dataset Summary
+
+This dataset contains annotated chess games in PGN format, scraped from the
+Smartbridge chess database. The games include expert commentary and annotations,
+making them valuable for chess analysis, opening theory research, and training
+chess-related AI models.
+
+## Dataset Structure
+
+### Files
+
+- **pgn_archive.zip** ({output_archive.stat().st_size // 1024}KB): ZIP archive
+  containing all PGN files, extracted content, and metadata
+- **labeled_positions.jsonl** ({output_jsonl.stat().st_size // 1024}KB):
+  Extracted positions with annotations ({total_positions:,} positions)
+- **pgn_index.jsonl**: Index mapping PGN files to their source metadata
+  ({total_files} files)
+
+### pgn_index.jsonl Format
+
+Each line in `pgn_index.jsonl` is a JSON object with the following structure:
+
+```json
+{{
+  "pgn_path": "path/to/file.pgn",
+  "source_url": "https://source.com/file.pgn",
+  "source_website": "{source_url}",
+  "archive_name": "original.zip",
+  "file_type": "pgn_from_zip"
+}}
+```
+
+**Field Descriptions:**
+- `pgn_path`: Relative path to PGN file within the archive
+- `source_url`: Original download URL
+- `source_website`: Source website URL
+- `archive_name`: Original ZIP filename if extracted from archive (empty for direct downloads)
+- `file_type`: Either "pgn_direct" (directly downloaded) or "pgn_from_zip" (extracted from ZIP)
+
+**Sample Entries:**
+
+{sample_table}
+
+**Statistics:**
+- Total PGN files: {total_files}
+- File type distribution: {json.dumps(file_types, indent=2)}
+- Unique source URLs: {len(source_urls)}
+
+### labeled_positions.jsonl Format
+
+Each line contains a chess position with annotations:
+
+```json
+{{
+  "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "comment": "Expert commentary on the position",
+  "game_id": "game_identifier",
+  "move_number": 1,
+  "side_to_move": "white",
+  "move_san": "e4",
+  "previous_fen": "...",
+  "concepts": []
+}}
+```
+
+## Uses
+
+- Chess engine training and evaluation
+- Opening theory research
+- Position analysis and pattern recognition
+- Chess commentary generation
+- Educational chess content
+
+## Citation
+
+**Source:** Smartbridge Annotated Games Database
+**URL:** {source_url}
+
+Please cite the original source when using this dataset:
+
+```bibtex
+@misc{{smartbridge_pgns,
+  title={{Smartbridge Annotated Chess Games}},
+  author={{Smartbridge}},
+  url={{{source_url}}},
+  year={{2004-2025}}
+}}
+```
+
+## Dataset Creation
+
+This dataset was created by scraping and processing PGN files from the Smartbridge database.
+The extraction pipeline:
+1. Downloads PGN and ZIP files from the source website
+2. Extracts and indexes all PGN files
+3. Parses games and extracts positions with annotations
+4. Creates structured index mapping positions to source games
+
+Generated using the chess-sandbox PGN scraper pipeline.
+"""
+
+    # Create card with content and metadata
+    card = DatasetCard(content=markdown_content)
+    card.data = card_data
+
+    # Save to file
+    card.save(readme_path)
+
+
 @click.group()
 def cli() -> None:
     """PGN scraping and processing pipeline."""
@@ -244,10 +448,16 @@ def cli() -> None:
     help="Directory to save downloaded PGN files",
 )
 @click.option(
-    "--index-file",
+    "--output-jsonl",
     type=click.Path(path_type=Path),
-    default="data/pgn_index.jsonl",
-    help="Index file to track downloaded PGNs",
+    default="data/labeled_positions.jsonl",
+    help="Output JSONL file for labeled positions",
+)
+@click.option(
+    "--output-archive",
+    type=click.Path(path_type=Path),
+    default="data/pgn_archive.zip",
+    help="Output ZIP archive of PGN files and metadata",
 )
 @click.option(
     "--limit",
@@ -255,22 +465,62 @@ def cli() -> None:
     default=None,
     help="Limit number of files to download (for testing)",
 )
-def scrape(
+@click.option(
+    "--upload-to-hub",
+    is_flag=True,
+    default=False,
+    help="Upload results to HuggingFace dataset",
+)
+@click.option(
+    "--hf-repo-id",
+    type=str,
+    default=None,
+    help="HuggingFace dataset repository ID (required if --upload-to-hub)",
+)
+@click.option(
+    "--hf-revision",
+    type=str,
+    default=None,
+    help="HuggingFace dataset revision/branch",
+)
+@click.option(
+    "--hf-token",
+    type=str,
+    default=None,
+    help="HuggingFace API token (uses HF_TOKEN env var if not provided)",
+)
+def run(
     url: str,
     output_dir: Path,
-    index_file: Path,
+    output_jsonl: Path,
+    output_archive: Path,
     limit: int | None,
+    upload_to_hub: bool,
+    hf_repo_id: str | None,
+    hf_revision: str | None,
+    hf_token: str | None,
 ) -> None:
-    """Step 1: Scrape and download PGN files with metadata index.
+    """Run the complete PGN scraping and processing pipeline.
 
-    Downloads PGN files (including extraction from ZIP archives) and creates
-    an index file tracking source URLs and metadata.
+    This command performs all steps in a single execution:
+    1. Scrapes webpage for PGN/ZIP download links
+    2. Downloads and extracts files
+    3. Extracts annotated positions from PGN files
+    4. Creates ZIP archive of all PGN files and metadata
+    5. Saves labeled positions to JSONL
+    6. Optionally uploads both archive and JSONL to HuggingFace
     """
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-    index_file.parent.mkdir(parents=True, exist_ok=True)
+    if upload_to_hub and not hf_repo_id:
+        raise click.UsageError("--hf-repo-id is required when --upload-to-hub is set")
 
-    # Step 1: Scrape webpage for links
+    # Create output directories
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    index_file = output_dir.parent / "pgn_index.jsonl"
+
+    # ============================================================
+    # STEP 1: Scrape webpage for PGN/ZIP links
+    # ============================================================
     click.echo(f"Scraping {url} for PGN/ZIP files...")
     try:
         with httpx.Client(follow_redirects=True, timeout=30.0) as client:
@@ -293,7 +543,9 @@ def scrape(
         links = links[:limit]
         click.echo(f"Limited to first {limit} files")
 
-    # Step 2: Download files
+    # ============================================================
+    # STEP 2: Download files
+    # ============================================================
     click.echo("Downloading files...")
     downloaded_files: list[Path] = []
     for link in tqdm(links, desc="Downloading"):
@@ -303,7 +555,9 @@ def scrape(
 
     click.echo(f"Successfully downloaded {len(downloaded_files)} files")
 
-    # Step 3: Extract ZIP files and collect all PGN files
+    # ============================================================
+    # STEP 3: Extract ZIP files and create index
+    # ============================================================
     click.echo("Processing files and extracting ZIPs...")
     index_entries: list[dict[str, str]] = []
     extract_dir = output_dir / "extracted"
@@ -341,90 +595,18 @@ def scrape(
                 }
             )
 
-    # Step 4: Save index
+    # Save index
     save_pgn_index(index_entries, index_file)
-    click.echo(f"Saved index with {len(index_entries)} PGN files to {index_file}")
+    click.echo(f"Created index with {len(index_entries)} PGN files")
 
-
-@cli.command()
-@click.option(
-    "--index-file",
-    type=click.Path(exists=True, path_type=Path),
-    default="data/pgn_index.jsonl",
-    help="Index file with PGN metadata",
-)
-@click.option(
-    "--pgn-dir",
-    type=click.Path(path_type=Path),
-    default="data/pgn_raw",
-    help="Base directory containing PGN files",
-)
-@click.option(
-    "--output-jsonl",
-    type=click.Path(path_type=Path),
-    default="data/labeled_positions.jsonl",
-    help="Output JSONL file for labeled positions",
-)
-@click.option(
-    "--upload-to-hub",
-    is_flag=True,
-    default=False,
-    help="Upload results to HuggingFace dataset",
-)
-@click.option(
-    "--hf-repo-id",
-    type=str,
-    default=None,
-    help="HuggingFace dataset repository ID (required if --upload-to-hub)",
-)
-@click.option(
-    "--hf-revision",
-    type=str,
-    default=None,
-    help="HuggingFace dataset revision/branch",
-)
-@click.option(
-    "--hf-token",
-    type=str,
-    default=None,
-    help="HuggingFace API token (uses HF_TOKEN env var if not provided)",
-)
-def extract(
-    index_file: Path,
-    pgn_dir: Path,
-    output_jsonl: Path,
-    upload_to_hub: bool,
-    hf_repo_id: str | None,
-    hf_revision: str | None,
-    hf_token: str | None,
-) -> None:
-    """Step 2: Extract labeled positions from downloaded PGN files.
-
-    Reads PGN files from the index and extracts annotated positions,
-    saving them to JSONL format with optional HuggingFace upload.
-    """
-    if upload_to_hub and not hf_repo_id:
-        raise click.UsageError("--hf-repo-id is required when --upload-to-hub is set")
-
-    # Create output directory
-    output_jsonl.parent.mkdir(parents=True, exist_ok=True)
-
-    # Step 1: Load index
-    click.echo(f"Loading PGN index from {index_file}...")
-    try:
-        index_entries = load_pgn_index(index_file)
-    except Exception as e:
-        click.echo(f"Error loading index: {e}", err=True)
-        return
-
-    click.echo(f"Found {len(index_entries)} PGN files in index")
-
-    # Step 2: Extract annotated positions from all PGN files
+    # ============================================================
+    # STEP 4: Extract annotated positions from PGN files
+    # ============================================================
     click.echo("Extracting annotated positions...")
     all_positions: list[LabelledPosition] = []
 
     for entry in tqdm(index_entries, desc="Processing PGNs"):
-        pgn_path = pgn_dir / entry["pgn_path"]
+        pgn_path = output_dir / entry["pgn_path"]
 
         if not pgn_path.exists():
             click.echo(f"Warning: PGN file not found: {pgn_path}", err=True)
@@ -435,7 +617,9 @@ def extract(
 
     click.echo(f"Extracted {len(all_positions)} annotated positions")
 
-    # Step 3: Save to JSONL
+    # ============================================================
+    # STEP 5: Save labeled positions to JSONL
+    # ============================================================
     if all_positions:
         save_positions_to_jsonl(all_positions, output_jsonl)
         click.echo(f"Saved positions to {output_jsonl}")
@@ -443,19 +627,64 @@ def extract(
         click.echo("No annotated positions found in PGN files.", err=True)
         return
 
-    # Step 4: Upload to HuggingFace (optional)
+    # ============================================================
+    # STEP 6: Create ZIP archive of PGN files and metadata
+    # ============================================================
+    click.echo("Creating PGN archive...")
+    create_pgn_archive(output_dir, index_file, output_archive)
+    click.echo(f"Created archive at {output_archive}")
+
+    # ============================================================
+    # STEP 6.5: Create DatasetCard with pgn_index metadata
+    # ============================================================
+    click.echo("Creating DatasetCard...")
+    readme_path = output_dir.parent / "README.md"
+    create_dataset_card(index_file, output_jsonl, output_archive, url, readme_path)
+    click.echo(f"Created DatasetCard at {readme_path}")
+
+    # ============================================================
+    # STEP 7: Upload to HuggingFace (optional)
+    # ============================================================
     if upload_to_hub:
         click.echo(f"Uploading to HuggingFace dataset {hf_repo_id}...")
+
+        # Upload README (DatasetCard)
         try:
-            result_url = upload_to_hf(
+            readme_url = upload_to_hf(
+                readme_path,
+                hf_repo_id,  # type: ignore[arg-type]
+                revision=hf_revision,
+                token=hf_token,
+            )
+            click.echo(f"Successfully uploaded README to: {readme_url}")
+        except Exception as e:
+            click.echo(f"Error uploading README to HuggingFace: {e}", err=True)
+
+        # Upload JSONL
+        try:
+            jsonl_url = upload_to_hf(
                 output_jsonl,
                 hf_repo_id,  # type: ignore[arg-type]
                 revision=hf_revision,
                 token=hf_token,
             )
-            click.echo(f"Successfully uploaded to: {result_url}")
+            click.echo(f"Successfully uploaded JSONL to: {jsonl_url}")
         except Exception as e:
-            click.echo(f"Error uploading to HuggingFace: {e}", err=True)
+            click.echo(f"Error uploading JSONL to HuggingFace: {e}", err=True)
+
+        # Upload ZIP archive
+        try:
+            archive_url = upload_to_hf(
+                output_archive,
+                hf_repo_id,  # type: ignore[arg-type]
+                revision=hf_revision,
+                token=hf_token,
+            )
+            click.echo(f"Successfully uploaded archive to: {archive_url}")
+        except Exception as e:
+            click.echo(f"Error uploading archive to HuggingFace: {e}", err=True)
+
+    click.echo("Pipeline complete!")
 
 
 if __name__ == "__main__":
