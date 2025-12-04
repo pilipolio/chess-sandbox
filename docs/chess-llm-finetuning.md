@@ -22,7 +22,7 @@ A two-stage training pipeline combining Supervised Fine-Tuning (SFT) with Group 
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Motivation:** Even strong reasoning models like GPT-4o and o1 lack chess board awareness and frequently produce illegal moves. LLMs, like humans, benefit from drilling patterns and board visualization ("System 1" intuition) before developing calculation and strategic understanding ("System 2" reasoning). The two-stage approach grounds the model in legal chess patterns through SFT, then refines play quality and look-ahead capabilities using verifiable rewards (GRPO).
+**Motivation:** Even strong reasoning models like GPT-5 lack chess board awareness and frequently produce illegal moves ([benchmark](https://blog.mathieuacher.com/GPT5-IllegalChessBench/)). We posit that LLMs, like humans, benefit from drilling patterns and board visualization ("System 1" intuition) before developing calculation and strategic understanding ("System 2" reasoning). The two-stage approach grounds the model in legal chess patterns through SFT, then refines look-ahead capabilities and strategic awareness through RL with verifiable rewards (GRPO).
 
 ## Stage 1: Supervised Fine-Tuning (SFT)
 
