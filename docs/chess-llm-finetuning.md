@@ -7,16 +7,17 @@ A two-stage training pipeline combining Supervised Fine-Tuning (SFT) with Group 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
-│   Stage 1: SFT                        Stage 2: GRPO                         │
+│   Stage 1: SFT                        Stage 2: RL                           │
 │   ───────────────                     ─────────────────                     │
-│   Structured tasks with               Open-ended positions with             │
-│   single correct answers              multiple acceptable moves             │
-│                                                                             │
-│   • Legal move detection              • Play against verification           │
-│   • Mate-in-1 puzzles                 • Engine-scored rewards               │
-│   • Forced sequences                  • Legality constraints                │
+│   Structured tasks with               RL with verifiable rewards            │
+│   single correct answers              for more complex positions            │
+│                                       with multiple acceptable lines        │ │                                                                             │
+│   • Legal move detection              • Legality constraints                │
+│   • Mate-in-1 puzzles                 • Reasoning verification (HF?)        │
+│   • Forced sequences                  • Engine-scored rewards               │
 │                                                                             │
 │   Dataset: Lichess puzzles            Reward: Stockfish eval + legality     │
+│                                       + reasoning preferences               │
 │   Tool: TRL SFTTrainer                Tool: TRL GRPOTrainer                 │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -75,7 +76,7 @@ trainer = SFTTrainer(
 )
 ```
 
-## Stage 2: GRPO Reinforcement Learning
+## Stage 2: Reinforcement Learning
 
 ### Why GRPO
 
@@ -170,7 +171,6 @@ trainer = GRPOTrainer(
 | **gpt-4o-mini** (fine-tuning API) | ~20B? | Strong baseline via OpenAI API, already exposed to chess data |
 | **Qwen3-3B+** | 3-8B | Good multilingual, strong reasoning |
 | **[Ministral-3B-Reasoning](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512)** | 3B | Reasoning-optimized, also 8B+ variants available |
-| **[Ministral-3B](https://huggingface.co/mistralai/Ministral-3b-instruct)** | 3B | Vision capability for board images |
 
 **Considerations:**
 - gpt-oss-20b likely strongest starting point given pre-training exposure to chess
