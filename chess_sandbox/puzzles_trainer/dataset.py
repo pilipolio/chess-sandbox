@@ -2,6 +2,7 @@
 
 import random
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Literal
 
 import chess
@@ -504,15 +505,19 @@ def materialize_task_dataset(
     train_mixed = create_mixed_dataset(train_examples)
     test_mixed = create_mixed_dataset(test_examples)
 
-    def add_images(examples: list[dict], desc: str) -> list[dict]:
-        """Add board images to examples."""
-        for ex in tqdm(examples, desc=desc):
-            ex["image"] = generate_board_image(ex["fen"], size=image_size)
-        return examples
+    all_examples = train_mixed + test_mixed
+    unique_fens = list({ex["fen"] for ex in all_examples})
+    print(f"Generating {len(unique_fens)} unique board images for {len(all_examples)} examples...")
 
-    print("Generating board images...")
-    train_mixed = add_images(train_mixed, "Train images")
-    test_mixed = add_images(test_mixed, "Test images")
+    fen_to_image: dict[str, bytes] = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(generate_board_image, fen, image_size): fen for fen in unique_fens}
+        for future in tqdm(as_completed(futures), total=len(unique_fens), desc="Board images"):
+            fen = futures[future]
+            fen_to_image[fen] = future.result()
+
+    for ex in all_examples:
+        ex["image"] = fen_to_image[ex["fen"]]
 
     features = Features(
         {

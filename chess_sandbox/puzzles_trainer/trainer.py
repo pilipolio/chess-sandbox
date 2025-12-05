@@ -2,15 +2,13 @@
 
 from pathlib import Path
 
+import click
 import torch
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
-from chess_sandbox.puzzles_trainer.callbacks import ChessValidationCallback
-from chess_sandbox.puzzles_trainer.dataset import load_puzzle_dataset
-
-DEFAULT_MODEL = "Qwen/Qwen3-0.6B"  # "Qwen/Qwen3-4B-Instruct-2507
+DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 DEFAULT_OUTPUT_MODEL_ID = "pilipolio/chess-puzzle-sft"
 
 
@@ -87,7 +85,7 @@ def get_training_config(
     device = get_device()
 
     config_kwargs = {
-        "output_dir": output_model_id,  # Also saves locally to this path
+        "output_dir": output_model_id,
         "hub_model_id": output_model_id,
         "per_device_train_batch_size": 8,
         "gradient_accumulation_steps": 2,
@@ -134,6 +132,9 @@ def train(
     wandb_run_name: str | None = None,
 ) -> None:
     """Train a chess puzzle SFT model."""
+    from chess_sandbox.puzzles_trainer.callbacks import ChessValidationCallback
+    from chess_sandbox.puzzles_trainer.dataset import load_puzzle_dataset
+
     model_short_name = model_id.split("/")[-1].lower()
     output_model_id = output_model_id or f"{DEFAULT_OUTPUT_MODEL_ID}-{model_short_name}"
     Path(output_model_id).mkdir(parents=True, exist_ok=True)
@@ -200,3 +201,89 @@ def train(
     #     wandb.finish()
 
     print("Done!")
+
+
+@click.group()
+def main() -> None:
+    """Chess puzzle trainer CLI."""
+
+
+@main.command("train")
+@click.option(
+    "--model-id",
+    type=str,
+    default="Qwen/Qwen3-0.6B",
+    help="HuggingFace model ID (default: Qwen/Qwen3-0.6B)",
+)
+@click.option("--use-4bit", is_flag=True, help="Use 4-bit quantization (CUDA only)")
+@click.option("--max-steps", type=int, default=None, help="Max training steps (for testing)")
+@click.option("--eval-steps", type=int, default=None, help="Eval every N steps (default: 100)")
+@click.option("--output-model-id", type=str, default=None, help="Hub model ID (also saves locally)")
+@click.option("--wandb-project", type=str, default=None, help="W&B project name (enables W&B logging)")
+@click.option("--wandb-run-name", type=str, default=None, help="W&B run name (defaults to model name)")
+def train_command(
+    model_id: str,
+    use_4bit: bool,
+    max_steps: int | None,
+    eval_steps: int | None,
+    output_model_id: str | None,
+    wandb_project: str | None,
+    wandb_run_name: str | None,
+) -> None:
+    """Train a chess puzzle SFT model using LoRA fine-tuning."""
+    train(
+        model_id=model_id,
+        output_model_id=output_model_id,
+        use_4bit=use_4bit,
+        max_steps=max_steps,
+        eval_steps=eval_steps,
+        wandb_project=wandb_project,
+        wandb_run_name=wandb_run_name,
+    )
+
+
+@main.command()
+@click.option("--sample-size", type=int, default=1000, help="Number of puzzles to sample")
+@click.option("--test-split", type=float, default=0.1, help="Fraction for test set")
+@click.option("--seed", type=int, default=42, help="Random seed")
+@click.option("--image-size", type=int, default=240, help="Board image size in pixels")
+@click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity")
+@click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating")
+@click.option("--themes", type=str, default=None, help="Comma-separated theme filter")
+@click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
+@click.option("--dataset-id", type=str, default=None, help="HuggingFace dataset ID for push")
+def materialize(
+    sample_size: int,
+    test_split: float,
+    seed: int,
+    image_size: int,
+    min_popularity: int,
+    max_rating: int | None,
+    themes: str | None,
+    push_to_hub: bool,
+    dataset_id: str | None,
+) -> None:
+    """Create puzzle task dataset with board images."""
+    from chess_sandbox.puzzles_trainer.dataset import materialize_task_dataset
+
+    themes_tuple = tuple(themes.split(",")) if themes else None
+
+    dataset_dict = materialize_task_dataset(
+        sample_size=sample_size,
+        test_split=test_split,
+        seed=seed,
+        image_size=image_size,
+        min_popularity=min_popularity,
+        max_rating=max_rating,
+        themes=themes_tuple,
+    )
+
+    if push_to_hub:
+        if not dataset_id:
+            raise click.UsageError("--dataset-id required when using --push-to-hub")
+        dataset_dict.push_to_hub(dataset_id)
+        print(f"Pushed dataset to: https://huggingface.co/datasets/{dataset_id}")
+
+
+if __name__ == "__main__":
+    main()

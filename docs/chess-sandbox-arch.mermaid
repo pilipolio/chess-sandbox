@@ -1,0 +1,56 @@
+flowchart TD
+subgraph N12 [" "]
+  N14(" ")
+  N16(" ")
+  N13(" ")
+  N15(" ")
+end
+N0(" ")
+subgraph N7 [" "]
+  N19(" ")
+  N8(" ")
+  N9(" ")
+end
+subgraph N3 [" "]
+  N4(" ")
+  subgraph N5 [" "]
+    N20("Binaries")
+    N6(" ")
+  end
+end
+subgraph N1 [" "]
+  N11(" ")
+  N18(" ")
+  N2(" ")
+  N17(" ")
+end
+N21("Training<br>pipeline")
+N10(" ")
+N15 --> N16
+N18 -.->|"Update"| N2
+N21 -->|"Model changes"| N3
+style N14 stroke:#d97757,fill:#d97757,opacity:0.70;
+style N11 stroke:#059669,fill:#12b886,opacity:0.60;
+style N16 stroke:#d97757,fill:#d97757,opacity:0.70;
+style N19 stroke:#059669,fill:#12b886,opacity:0.60;
+style N18 stroke:#059669,fill:#12b886,opacity:0.60;
+style N13 stroke:#d97757,fill:#d97757,opacity:0.70;
+style N20 stroke:#d97706,fill:#fed7aa,color:#000000;
+style N12 stroke:#000000,fill:#d97757,opacity:0.40;
+style N0 stroke:#000000,fill:#ffffff;
+style N15 stroke:#d97757,fill:#d97757,opacity:0.70;
+style N2 stroke:#059669,fill:#12b886,opacity:0.60;
+style N8 stroke:#374151,fill:#d1d5db;
+style N4 stroke:#d97706,fill:#fed7aa;
+style N6 stroke:#d97706,fill:#fed7aa;
+style N7 stroke:#000000,fill:#e5e7eb;
+style N3 stroke:#000000,fill:#fef3c7;
+style N1 stroke:#059669,fill:#d1fae5;
+style N5 stroke:#d97706,fill:#fed7aa;
+style N21 stroke:#000000,fill:#ffffff,color:#000000;
+style N17 stroke:#059669,fill:#12b886,opacity:0.60;
+style N9 stroke:#374151,fill:#d1d5db;
+style N10 stroke:#000000,fill:#ffffff;
+linkStyle 0 stroke:#000000,color:black,stroke-width:0.5;
+linkStyle 1 stroke-dasharray: 5 5,stroke:#000000,color:black,stroke-width:0.5;
+linkStyle 2 stroke:#000000,color:black,stroke-width:0.5;

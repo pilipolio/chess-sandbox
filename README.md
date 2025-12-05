@@ -57,14 +57,31 @@ This enables concept detection and commentary generation grounded in how chess p
 
 Experimental module for fine-tuning small LLMs on chess puzzles using SFT with LoRA. See [docs/chess-llm-finetuning.md](docs/chess-llm-finetuning.md) for the full approach.
 
+**Dataset:** [pilipolio/chess-puzzle-tasks](https://huggingface.co/datasets/pilipolio/chess-puzzle-tasks) - Multi-task dataset with board images generated from 1000 Lichess puzzles (4992 train / 554 test examples). Task distribution: puzzle solving, ASCII board rendering, legal moves/captures listing, piece positions.
+
 **Dataset Preparation:**
 
 ```bash
 # Install dependencies (requires system cairo library: brew install cairo)
 uv sync --group prepare-data
 
-# Create puzzle dataset with board images
-uv run prepare-puzzle-dataset --sample-size 1000 --max-rating 1500 --push-to-hub
+# Create puzzle dataset with board images and push to HuggingFace Hub
+HF_TOKEN=your-token puzzles-trainer materialize \
+    --sample-size 1000 \
+    --max-rating 1500 \
+    --push-to-hub \
+    --dataset-id your-username/chess-puzzle-tasks
+```
+
+**LLM Evaluation:**
+
+```bash
+# Evaluate an OpenAI-compatible model on puzzle tasks
+uv run python -m chess_sandbox.puzzles_trainer.llm_evaluation \
+    --dataset-id pilipolio/lichess-puzzle-tasks \
+    --model gpt-4o-mini \
+    --sample-size 100 \
+    --output results.jsonl
 ```
 
 **Training on Modal:**
@@ -81,8 +98,8 @@ modal run chess_sandbox/puzzles_trainer/modal_pipeline.py::train \
 **Local Training:**
 
 ```bash
-uv sync --group sft
-uv run python -m chess_sandbox.puzzles_trainer.cli \
+uv sync --group sft --group prepare-data
+puzzles-trainer train \
     --model-id Qwen/Qwen3-0.6B \
     --max-steps 100 \
     --eval-steps 20
