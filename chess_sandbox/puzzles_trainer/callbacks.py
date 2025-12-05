@@ -171,6 +171,8 @@ class ChessValidationCallback(TrainerCallback):
                     generated = self.tokenizer.decode(output[input_len:], skip_special_tokens=True)  # pyright: ignore[reportUnknownMemberType]
                     # Strip <think>...</think> blocks (Qwen3 style reasoning)
                     generated = re.sub(r"<think>.*?</think>", "", generated, flags=re.DOTALL)
+                    # Also strip incomplete <think> blocks (truncated output)
+                    generated = re.sub(r"<think>.*", "", generated, flags=re.DOTALL)
                     all_outputs.append(generated.strip())
 
         print("  Validating outputs...")
