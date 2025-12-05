@@ -32,7 +32,8 @@ A two-stage training pipeline combining Supervised Fine-Tuning (SFT) with Group 
 | Task | Input | Output | Purpose |
 |------|-------|--------|---------|
 | Board ↔ FEN | ASCII board diagram | FEN string (or vice versa) | Board visualization and spatial reasoning |
-| Legal moves | FEN position | List of legal moves | Learn chess rules implicitly |
+| Legal moves | FEN position | List of legal moves for a piece | Learn chess rules implicitly |
+| Legal captures | FEN position | List of all legal captures | Identify tactical opportunities |
 | Mate-in-1 | FEN + "Find checkmate" | Single move (SAN) | Tactical pattern recognition |
 | Puzzle solving | FEN + puzzle prompt | Move sequence | Multi-step calculation |
 | Best move | FEN + context | Single best move | Position evaluation |

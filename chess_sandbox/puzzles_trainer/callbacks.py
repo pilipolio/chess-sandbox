@@ -11,7 +11,12 @@ import chess
 from transformers import PreTrainedTokenizerBase, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
 from chess_sandbox.puzzles_trainer.inference import batch_generate
-from chess_sandbox.puzzles_trainer.prompts import build_puzzle_prompt
+from chess_sandbox.puzzles_trainer.prompts import (
+    build_ascii_board_prompt,
+    build_concept_detection_prompt,
+    build_legal_captures_prompt,
+    build_puzzle_prompt,
+)
 
 if TYPE_CHECKING:
     from datasets import Dataset  # pyright: ignore[reportMissingTypeStubs]
@@ -127,7 +132,7 @@ class ChessValidationCallback(TrainerCallback):
             data=table_data,
         )
         print(f"Logging {json.dumps(table_data, indent=2)} examples to W&B")
-        wandb.log({"eval/examples": table})
+        wandb.log({"eval/examples": table})  # pyright: ignore[reportUnknownMemberType]
 
         print("Logged metrics and examples to W&B\n")
 
@@ -143,8 +148,16 @@ class ChessValidationCallback(TrainerCallback):
         for example in test_samples:
             task_type = example.get("task_type", "unknown")
 
+            fen = example.get("fen", "")
+
             if task_type == "puzzle":
-                question = build_puzzle_prompt(example.get("fen", ""))
+                question = build_puzzle_prompt(fen)
+            elif task_type == "ascii_board":
+                question = build_ascii_board_prompt(fen)
+            elif task_type == "concept_detection":
+                question = build_concept_detection_prompt(fen)
+            elif task_type == "legal_captures":
+                question = build_legal_captures_prompt(fen)
             else:
                 question = example.get("question", "")
                 if not question:

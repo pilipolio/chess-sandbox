@@ -150,7 +150,7 @@ exclude = [
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py --ignore=chess_sandbox/puzzles_trainer/prepare_dataset.py"
+addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py --ignore=chess_sandbox/puzzles_trainer"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: marks tests as integration tests requiring Stockfish (deselect with '-m \"not integration\"')",
