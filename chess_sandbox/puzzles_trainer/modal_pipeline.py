@@ -13,11 +13,18 @@ import modal
 
 image = (
     modal.Image.from_registry("huggingface/trl:0.25.1")  # type: ignore[reportUnknownMemberType]
-    .pip_install("python-chess", "wandb", "click")
+    .pip_install("python-chess", "wandb==0.23.0", "click")
     .add_local_python_source("chess_sandbox")
 )
 
 app = modal.App(name="chess-puzzle-sft", image=image)
+
+
+@app.function()  # type: ignore
+def pip_freeze():
+    """Run pip freeze to show installed packages."""
+    result = subprocess.run(["pip", "freeze"], capture_output=True, text=True, check=True)
+    print(result.stdout)
 
 
 @app.function(  # type: ignore

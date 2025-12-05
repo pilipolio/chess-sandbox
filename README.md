@@ -51,7 +51,42 @@ This enables concept detection and commentary generation grounded in how chess p
  * Human and LLM-as-Judge evaluation of generated chess commentaries using standardized quality metrics
  * Data-centric improvements by collecting chess experts' feedback and annotations using https://prodi.gy/
  * Additional board features relevant to extracted concepts
- * Agentic "chess analyst" to explore moves and engine/human lines 
+ * Agentic "chess analyst" to explore moves and engine/human lines
+
+### WIP: Chess Puzzle Fine-tuning (`puzzles_trainer`)
+
+Experimental module for fine-tuning small LLMs on chess puzzles using SFT with LoRA. See [docs/chess-llm-finetuning.md](docs/chess-llm-finetuning.md) for the full approach.
+
+**Dataset Preparation:**
+
+```bash
+# Install dependencies (requires system cairo library: brew install cairo)
+uv sync --group prepare-data
+
+# Create puzzle dataset with board images
+uv run prepare-puzzle-dataset --sample-size 1000 --max-rating 1500 --push-to-hub
+```
+
+**Training on Modal:**
+
+```bash
+modal run chess_sandbox/puzzles_trainer/modal_pipeline.py::train \
+    --max-steps 500 \
+    --eval-steps 50 \
+    --wandb-project chess-puzzles \
+    --model-id Qwen/Qwen3-4B-Instruct-2507 \
+    --output-model-id pilipolio/chess-puzzle-sft-qwen3-4b
+```
+
+**Local Training:**
+
+```bash
+uv sync --group sft
+uv run python -m chess_sandbox.puzzles_trainer.cli \
+    --model-id Qwen/Qwen3-0.6B \
+    --max-steps 100 \
+    --eval-steps 20
+```
 
 ## Project 
 
