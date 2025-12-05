@@ -8,8 +8,9 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import chess
-import torch
 from transformers import PreTrainedTokenizerBase, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
+
+from chess_sandbox.puzzles_trainer.inference import batch_generate
 
 if TYPE_CHECKING:
     from datasets import Dataset  # pyright: ignore[reportMissingTypeStubs]
@@ -31,11 +32,15 @@ class ChessValidationCallback(TrainerCallback):
         test_dataset: Dataset | None,
         num_validation_samples: int = 10,
         log_examples: int = 10,
+        max_new_tokens: int | None = None,
+        max_thinking_tokens: int | None = None,
     ):
         self.tokenizer = tokenizer
         self.test_dataset = test_dataset
         self.num_validation_samples = num_validation_samples
         self.log_examples = log_examples
+        self.max_new_tokens = max_new_tokens
+        self.max_thinking_tokens = max_thinking_tokens
 
     def on_evaluate(
         self,
@@ -45,14 +50,15 @@ class ChessValidationCallback(TrainerCallback):
         **kwargs: Any,
     ) -> None:
         """Run validation after each evaluation step."""
-        if not args.report_to or "wandb" not in args.report_to:
-            return
-
         model = kwargs.get("model")
         if model is None or self.test_dataset is None:
             return
 
         import wandb  # pyright: ignore[reportMissingImports]
+
+        # Only log to W&B if there's an active run (initialized by Trainer)
+        if wandb.run is None:  # pyright: ignore[reportUnknownMemberType]
+            return
 
         print(f"\n{'='*60}")
         print(f"Running validation at step {state.global_step}")
@@ -119,8 +125,7 @@ class ChessValidationCallback(TrainerCallback):
             data=table_data,
         )
         print(f"Logging {json.dumps(table_data, indent=2)} examples to W&B")
-        print(table_data)
-        wandb.log({"eval/examples": table}, step=state.global_step)  # pyright: ignore[reportUnknownMemberType]
+        wandb.log({"eval/examples": table})
 
         print("Logged metrics and examples to W&B\n")
 
@@ -145,35 +150,15 @@ class ChessValidationCallback(TrainerCallback):
             prompt = self.tokenizer.apply_chat_template(chat_messages, tokenize=False, add_generation_prompt=True)  # pyright: ignore[reportUnknownMemberType]
             prompts.append(str(prompt))
 
-        # Batch inference
-        batch_size = 8
-        all_outputs: list[str] = []
-
         print(f"  Running inference on {len(prompts)} samples...")
 
-        with torch.no_grad():
-            for i in range(0, len(prompts), batch_size):
-                batch = prompts[i : i + batch_size]
-
-                inputs = self.tokenizer(batch, return_tensors="pt", padding=True, truncation=True)  # pyright: ignore[reportUnknownMemberType]
-                inputs = {k: v.to(model.device) for k, v in inputs.items()}  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
-
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=128,  # Increased for longer outputs like ascii_board
-                    do_sample=False,
-                    pad_token_id=self.tokenizer.pad_token_id,  # pyright: ignore[reportUnknownMemberType]
-                )
-
-                # Decode only the generated tokens
-                for j, output in enumerate(outputs):
-                    input_len = int(inputs["input_ids"][j].shape[0])  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
-                    generated = self.tokenizer.decode(output[input_len:], skip_special_tokens=True)  # pyright: ignore[reportUnknownMemberType]
-                    # Strip <think>...</think> blocks (Qwen3 style reasoning)
-                    generated = re.sub(r"<think>.*?</think>", "", generated, flags=re.DOTALL)
-                    # Also strip incomplete <think> blocks (truncated output)
-                    generated = re.sub(r"<think>.*", "", generated, flags=re.DOTALL)
-                    all_outputs.append(generated.strip())
+        all_outputs = batch_generate(
+            model=model,
+            tokenizer=self.tokenizer,
+            prompts=prompts,
+            max_new_tokens=self.max_new_tokens,
+            max_thinking_tokens=self.max_thinking_tokens,
+        )
 
         print("  Validating outputs...")
 
