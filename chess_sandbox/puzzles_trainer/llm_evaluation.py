@@ -1,27 +1,25 @@
-"""Lightweight LLM evaluation for chess puzzle tasks using OpenAI API."""
+"""LLM evaluation for chess puzzle tasks using OpenRouter API with Weave tracking."""
 
+import asyncio
 import os
-from pathlib import Path
 
 import click
+import weave
 from datasets import Dataset, load_dataset  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
+from dotenv import load_dotenv
 from openai import OpenAI
-from pydantic import BaseModel
-from tqdm import tqdm
+
+load_dotenv()
 
 DEFAULT_DATASET_ID = "pilipolio/lichess-puzzle-tasks"
-DEFAULT_MODEL = "gpt-oss-20b"
+DEFAULT_SAMPLE_SIZE = 10
 
-
-class EvalResult(BaseModel):
-    """Single evaluation result."""
-
-    task_type: str
-    fen: str
-    question: str
-    expected: str
-    predicted: str
-    exact_match: bool
+BENCHMARK_MODELS = [
+    "openai/gpt-oss-20b:free",
+    "mistralai/ministral-14b-2512",
+    "qwen/qwen3-32b",
+    "openai/gpt-5-mini",
+]
 
 
 def normalize_answer(answer: str) -> str:
@@ -29,37 +27,148 @@ def normalize_answer(answer: str) -> str:
     return answer.strip().lower()
 
 
-ReasoningEffort = str  # "low" | "medium" | "high"
+def create_client(api_key: str | None = None) -> OpenAI:
+    """Create OpenRouter client."""
+    key = api_key or os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise ValueError("Set OPENROUTER_API_KEY or OPENAI_API_KEY environment variable")
+    return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
 
 
-def evaluate_example(client: OpenAI, model: str, question: str, reasoning_effort: ReasoningEffort | None = None) -> str:
-    """Get model prediction for a question."""
-    kwargs: dict[str, object] = {
-        "model": model,
-        "input": question,
-    }
-    if reasoning_effort:
-        kwargs["reasoning"] = {"effort": reasoning_effort}
+class PuzzleModel(weave.Model):
+    """Weave model wrapper for chess puzzle evaluation."""
 
-    response = client.responses.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
+    model_name: str
 
-    for item in response.output:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        if item.type == "message":  # pyright: ignore[reportUnknownMemberType]
-            for content in item.content:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-                if content.type == "output_text":  # pyright: ignore[reportUnknownMemberType]
-                    return content.text.strip()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    return ""
+    @weave.op()
+    def predict(self, question: str) -> str:
+        """Get model prediction for a question."""
+        client = create_client()
+        kwargs: dict[str, object] = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": question}],
+        }
+
+        try:
+            response = client.chat.completions.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
+            content = response.choices[0].message.content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            return content.strip() if content else ""  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        except Exception as e:
+            print(f"\nError evaluating example with {self.model_name}: {e}")
+            return ""
 
 
-def run_evaluation(
-    dataset_id: str = DEFAULT_DATASET_ID,
-    model: str = DEFAULT_MODEL,
-    sample_size: int | None = None,
-    split: str = "test",
-    reasoning_effort: ReasoningEffort | None = None,
-) -> list[EvalResult]:
-    """Run evaluation on dataset and return results."""
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+@weave.op()
+def exact_match_scorer(answer: str, output: str) -> dict[str, bool]:
+    """Score model output against expected answer."""
+    return {"exact_match": normalize_answer(output) == normalize_answer(answer)}
+
+
+async def run_evaluation(
+    dataset: Dataset,  # pyright: ignore[reportMissingTypeArgument]
+    model_name: str,
+) -> dict[str, object]:
+    """Run evaluation on dataset using Weave."""
+    model_desc = model_name
+    print(f"Evaluating {len(dataset)} examples with model: {model_desc}")
+
+    examples: list[dict[str, str]] = [dict(ex) for ex in dataset]  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+
+    model = PuzzleModel(model_name=model_name)
+    eval_name = f"chess-puzzles:{model_name}"
+    evaluation = weave.Evaluation(
+        name=eval_name,
+        dataset=examples,  # pyright: ignore[reportArgumentType]
+        scorers=[exact_match_scorer],
+    )
+
+    results = await evaluation.evaluate(model)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return results  # pyright: ignore[reportUnknownVariableType, reportReturnType]
+
+
+async def run_benchmark(
+    dataset: Dataset,  # pyright: ignore[reportMissingTypeArgument]
+    models: list[str],
+) -> dict[str, dict[str, object]]:
+    """Run benchmark across multiple models."""
+    all_results: dict[str, dict[str, object]] = {}
+
+    for model_name in models:
+        results = await run_evaluation(dataset, model_name)
+        all_results[model_name] = results
+        print_model_summary(model_name, results)
+
+    return all_results
+
+
+def print_model_summary(model: str, results: dict[str, object]) -> None:
+    """Print summary for a single model from Weave evaluation results."""
+    exact_match_data = results.get("exact_match_scorer", {})
+    if isinstance(exact_match_data, dict):
+        exact_match_info = exact_match_data.get("exact_match", {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if isinstance(exact_match_info, dict):
+            mean = exact_match_info.get("true_fraction", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            print(f"{model}: {mean * 100:.1f}% exact match")
+            return
+    print(f"{model}: Results available in Weave UI")
+
+
+def print_summary(results: dict[str, object]) -> None:
+    """Print evaluation summary."""
+    print("\n" + "=" * 60)
+    print("EVALUATION SUMMARY")
+    print("=" * 60)
+    exact_match_data = results.get("exact_match_scorer", {})
+    if isinstance(exact_match_data, dict):
+        exact_match_info = exact_match_data.get("exact_match", {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if isinstance(exact_match_info, dict):
+            mean = exact_match_info.get("true_fraction", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            print(f"Overall exact match: {mean * 100:.1f}%")
+    print("=" * 60)
+    print("Full results available in Weave UI")
+
+
+def print_benchmark_comparison(all_results: dict[str, dict[str, object]]) -> None:
+    """Print comparison table for benchmark results."""
+    print("\n" + "=" * 60)
+    print("BENCHMARK COMPARISON")
+    print("=" * 60)
+    print(f"{'Model':<40} {'Exact Match':>15}")
+    print("-" * 60)
+
+    for model, results in all_results.items():
+        exact_match_data = results.get("exact_match_scorer", {})
+        if isinstance(exact_match_data, dict):
+            exact_match_info = exact_match_data.get("exact_match", {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            if isinstance(exact_match_info, dict):
+                mean = exact_match_info.get("true_fraction", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                print(f"{model:<40} {mean * 100:>14.1f}%")
+                continue
+        print(f"{model:<40} {'N/A':>15}")
+
+    print("=" * 60)
+    print("Full results available in Weave UI")
+
+
+@click.command()
+@click.option("--dataset-id", default=DEFAULT_DATASET_ID, help="HuggingFace dataset ID")
+@click.option("--model", default=None, help="Single model to evaluate")
+@click.option("--models", default=None, help="Comma-separated models for benchmark")
+@click.option("--benchmark", is_flag=True, help="Run full benchmark with default models")
+@click.option("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE, help="Number of examples to evaluate")
+@click.option("--split", default="test", help="Dataset split to evaluate")
+@click.option("--weave-project", default="chess-puzzles", help="Weave project name for tracking")
+def main(
+    dataset_id: str,
+    model: str | None,
+    models: str | None,
+    benchmark: bool,
+    sample_size: int,
+    split: str,
+    weave_project: str,
+) -> None:
+    """Evaluate LLM models on the puzzle task dataset via OpenRouter with Weave tracking."""
+    weave.init(weave_project)
 
     print(f"Loading dataset: {dataset_id} (split: {split})")
     dataset: Dataset = load_dataset(dataset_id, split=split)  # pyright: ignore[reportAssignmentType]
@@ -67,120 +176,22 @@ def run_evaluation(
     if sample_size:
         dataset = dataset.select(range(min(sample_size, len(dataset))))  # pyright: ignore[reportUnknownMemberType]
 
-    model_desc = model
-    if reasoning_effort:
-        model_desc += f" (reasoning: {reasoning_effort})"
-    print(f"Evaluating {len(dataset)} examples with model: {model_desc}")
+    if benchmark:
+        model_list = BENCHMARK_MODELS
+        all_results = asyncio.run(run_benchmark(dataset, model_list))
+        print_benchmark_comparison(all_results)
 
-    results: list[EvalResult] = []
+    elif models:
+        model_list = [m.strip() for m in models.split(",")]
+        all_results = asyncio.run(run_benchmark(dataset, model_list))
+        print_benchmark_comparison(all_results)
 
-    for example in tqdm(dataset, desc="Evaluating"):  # pyright: ignore[reportUnknownVariableType]
-        ex: dict[str, str] = dict(example)  # pyright: ignore[reportUnknownArgumentType]
-        question = ex["question"]
-        expected = ex["answer"]
-        task_type = ex["task_type"]
-        fen = ex["fen"]
+    elif model:
+        results = asyncio.run(run_evaluation(dataset, model))
+        print_summary(results)
 
-        try:
-            predicted = evaluate_example(client, model, question, reasoning_effort)
-        except Exception as e:
-            print(f"\nError evaluating example: {e}")
-            predicted = ""
-
-        exact_match = normalize_answer(predicted) == normalize_answer(expected)
-
-        results.append(
-            EvalResult(
-                task_type=task_type,
-                fen=fen,
-                question=question,
-                expected=expected,
-                predicted=predicted,
-                exact_match=exact_match,
-            )
-        )
-
-    return results
-
-
-def save_results(results: list[EvalResult], output_path: str) -> None:
-    """Save results to JSONL file."""
-    output_dir = Path(output_path).parent
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, "w") as f:
-        for result in results:
-            f.write(result.model_dump_json() + "\n")
-
-    print(f"Results saved to: {output_path}")
-
-
-def print_summary(results: list[EvalResult]) -> None:
-    """Print evaluation summary with per-task metrics."""
-    if not results:
-        print("No results to summarize.")
-        return
-
-    total = len(results)
-    correct = sum(1 for r in results if r.exact_match)
-    overall_rate = correct / total * 100
-
-    print("\n" + "=" * 60)
-    print("EVALUATION SUMMARY")
-    print("=" * 60)
-    print(f"Total examples: {total}")
-    print(f"Overall exact match: {correct}/{total} ({overall_rate:.1f}%)")
-    print("-" * 60)
-
-    task_metrics: dict[str, dict[str, int]] = {}
-    for r in results:
-        if r.task_type not in task_metrics:
-            task_metrics[r.task_type] = {"total": 0, "correct": 0}
-        task_metrics[r.task_type]["total"] += 1
-        if r.exact_match:
-            task_metrics[r.task_type]["correct"] += 1
-
-    print("\nPer-task metrics:")
-    for task_type, metrics in sorted(task_metrics.items()):
-        rate = metrics["correct"] / metrics["total"] * 100
-        print(f"  {task_type}: {metrics['correct']}/{metrics['total']} ({rate:.1f}%)")
-
-    print("=" * 60)
-
-
-@click.command()
-@click.option("--dataset-id", default=DEFAULT_DATASET_ID, help="HuggingFace dataset ID")
-@click.option("--model", default=DEFAULT_MODEL, help="OpenAI model name")
-@click.option("--sample-size", type=int, default=None, help="Limit number of examples")
-@click.option("--split", default="test", help="Dataset split to evaluate")
-@click.option(
-    "--reasoning-effort",
-    type=click.Choice(["low", "medium", "high"]),
-    default=None,
-    help="Reasoning effort for thinking models",
-)
-@click.option("--output", type=str, default=None, help="Output path for JSONL results")
-def main(
-    dataset_id: str,
-    model: str,
-    sample_size: int | None,
-    split: str,
-    reasoning_effort: str | None,
-    output: str | None,
-) -> None:
-    """Evaluate an OpenAI model on the puzzle task dataset."""
-    results = run_evaluation(
-        dataset_id=dataset_id,
-        model=model,
-        sample_size=sample_size,
-        split=split,
-        reasoning_effort=reasoning_effort,
-    )
-
-    print_summary(results)
-
-    if output:
-        save_results(results, output)
+    else:
+        raise click.UsageError("Specify --model, --models, or --benchmark")
 
 
 if __name__ == "__main__":
