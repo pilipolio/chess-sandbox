@@ -242,17 +242,41 @@ def train_command(
     )
 
 
-@main.command()
-@click.option("--sample-size", type=int, default=1000, help="Number of puzzles to sample")
+DEFAULT_DATASET_IDS = {
+    "puzzle": "pilipolio/chess-puzzle-tasks",
+    "toy": "pilipolio/chess-toy-tasks",
+    "mixed": "pilipolio/chess-mixed-tasks",
+}
+
+
+@main.command("generate-samples")
+@click.option("--sample-size", type=int, default=1000, help="Number of puzzles/exercises to generate")
 @click.option("--test-split", type=float, default=0.1, help="Fraction for test set")
 @click.option("--seed", type=int, default=42, help="Random seed")
 @click.option("--image-size", type=int, default=240, help="Board image size in pixels")
-@click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity")
-@click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating")
-@click.option("--themes", type=str, default=None, help="Comma-separated theme filter")
+@click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity (puzzle/mixed)")
+@click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating (puzzle/mixed)")
+@click.option("--themes", type=str, default=None, help="Comma-separated theme filter (puzzle/mixed)")
+@click.option(
+    "--source",
+    type=click.Choice(["puzzle", "toy", "mixed"]),
+    default="puzzle",
+    help="Data source: puzzle (Lichess), toy (synthetic), or mixed",
+)
+@click.option("--toy-ratio", type=float, default=0.3, help="Fraction of toy exercises when source=mixed")
+@click.option(
+    "--include-toy-representation/--no-toy-representation",
+    default=True,
+    help="Include FEN/piece-list conversion tasks for toy exercises",
+)
 @click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
-@click.option("--dataset-id", type=str, default=None, help="HuggingFace dataset ID for push")
-def materialize(
+@click.option(
+    "--dataset-id",
+    type=str,
+    default=None,
+    help="HuggingFace dataset ID (default: source-specific ID)",
+)
+def generate_samples(
     sample_size: int,
     test_split: float,
     seed: int,
@@ -260,10 +284,19 @@ def materialize(
     min_popularity: int,
     max_rating: int | None,
     themes: str | None,
+    source: str,
+    toy_ratio: float,
+    include_toy_representation: bool,
     push_to_hub: bool,
     dataset_id: str | None,
 ) -> None:
-    """Create puzzle task dataset with board images."""
+    """Generate chess task dataset with board images.
+
+    Sources:
+      - puzzle: Lichess puzzles with multiple task types (SAN moves)
+      - toy: Synthetic toy exercises (capture sequences, movement paths, UCI moves)
+      - mixed: Combination of both (use --toy-ratio to control mix)
+    """
     from chess_sandbox.puzzles_trainer.dataset import materialize_task_dataset
 
     themes_tuple = tuple(themes.split(",")) if themes else None
@@ -276,12 +309,76 @@ def materialize(
         min_popularity=min_popularity,
         max_rating=max_rating,
         themes=themes_tuple,
+        source=source,  # type: ignore[arg-type]
+        toy_ratio=toy_ratio,
+        include_toy_representation=include_toy_representation,
     )
+
+    if push_to_hub:
+        hub_dataset_id = dataset_id or DEFAULT_DATASET_IDS[source]
+        dataset_dict.push_to_hub(hub_dataset_id)
+        print(f"Pushed dataset to: https://huggingface.co/datasets/{hub_dataset_id}")
+
+
+@main.command("generate-curriculum")
+@click.option("--capture-exercises", type=int, default=100, help="Number of capture exercises")
+@click.option("--movement-exercises", type=int, default=100, help="Number of movement exercises")
+@click.option("--include-representation/--no-representation", default=True, help="Include representation tasks")
+@click.option("--seed", type=int, default=42, help="Random seed")
+@click.option("--output", type=click.Path(), required=True, help="Output JSONL file path")
+@click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
+@click.option("--dataset-id", type=str, default=None, help="HuggingFace dataset ID for push")
+def generate_curriculum_command(
+    capture_exercises: int,
+    movement_exercises: int,
+    include_representation: bool,
+    seed: int,
+    output: str,
+    push_to_hub: bool,
+    dataset_id: str | None,
+) -> None:
+    """Generate synthetic toy chess curriculum dataset."""
+    import json
+
+    from datasets import Dataset
+
+    from chess_sandbox.puzzles_trainer.toy_curriculum import create_toy_curriculum
+
+    print("Generating toy curriculum...")
+    print(f"  Capture exercises: {capture_exercises}")
+    print(f"  Movement exercises: {movement_exercises}")
+    print(f"  Include representation tasks: {include_representation}")
+    print(f"  Seed: {seed}")
+
+    curriculum = create_toy_curriculum(
+        capture_exercises=capture_exercises,
+        movement_exercises=movement_exercises,
+        include_representation=include_representation,
+        seed=seed,
+    )
+
+    print(f"\nGenerated {len(curriculum)} total tasks")
+
+    task_counts: dict[str, int] = {}
+    for ex in curriculum:
+        task_type = ex.get("task_type", "unknown")
+        task_counts[task_type] = task_counts.get(task_type, 0) + 1
+    print(f"Task distribution: {task_counts}")
+
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "w") as f:
+        for item in curriculum:
+            f.write(json.dumps(item) + "\n")
+
+    print(f"\nSaved to: {output_path}")
 
     if push_to_hub:
         if not dataset_id:
             raise click.UsageError("--dataset-id required when using --push-to-hub")
-        dataset_dict.push_to_hub(dataset_id)
+        dataset = Dataset.from_list(curriculum)
+        dataset.push_to_hub(dataset_id)
         print(f"Pushed dataset to: https://huggingface.co/datasets/{dataset_id}")
 
 

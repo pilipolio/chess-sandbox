@@ -3,7 +3,7 @@
 import random
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Literal
+from typing import Any, Literal
 
 import chess
 from datasets import Dataset, DatasetDict, Features, Value, load_dataset
@@ -20,8 +20,11 @@ from chess_sandbox.puzzles_trainer.prompts import (
     build_piece_positions_prompt,
     build_puzzle_prompt,
 )
+from chess_sandbox.puzzles_trainer.toy_curriculum import create_toy_curriculum
 
 DATASET_ID = "Lichess/chess-puzzles"
+
+DatasetSource = Literal["puzzle", "toy", "mixed"]
 
 TaskType = Literal[
     "puzzle", "ascii_board", "legal_moves", "legal_captures", "piece_captures", "concept_detection", "piece_positions"
@@ -109,7 +112,7 @@ def normalize_lichess_example(example: dict) -> dict:
         "fen": fen,
         "answer": first_move,
         "themes": themes,
-        "lichess_url": f"https://lichess.org/training/{puzzle_id}",
+        "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
 
@@ -127,7 +130,7 @@ def format_puzzle(example: dict) -> dict:
         "fen": fen,
         "question": prompt,
         "answer": example["answer"],
-        "lichess_url": example["lichess_url"],
+        "source_url": example["source_url"],
     }
 
 
@@ -147,7 +150,7 @@ def format_ascii_board(example: dict) -> dict:
         "fen": fen,
         "question": prompt,
         "answer": ascii_output,
-        "lichess_url": example["lichess_url"],
+        "source_url": example["source_url"],
     }
 
 
@@ -187,7 +190,7 @@ def format_legal_moves(example: dict) -> dict | None:
                 "square": square_name,
                 "question": prompt,
                 "answer": san_moves,
-                "lichess_url": example["lichess_url"],
+                "source_url": example["source_url"],
             }
 
     return None
@@ -218,7 +221,7 @@ def format_legal_captures(example: dict) -> dict | None:
         "fen": fen,
         "question": prompt,
         "answer": san_captures,
-        "lichess_url": example["lichess_url"],
+        "source_url": example["source_url"],
     }
 
 
@@ -259,7 +262,7 @@ def format_piece_captures(example: dict) -> dict | None:
                 "square": square_name,
                 "question": prompt,
                 "answer": san_captures,
-                "lichess_url": example["lichess_url"],
+                "source_url": example["source_url"],
             }
 
     return None
@@ -281,7 +284,7 @@ def format_concept_detection(example: dict) -> dict:
         "fen": fen,
         "question": prompt,
         "answer": themes_str,
-        "lichess_url": example["lichess_url"],
+        "source_url": example["source_url"],
     }
 
 
@@ -315,7 +318,7 @@ def format_piece_positions(example: dict) -> dict:
         "fen": fen,
         "question": prompt,
         "answer": output,
-        "lichess_url": example["lichess_url"],
+        "source_url": example["source_url"],
     }
 
 
@@ -346,27 +349,14 @@ def create_mixed_dataset(examples: list[dict]) -> list[dict]:
     return result
 
 
-def load_puzzle_dataset(
-    sample_size: int = 1000,
-    test_split: float = 0.1,
-    seed: int = 42,
-    min_popularity: int = 80,
-    max_rating: int | None = None,
-    themes: tuple[str, ...] | None = None,
-) -> tuple[Dataset, Dataset]:
-    """Load and format the chess puzzles dataset with mixed tasks.
-
-    Args:
-        sample_size: Number of source puzzles to sample.
-        test_split: Fraction of data for test set.
-        seed: Random seed for reproducibility.
-        min_popularity: Minimum popularity score (default 80).
-        max_rating: Maximum puzzle rating (None for no limit).
-        themes: Filter by theme(s) (None for all themes).
-
-    Returns:
-        Tuple of (train_dataset, test_dataset).
-    """
+def _load_puzzle_tasks(
+    sample_size: int,
+    seed: int,
+    min_popularity: int,
+    max_rating: int | None,
+    themes: tuple[str, ...] | None,
+) -> list[dict[str, Any]]:
+    """Load and format Lichess puzzle tasks."""
     random.seed(seed)
 
     print(f"Loading dataset: {DATASET_ID}")
@@ -388,7 +378,7 @@ def load_puzzle_dataset(
     sampled_data = lichess_dataset.select(sampled_indices)
 
     print("Normalizing and validating puzzles...")
-    normalized_examples: list[dict] = []
+    normalized_examples: list[dict[str, Any]] = []
     skipped = 0
 
     for example in tqdm(_cast_to_iterator(sampled_data), desc="Processing", total=len(sampled_data)):
@@ -406,25 +396,94 @@ def load_puzzle_dataset(
 
     print(f"Processed {len(normalized_examples)} puzzles, skipped {skipped}")
 
-    # Split into train/test
-    test_size = int(len(normalized_examples) * test_split)
-    random.shuffle(normalized_examples)
-
-    train_examples = normalized_examples[:-test_size] if test_size > 0 else normalized_examples
-    test_examples = normalized_examples[-test_size:] if test_size > 0 else []
-
     print("Creating mixed dataset with all task types...")
-    train_mixed = create_mixed_dataset(train_examples)
-    test_mixed = create_mixed_dataset(test_examples)
+    return create_mixed_dataset(normalized_examples)
 
-    train_dataset = Dataset.from_list(train_mixed)
-    test_dataset = Dataset.from_list(test_mixed)
+
+def _load_toy_tasks(
+    num_exercises: int,
+    seed: int,
+    include_representation: bool = True,
+) -> list[dict[str, Any]]:
+    """Load toy curriculum tasks."""
+    print(f"Generating {num_exercises} toy exercises (capture + movement)...")
+    # Split evenly between capture and movement
+    capture_count = num_exercises // 2
+    movement_count = num_exercises - capture_count
+
+    return create_toy_curriculum(
+        capture_exercises=capture_count,
+        movement_exercises=movement_count,
+        include_representation=include_representation,
+        seed=seed,
+    )
+
+
+def load_puzzle_dataset(
+    sample_size: int = 1000,
+    test_split: float = 0.1,
+    seed: int = 42,
+    min_popularity: int = 80,
+    max_rating: int | None = None,
+    themes: tuple[str, ...] | None = None,
+    source: DatasetSource = "puzzle",
+    toy_ratio: float = 0.3,
+    include_toy_representation: bool = True,
+) -> tuple[Dataset, Dataset]:
+    """Load and format chess dataset with mixed tasks.
+
+    Args:
+        sample_size: Number of source puzzles/exercises to generate.
+        test_split: Fraction of data for test set.
+        seed: Random seed for reproducibility.
+        min_popularity: Minimum popularity score for puzzles (default 80).
+        max_rating: Maximum puzzle rating (None for no limit).
+        themes: Filter puzzles by theme(s) (None for all themes).
+        source: Data source - "puzzle" (Lichess), "toy" (synthetic), or "mixed".
+        toy_ratio: Fraction of toy exercises when source="mixed" (default 0.3).
+        include_toy_representation: Include FEN/piece-list conversion tasks for toy.
+
+    Returns:
+        Tuple of (train_dataset, test_dataset).
+    """
+    random.seed(seed)
+    all_tasks: list[dict[str, Any]] = []
+
+    if source == "puzzle":
+        all_tasks = _load_puzzle_tasks(sample_size, seed, min_popularity, max_rating, themes)
+    elif source == "toy":
+        all_tasks = _load_toy_tasks(sample_size, seed, include_toy_representation)
+    elif source == "mixed":
+        toy_count = int(sample_size * toy_ratio)
+        puzzle_count = sample_size - toy_count
+
+        if puzzle_count > 0:
+            puzzle_tasks = _load_puzzle_tasks(puzzle_count, seed, min_popularity, max_rating, themes)
+            all_tasks.extend(puzzle_tasks)
+
+        if toy_count > 0:
+            toy_tasks = _load_toy_tasks(toy_count, seed + 1000, include_toy_representation)
+            all_tasks.extend(toy_tasks)
+
+        random.shuffle(all_tasks)
+    else:
+        raise ValueError(f"Unknown source: {source}")
+
+    # Split into train/test
+    test_size = int(len(all_tasks) * test_split)
+    random.shuffle(all_tasks)
+
+    train_tasks = all_tasks[:-test_size] if test_size > 0 else all_tasks
+    test_tasks = all_tasks[-test_size:] if test_size > 0 else []
+
+    train_dataset = Dataset.from_list(train_tasks)
+    test_dataset = Dataset.from_list(test_tasks)
 
     print(f"Train examples: {len(train_dataset)}")
     print(f"Test examples: {len(test_dataset)}")
 
     task_counts: dict[str, int] = {}
-    for ex in train_mixed[:1000]:
+    for ex in train_tasks[:1000]:
         task_type = ex.get("task_type", "unknown")
         task_counts[task_type] = task_counts.get(task_type, 0) + 1
     print(f"Task distribution (first 1000): {task_counts}")
@@ -440,72 +499,58 @@ def materialize_task_dataset(
     min_popularity: int = 80,
     max_rating: int | None = None,
     themes: tuple[str, ...] | None = None,
+    source: DatasetSource = "puzzle",
+    toy_ratio: float = 0.3,
+    include_toy_representation: bool = True,
 ) -> DatasetDict:
     """Create task dataset with board images ready for HF Hub.
 
     Args:
-        sample_size: Number of source puzzles to sample.
+        sample_size: Number of source puzzles/exercises to generate.
         test_split: Fraction of data for test set.
         seed: Random seed for reproducibility.
         image_size: Board image size in pixels.
-        min_popularity: Minimum popularity score (default 80).
+        min_popularity: Minimum popularity score for puzzles (default 80).
         max_rating: Maximum puzzle rating (None for no limit).
-        themes: Filter by theme(s) (None for all themes).
+        themes: Filter puzzles by theme(s) (None for all themes).
+        source: Data source - "puzzle" (Lichess), "toy" (synthetic), or "mixed".
+        toy_ratio: Fraction of toy exercises when source="mixed" (default 0.3).
+        include_toy_representation: Include FEN/piece-list conversion tasks for toy.
 
     Returns:
         DatasetDict with train and test splits.
     """
     random.seed(seed)
+    all_tasks: list[dict[str, Any]] = []
 
-    print(f"Loading dataset: {DATASET_ID}")
-    lichess_dataset: Dataset = load_dataset(DATASET_ID, split="train")  # pyright: ignore[reportAssignmentType]
-    print(f"Loaded {len(lichess_dataset)} puzzles")
+    if source == "puzzle":
+        all_tasks = _load_puzzle_tasks(sample_size, seed, min_popularity, max_rating, themes)
+    elif source == "toy":
+        all_tasks = _load_toy_tasks(sample_size, seed, include_toy_representation)
+    elif source == "mixed":
+        toy_count = int(sample_size * toy_ratio)
+        puzzle_count = sample_size - toy_count
 
-    print(f"Sampling {sample_size} puzzles with popularity >= {min_popularity}...")
-    sampled_indices = stream_and_sample_puzzles(
-        lichess_dataset,
-        sample_size,
-        theme_filter=themes,
-        min_popularity=min_popularity,
-        max_rating=max_rating,
-    )
+        if puzzle_count > 0:
+            puzzle_tasks = _load_puzzle_tasks(puzzle_count, seed, min_popularity, max_rating, themes)
+            all_tasks.extend(puzzle_tasks)
 
-    if not sampled_indices:
-        raise ValueError("No puzzles found matching the specified criteria")
+        if toy_count > 0:
+            toy_tasks = _load_toy_tasks(toy_count, seed + 1000, include_toy_representation)
+            all_tasks.extend(toy_tasks)
 
-    sampled_data = lichess_dataset.select(sampled_indices)
-
-    print("Normalizing and validating puzzles...")
-    normalized_examples: list[dict] = []
-    skipped = 0
-
-    for example in tqdm(_cast_to_iterator(sampled_data), desc="Processing", total=len(sampled_data)):
-        normalized = normalize_lichess_example(dict(example))  # pyright: ignore[reportUnknownArgumentType]
-
-        if not normalized["answer"]:
-            skipped += 1
-            continue
-
-        if not validate_move(normalized["fen"], normalized["answer"]):
-            skipped += 1
-            continue
-
-        normalized_examples.append(normalized)
-
-    print(f"Processed {len(normalized_examples)} puzzles, skipped {skipped}")
+        random.shuffle(all_tasks)
+    else:
+        raise ValueError(f"Unknown source: {source}")
 
     # Split into train/test
-    test_size = int(len(normalized_examples) * test_split)
-    random.shuffle(normalized_examples)
+    test_size = int(len(all_tasks) * test_split)
+    random.shuffle(all_tasks)
 
-    train_examples = normalized_examples[:-test_size] if test_size > 0 else normalized_examples
-    test_examples = normalized_examples[-test_size:] if test_size > 0 else []
+    train_tasks = all_tasks[:-test_size] if test_size > 0 else all_tasks
+    test_tasks = all_tasks[-test_size:] if test_size > 0 else []
 
-    print("Creating mixed dataset with all task types...")
-    train_mixed = create_mixed_dataset(train_examples)
-    test_mixed = create_mixed_dataset(test_examples)
-
-    all_examples = train_mixed + test_mixed
+    all_examples = train_tasks + test_tasks
     unique_fens = list({ex["fen"] for ex in all_examples})
     print(f"Generating {len(unique_fens)} unique board images for {len(all_examples)} examples...")
 
@@ -526,7 +571,7 @@ def materialize_task_dataset(
             "task_type": Value("string"),
             "question": Value("string"),
             "answer": Value("string"),
-            "lichess_url": Value("string"),
+            "source": Value("string"),
             "messages": [
                 {
                     "role": Value("string"),
@@ -536,7 +581,7 @@ def materialize_task_dataset(
         }
     )
 
-    def normalize_example(ex: dict) -> dict:
+    def normalize_example(ex: dict[str, Any]) -> dict[str, Any]:
         """Ensure all examples have consistent fields."""
         return {
             "image": ex["image"],
@@ -544,21 +589,21 @@ def materialize_task_dataset(
             "task_type": ex["task_type"],
             "question": ex["question"],
             "answer": ex["answer"],
-            "lichess_url": ex["lichess_url"],
+            "source": ex.get("source", "lichess"),  # Default to lichess for puzzle tasks
             "messages": ex["messages"],
         }
 
-    train_mixed = [normalize_example(ex) for ex in train_mixed]
-    test_mixed = [normalize_example(ex) for ex in test_mixed]
+    train_normalized = [normalize_example(ex) for ex in train_tasks]
+    test_normalized = [normalize_example(ex) for ex in test_tasks]
 
-    train_dataset = Dataset.from_list(train_mixed, features=features)
-    test_dataset = Dataset.from_list(test_mixed, features=features)
+    train_dataset = Dataset.from_list(train_normalized, features=features)
+    test_dataset = Dataset.from_list(test_normalized, features=features)
 
     print(f"Train examples: {len(train_dataset)}")
     print(f"Test examples: {len(test_dataset)}")
 
     task_counts: dict[str, int] = {}
-    for ex in train_mixed[:1000]:
+    for ex in train_normalized[:1000]:
         task_type = ex.get("task_type", "unknown")
         task_counts[task_type] = task_counts.get(task_type, 0) + 1
     print(f"Task distribution (first 1000): {task_counts}")

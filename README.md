@@ -57,7 +57,10 @@ This enables concept detection and commentary generation grounded in how chess p
 
 Experimental module for fine-tuning small LLMs on chess puzzles using SFT with LoRA. See [docs/chess-llm-finetuning.md](docs/chess-llm-finetuning.md) for the full approach.
 
-**Dataset:** [pilipolio/chess-puzzle-tasks](https://huggingface.co/datasets/pilipolio/chess-puzzle-tasks) - Multi-task dataset with board images generated from 1000 Lichess puzzles (4992 train / 554 test examples). Task distribution: puzzle solving, ASCII board rendering, legal moves/captures listing, piece positions.
+**Datasets:**
+- [pilipolio/chess-puzzle-tasks](https://huggingface.co/datasets/pilipolio/chess-puzzle-tasks) - Lichess puzzles with multiple task types (puzzle solving, ASCII board, legal moves/captures, piece positions)
+- [pilipolio/chess-toy-tasks](https://huggingface.co/datasets/pilipolio/chess-toy-tasks) - Synthetic toy exercises (capture sequences, movement paths, FEN/piece-list conversions, UCI legal moves)
+- [pilipolio/chess-mixed-tasks](https://huggingface.co/datasets/pilipolio/chess-mixed-tasks) - Combination of puzzle and toy tasks for curriculum learning
 
 **Dataset Preparation:**
 
@@ -65,12 +68,25 @@ Experimental module for fine-tuning small LLMs on chess puzzles using SFT with L
 # Install dependencies (requires system cairo library: brew install cairo)
 uv sync --group prepare-data
 
-# Create puzzle dataset with board images and push to HuggingFace Hub
-HF_TOKEN=your-token puzzles-trainer materialize \
+# Generate puzzle dataset from Lichess puzzles
+HF_TOKEN=your-token puzzles-trainer generate-samples \
+    --source puzzle \
     --sample-size 1000 \
     --max-rating 1500 \
-    --push-to-hub \
-    --dataset-id your-username/chess-puzzle-tasks
+    --push-to-hub
+
+# Generate toy curriculum (synthetic exercises)
+HF_TOKEN=your-token puzzles-trainer generate-samples \
+    --source toy \
+    --sample-size 500 \
+    --push-to-hub
+
+# Generate mixed dataset (70% puzzle, 30% toy by default)
+HF_TOKEN=your-token puzzles-trainer generate-samples \
+    --source mixed \
+    --sample-size 500 \
+    --toy-ratio 0.3 \
+    --push-to-hub
 ```
 
 **LLM Evaluation:**
