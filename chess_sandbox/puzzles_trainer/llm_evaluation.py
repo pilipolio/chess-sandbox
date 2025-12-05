@@ -75,7 +75,7 @@ async def run_evaluation(
     examples: list[dict[str, str]] = [dict(ex) for ex in dataset]  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
 
     model = PuzzleModel(model_name=model_name)
-    eval_name = f"chess-puzzles:{model_name}"
+    eval_name = f"{dataset.info.dataset_name}-{len(examples)}:{model_name}"
     evaluation = weave.Evaluation(
         name=eval_name,
         dataset=examples,  # pyright: ignore[reportArgumentType]
