@@ -4,12 +4,14 @@ from pathlib import Path
 
 import click
 import torch
+from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 DEFAULT_OUTPUT_MODEL_ID = "pilipolio/chess-puzzle-sft"
+DEFAULT_DATASET_ID = "pilipolio/chess-mixed-tasks"
 
 
 def get_device() -> str:
@@ -125,6 +127,7 @@ def get_training_config(
 def train(
     model_id: str = DEFAULT_MODEL,
     output_model_id: str | None = None,
+    dataset_id: str = DEFAULT_DATASET_ID,
     use_4bit: bool = False,
     max_steps: int | None = None,
     eval_steps: int | None = None,
@@ -133,7 +136,6 @@ def train(
 ) -> None:
     """Train a chess puzzle SFT model."""
     from chess_sandbox.puzzles_trainer.callbacks import ChessValidationCallback
-    from chess_sandbox.puzzles_trainer.dataset import load_puzzle_dataset
 
     model_short_name = model_id.split("/")[-1].lower()
     output_model_id = output_model_id or f"{DEFAULT_OUTPUT_MODEL_ID}-{model_short_name}"
@@ -142,17 +144,17 @@ def train(
     if wandb_project and not wandb_run_name:
         wandb_run_name = model_short_name
 
-    # Let TRL/Trainer handle wandb initialization via report_to="wandb"
-    # if wandb_project:
-    #     import wandb
-    #     wandb.init(project=wandb_project, name=wandb_run_name)
     if wandb_project:
         import os
 
         os.environ["WANDB_PROJECT"] = wandb_project
 
     model, tokenizer = load_model_and_tokenizer(model_id, use_4bit=use_4bit)
-    train_dataset, test_dataset = load_puzzle_dataset()
+
+    print(f"Loading dataset from Hub: {dataset_id}")
+    dataset_dict = load_dataset(dataset_id)
+    train_dataset = dataset_dict["train"]
+    test_dataset = dataset_dict["test"]
     lora_config = get_lora_config()
     training_config = get_training_config(
         output_model_id,
@@ -215,6 +217,12 @@ def main() -> None:
     default="Qwen/Qwen3-0.6B",
     help="HuggingFace model ID (default: Qwen/Qwen3-0.6B)",
 )
+@click.option(
+    "--dataset-id",
+    type=str,
+    default=DEFAULT_DATASET_ID,
+    help=f"HuggingFace dataset ID (default: {DEFAULT_DATASET_ID})",
+)
 @click.option("--use-4bit", is_flag=True, help="Use 4-bit quantization (CUDA only)")
 @click.option("--max-steps", type=int, default=None, help="Max training steps (for testing)")
 @click.option("--eval-steps", type=int, default=None, help="Eval every N steps (default: 100)")
@@ -223,6 +231,7 @@ def main() -> None:
 @click.option("--wandb-run-name", type=str, default=None, help="W&B run name (defaults to model name)")
 def train_command(
     model_id: str,
+    dataset_id: str,
     use_4bit: bool,
     max_steps: int | None,
     eval_steps: int | None,
@@ -234,74 +243,13 @@ def train_command(
     train(
         model_id=model_id,
         output_model_id=output_model_id,
+        dataset_id=dataset_id,
         use_4bit=use_4bit,
         max_steps=max_steps,
         eval_steps=eval_steps,
         wandb_project=wandb_project,
         wandb_run_name=wandb_run_name,
     )
-
-
-@main.command("generate-curriculum")
-@click.option("--capture-exercises", type=int, default=100, help="Number of capture exercises")
-@click.option("--movement-exercises", type=int, default=100, help="Number of movement exercises")
-@click.option("--include-representation/--no-representation", default=True, help="Include representation tasks")
-@click.option("--seed", type=int, default=42, help="Random seed")
-@click.option("--output", type=click.Path(), required=True, help="Output JSONL file path")
-@click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
-@click.option("--dataset-id", type=str, default=None, help="HuggingFace dataset ID for push")
-def generate_curriculum_command(
-    capture_exercises: int,
-    movement_exercises: int,
-    include_representation: bool,
-    seed: int,
-    output: str,
-    push_to_hub: bool,
-    dataset_id: str | None,
-) -> None:
-    """Generate synthetic toy chess curriculum dataset."""
-    import json
-
-    from datasets import Dataset
-
-    from chess_sandbox.puzzles_trainer.toy_curriculum import create_toy_curriculum
-
-    print("Generating toy curriculum...")
-    print(f"  Capture exercises: {capture_exercises}")
-    print(f"  Movement exercises: {movement_exercises}")
-    print(f"  Include representation tasks: {include_representation}")
-    print(f"  Seed: {seed}")
-
-    curriculum = create_toy_curriculum(
-        capture_exercises=capture_exercises,
-        movement_exercises=movement_exercises,
-        include_representation=include_representation,
-        seed=seed,
-    )
-
-    print(f"\nGenerated {len(curriculum)} total tasks")
-
-    task_counts: dict[str, int] = {}
-    for ex in curriculum:
-        task_type = ex.get("task_type", "unknown")
-        task_counts[task_type] = task_counts.get(task_type, 0) + 1
-    print(f"Task distribution: {task_counts}")
-
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, "w") as f:
-        for item in curriculum:
-            f.write(json.dumps(item) + "\n")
-
-    print(f"\nSaved to: {output_path}")
-
-    if push_to_hub:
-        if not dataset_id:
-            raise click.UsageError("--dataset-id required when using --push-to-hub")
-        dataset = Dataset.from_list(curriculum)
-        dataset.push_to_hub(dataset_id)
-        print(f"Pushed dataset to: https://huggingface.co/datasets/{dataset_id}")
 
 
 if __name__ == "__main__":
