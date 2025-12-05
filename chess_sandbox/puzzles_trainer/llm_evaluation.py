@@ -36,14 +36,19 @@ def evaluate_example(client: OpenAI, model: str, question: str, reasoning_effort
     """Get model prediction for a question."""
     kwargs: dict[str, object] = {
         "model": model,
-        "messages": [{"role": "user", "content": question}],
+        "input": question,
     }
     if reasoning_effort:
         kwargs["reasoning"] = {"effort": reasoning_effort}
 
-    response = client.chat.completions.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
-    content = response.choices[0].message.content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    return content.strip() if content else ""  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    response = client.responses.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
+
+    for item in response.output:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if item.type == "message":  # pyright: ignore[reportUnknownMemberType]
+            for content in item.content:  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                if content.type == "output_text":  # pyright: ignore[reportUnknownMemberType]
+                    return content.text.strip()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return ""
 
 
 def run_evaluation(
