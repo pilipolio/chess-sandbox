@@ -15,6 +15,7 @@ from chess_sandbox.puzzles_trainer.prompts import (
     build_ascii_board_prompt,
     build_concept_detection_prompt,
     build_legal_captures_prompt,
+    build_piece_captures_prompt,
     build_puzzle_prompt,
 )
 
@@ -158,6 +159,9 @@ class ChessValidationCallback(TrainerCallback):
                 question = build_concept_detection_prompt(fen)
             elif task_type == "legal_captures":
                 question = build_legal_captures_prompt(fen)
+            elif task_type == "piece_captures":
+                square = example.get("square", "")
+                question = build_piece_captures_prompt(fen, square)
             else:
                 question = example.get("question", "")
                 if not question:

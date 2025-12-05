@@ -10,12 +10,17 @@ from chess_sandbox.puzzles_trainer.prompts import (
     build_ascii_board_prompt,
     build_concept_detection_prompt,
     build_legal_captures_prompt,
+    build_legal_moves_prompt,
+    build_piece_captures_prompt,
+    build_piece_positions_prompt,
     build_puzzle_prompt,
 )
 
 DATASET_ID = "pilipolio/lichess-puzzles-solutions"
 
-TaskType = Literal["puzzle", "ascii_board", "legal_moves", "legal_captures", "concept_detection", "piece_positions"]
+TaskType = Literal[
+    "puzzle", "ascii_board", "legal_moves", "legal_captures", "piece_captures", "concept_detection", "piece_positions"
+]
 
 
 def format_puzzle(example: dict) -> dict:
@@ -78,9 +83,7 @@ def format_legal_moves(example: dict) -> dict | None:
         if moves:
             square_name = chess.square_name(square)
             san_moves = ", ".join(board.san(m) for m in moves)
-
-            prompt = f"""List all legal moves for the piece on {square_name} in this position.
-FEN: {fen}"""
+            prompt = build_legal_moves_prompt(fen, square_name)
 
             return {
                 "messages": [
@@ -89,6 +92,9 @@ FEN: {fen}"""
                 ],
                 "task_type": "legal_moves",
                 "fen": fen,
+                "square": square_name,
+                "question": prompt,
+                "answer": san_moves,
             }
 
     return None
@@ -120,6 +126,48 @@ def format_legal_captures(example: dict) -> dict | None:
         "question": prompt,
         "answer": san_captures,
     }
+
+
+def format_piece_captures(example: dict) -> dict | None:
+    """Format piece captures task - captures for a specific piece.
+
+    Returns None if no piece has captures available.
+    """
+    fen = example["fen"]
+    board = chess.Board(fen)
+
+    piece_squares = [
+        sq
+        for sq in chess.SQUARES
+        if board.piece_at(sq) and board.piece_at(sq).color == board.turn  # pyright: ignore[reportOptionalMemberAccess]
+    ]
+
+    if not piece_squares:
+        return None
+
+    random.shuffle(piece_squares)
+
+    for square in piece_squares:
+        captures = [m for m in board.legal_moves if m.from_square == square and board.is_capture(m)]
+
+        if captures:
+            square_name = chess.square_name(square)
+            san_captures = ", ".join(board.san(m) for m in captures)
+            prompt = build_piece_captures_prompt(fen, square_name)
+
+            return {
+                "messages": [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": san_captures},
+                ],
+                "task_type": "piece_captures",
+                "fen": fen,
+                "square": square_name,
+                "question": prompt,
+                "answer": san_captures,
+            }
+
+    return None
 
 
 def format_concept_detection(example: dict) -> dict:
@@ -160,9 +208,7 @@ def format_piece_positions(example: dict) -> dict:
     black_pieces.sort(key=lambda p: ("KQRBNP".index(p[0]), p[1:]))
 
     output = f"White: {', '.join(white_pieces)}\nBlack: {', '.join(black_pieces)}"
-
-    prompt = f"""List all pieces and their positions from this FEN.
-FEN: {fen}"""
+    prompt = build_piece_positions_prompt(fen)
 
     return {
         "messages": [
@@ -171,6 +217,8 @@ FEN: {fen}"""
         ],
         "task_type": "piece_positions",
         "fen": fen,
+        "question": prompt,
+        "answer": output,
     }
 
 
@@ -194,6 +242,10 @@ def create_mixed_dataset(dataset: Dataset) -> list[dict]:
         legal_captures_example = format_legal_captures(example_dict)
         if legal_captures_example:
             examples.append(legal_captures_example)
+
+        piece_captures_example = format_piece_captures(example_dict)
+        if piece_captures_example:
+            examples.append(piece_captures_example)
 
     random.shuffle(examples)
     return examples

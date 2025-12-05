@@ -94,13 +94,103 @@ CAPTURES_EXAMPLE_ANSWER = "Bxf7+"
 
 
 def build_legal_captures_prompt(fen: str) -> str:
-    """Build a legal captures prompt with example."""
+    """Build a legal captures prompt with example.
+
+    >>> prompt = build_legal_captures_prompt("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    >>> "List all legal captures" in prompt
+    True
+    >>> "FEN: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" in prompt
+    True
+    """
     return f"""List all legal captures in this position.
 Respond with ONLY the captures in SAN notation, comma-separated. If no captures, respond "none".
 
 Example:
 FEN: {CAPTURES_EXAMPLE_FEN}
 Answer: {CAPTURES_EXAMPLE_ANSWER}
+
+FEN: {fen}
+Answer:"""
+
+
+PIECE_CAPTURES_EXAMPLE_FEN = "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
+PIECE_CAPTURES_EXAMPLE_PIECE = "c4"
+PIECE_CAPTURES_EXAMPLE_ANSWER = "Bxf7+"
+
+
+LEGAL_MOVES_EXAMPLE_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+LEGAL_MOVES_EXAMPLE_PIECE = "b1"
+LEGAL_MOVES_EXAMPLE_ANSWER = "Na3, Nc3"
+
+
+def build_legal_moves_prompt(fen: str, square: str) -> str:
+    """Build a legal moves prompt with example.
+
+    >>> prompt = build_legal_moves_prompt("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "g8")
+    >>> "List all legal moves" in prompt
+    True
+    >>> "Piece on: g8" in prompt
+    True
+    """
+    return f"""List all legal moves for the piece on {square} in this position.
+Respond with ONLY the moves in SAN notation, comma-separated.
+
+Example:
+FEN: {LEGAL_MOVES_EXAMPLE_FEN}
+Piece on: {LEGAL_MOVES_EXAMPLE_PIECE}
+Answer: {LEGAL_MOVES_EXAMPLE_ANSWER}
+
+FEN: {fen}
+Piece on: {square}
+Answer:"""
+
+
+def build_piece_captures_prompt(fen: str, square: str) -> str:
+    """Build a piece captures prompt with example.
+
+    >>> fen = "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
+    >>> prompt = build_piece_captures_prompt(fen, "c4")
+    >>> "Piece on: c4" in prompt
+    True
+    >>> "List all captures" in prompt
+    True
+    """
+    return f"""List all captures the piece on {square} can make.
+Respond with ONLY the captures in SAN notation, comma-separated. If no captures, respond "none".
+
+Example:
+FEN: {PIECE_CAPTURES_EXAMPLE_FEN}
+Piece on: {PIECE_CAPTURES_EXAMPLE_PIECE}
+Answer: {PIECE_CAPTURES_EXAMPLE_ANSWER}
+
+FEN: {fen}
+Piece on: {square}
+Answer:"""
+
+
+PIECE_POSITIONS_EXAMPLE_FEN = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+PIECE_POSITIONS_EXAMPLE_OUTPUT = (
+    "White: Ke1, Qd1, Ra1, Rh1, Bc1, Bf1, Nb1, Ng1, Pa2, Pb2, Pc2, Pd2, Pe4, Pf2, Pg2, Ph2\n"
+    "Black: Ke8, Qd8, Ra8, Rh8, Bc8, Bf8, Nb8, Ng8, Pa7, Pb7, Pc7, Pd7, Pe7, Pf7, Pg7, Ph7"
+)
+
+
+def build_piece_positions_prompt(fen: str) -> str:
+    """Build a piece positions prompt with example.
+
+    >>> prompt = build_piece_positions_prompt("8/8/8/4k3/8/8/8/4K3 w - - 0 1")
+    >>> "List all pieces" in prompt
+    True
+    >>> "White: Ke1" in prompt
+    True
+    """
+    return f"""List all pieces and their positions from this FEN.
+Format: "White: pieces" then "Black: pieces", sorted by piece value (K, Q, R, B, N, P).
+
+Example:
+FEN: {PIECE_POSITIONS_EXAMPLE_FEN}
+Answer:
+{PIECE_POSITIONS_EXAMPLE_OUTPUT}
 
 FEN: {fen}
 Answer:"""
