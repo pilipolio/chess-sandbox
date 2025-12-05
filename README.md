@@ -1,6 +1,6 @@
 # chess-sandbox
 
-Implements research ideas for chess commentary generation in a production-grade ML/AI engineering architecture.
+Implements research ideas for chess commentary generation in a lightweight production-grade ML/AI engineering architecture.
 
 ## Research Context
 
@@ -18,7 +18,7 @@ Our implementation extends this approach with a key distinction:
 - **Two-stage labelling pipeline**: regex pattern matching + LLM validation to extract concepts from annotated PGN games in the [Gameknot dataset](https://huggingface.co/datasets/Waterhorse/chess_data) introduced by [Feng et al. (2023) - ChessGPT](https://arxiv.org/html/2306.09200v2)
 - **Annotated Dataset**: [97,995 labelled positions](https://huggingface.co/datasets/pilipolio/chess-positions-concepts) (28K train, 70K test) available on HuggingFace Hub
 
-This enables concept detection grounded in how chess players naturally describe positions, rather than being constrained to engine evaluation heuristics.
+This enables concept detection and commentary generation grounded in how chess players naturally describe positions, rather than being constrained to engine evaluation heuristics.
 
 **Key Features:**
 - Interactive Claude skill for analyzing chess positions in natural language
