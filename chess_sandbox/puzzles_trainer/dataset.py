@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal
 
 import chess
+import click
 from datasets import Dataset, DatasetDict, Features, Value, load_dataset
 from datasets import Image as HFImage
 from tqdm import tqdm
@@ -609,3 +610,83 @@ def materialize_task_dataset(
     print(f"Task distribution (first 1000): {task_counts}")
 
     return DatasetDict({"train": train_dataset, "test": test_dataset})
+
+
+DEFAULT_DATASET_IDS = {
+    "puzzle": "pilipolio/chess-puzzle-tasks",
+    "toy": "pilipolio/chess-toy-tasks",
+    "mixed": "pilipolio/chess-mixed-tasks",
+}
+
+
+@click.command("generate-task-dataset")
+@click.option("--sample-size", type=int, default=1000, help="Number of puzzles/exercises to generate")
+@click.option("--test-split", type=float, default=0.1, help="Fraction for test set")
+@click.option("--seed", type=int, default=42, help="Random seed")
+@click.option("--image-size", type=int, default=240, help="Board image size in pixels")
+@click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity (puzzle/mixed)")
+@click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating (puzzle/mixed)")
+@click.option("--themes", type=str, default=None, help="Comma-separated theme filter (puzzle/mixed)")
+@click.option(
+    "--source",
+    type=click.Choice(["puzzle", "toy", "mixed"]),
+    default="puzzle",
+    help="Data source: puzzle (Lichess), toy (synthetic), or mixed",
+)
+@click.option("--toy-ratio", type=float, default=0.3, help="Fraction of toy exercises when source=mixed")
+@click.option(
+    "--include-toy-representation/--no-toy-representation",
+    default=True,
+    help="Include FEN/piece-list conversion tasks for toy exercises",
+)
+@click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
+@click.option(
+    "--dataset-id",
+    type=str,
+    default=None,
+    help="HuggingFace dataset ID (default: source-specific ID)",
+)
+def main(
+    sample_size: int,
+    test_split: float,
+    seed: int,
+    image_size: int,
+    min_popularity: int,
+    max_rating: int | None,
+    themes: str | None,
+    source: str,
+    toy_ratio: float,
+    include_toy_representation: bool,
+    push_to_hub: bool,
+    dataset_id: str | None,
+) -> None:
+    """Generate chess task dataset with board images.
+
+    Sources:
+      - puzzle: Lichess puzzles with multiple task types (SAN moves)
+      - toy: Synthetic toy exercises (capture sequences, movement paths, UCI moves)
+      - mixed: Combination of both (use --toy-ratio to control mix)
+    """
+    themes_tuple = tuple(themes.split(",")) if themes else None
+
+    dataset_dict = materialize_task_dataset(
+        sample_size=sample_size,
+        test_split=test_split,
+        seed=seed,
+        image_size=image_size,
+        min_popularity=min_popularity,
+        max_rating=max_rating,
+        themes=themes_tuple,
+        source=source,  # type: ignore[arg-type]
+        toy_ratio=toy_ratio,
+        include_toy_representation=include_toy_representation,
+    )
+
+    if push_to_hub:
+        hub_dataset_id = dataset_id or DEFAULT_DATASET_IDS[source]
+        dataset_dict.push_to_hub(hub_dataset_id)
+        print(f"Pushed dataset to: https://huggingface.co/datasets/{hub_dataset_id}")
+
+
+if __name__ == "__main__":
+    main()

@@ -44,6 +44,7 @@ dependencies = [
     "scikit-learn-stubs>=0.0.3",
     "joblib-stubs>=1.5.2.0.20250831",
     "jinja2>=3.1.6",
+    "weave>=0.51.0",
 ]
 
 [dependency-groups]
@@ -85,6 +86,7 @@ include = ["chess_sandbox*"]
 
 [project.scripts]
 puzzles-trainer = "chess_sandbox.puzzles_trainer.trainer:main"
+puzzles-generate-task-dataset = "chess_sandbox.puzzles_trainer.dataset:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
