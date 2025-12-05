@@ -32,7 +32,8 @@ A two-stage training pipeline combining Supervised Fine-Tuning (SFT) with Group 
 | Task | Input | Output | Purpose |
 |------|-------|--------|---------|
 | Board ↔ FEN | ASCII board diagram | FEN string (or vice versa) | Board visualization and spatial reasoning |
-| Legal moves | FEN position | List of legal moves | Learn chess rules implicitly |
+| Legal moves | FEN position | List of legal moves for a piece | Learn chess rules implicitly |
+| Legal captures | FEN position | List of all legal captures | Identify tactical opportunities |
 | Mate-in-1 | FEN + "Find checkmate" | Single move (SAN) | Tactical pattern recognition |
 | Puzzle solving | FEN + puzzle prompt | Move sequence | Multi-step calculation |
 | Best move | FEN + context | Single best move | Position evaluation |
@@ -73,6 +74,51 @@ trainer = SFTTrainer(
     model=model,
     args=SFTConfig(output_dir="./chess-sft", ...),
     train_dataset=dataset["train"].map(format_puzzle),
+)
+```
+
+### Training Configuration
+
+**GPU Memory Estimates (QLoRA)**
+
+| Model | VRAM | Fits on |
+|-------|------|---------|
+| Qwen3-14B | ~14 GB | T4/A10G |
+| Qwen3-4B | ~7 GB | Any GPU |
+| Llama-3.1-8B | ~11 GB | T4/A10G |
+| Llama-3.2-3B | ~5 GB | Any GPU |
+
+*Source: [TRL SFT notebook](https://github.com/huggingface/trl/blob/794d87ff8d46fc41a07ffe9fb96771fee75922d4/examples/notebooks/sft_trl_lora_qlora.ipynb)*
+
+**Recommended SFTConfig for A10G (24GB)**
+
+```python
+SFTConfig(
+    per_device_train_batch_size=8,
+    gradient_accumulation_steps=2,
+    learning_rate=2e-4,
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.1,
+    max_length=512,
+    packing=True,
+    gradient_checkpointing=True,
+    fp16=True,
+)
+```
+
+**Memory-Saving Options**
+
+For larger models or constrained GPUs:
+
+```python
+# 8-bit optimizer (reduces optimizer states ~75%)
+optim="paged_adamw_8bit"
+
+# QLoRA with double quantization
+BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
 )
 ```
 
@@ -303,3 +349,13 @@ The chess-sandbox codebase provides useful components:
 - [Demystifying Reasoning Models (GRPO deep-dive)](https://cameronrwolfe.substack.com/p/demystifying-reasoning-models)
 - [Why GRPO is Important](https://ghost.oxen.ai/why-grpo-is-important-and-how-it-works/)
 - [PPO & GRPO comparison](https://yugeten.github.io/posts/2025/01/ppogrpo/)
+
+### Examples
+
+Mostly notebooks:
+ - [SFT with LoRA/QLoRA using TRL](https://github.com/huggingface/trl/blob/794d87ff8d46fc41a07ffe9fb96771fee75922d4/examples/notebooks/sft_trl_lora_qlora.ipynb) on a range models (Qwen3, ...) 
+
+ - [GRPO Qwen3-VL with QLoRA using TRL](https://github.com/huggingface/trl/blob/794d87ff8d46fc41a07ffe9fb96771fee75922d4/examples/notebooks/grpo_qwen3_vl.ipynb) on multi-modal math problems from [https://huggingface.co/datasets/lmms-lab/multimodal-open-r1-8k-verified]
+
+ - [GRPO Ministral-3 with QLoRA using TRL]( https://github.com/huggingface/trl/blob/794d87ff8d46fc41a07ffe9fb96771fee75922d4/examples/notebooks/grpo_ministral3_vl.ipynb#L4)
+

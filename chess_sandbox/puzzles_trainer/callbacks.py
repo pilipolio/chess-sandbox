@@ -11,6 +11,13 @@ import chess
 from transformers import PreTrainedTokenizerBase, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
 from chess_sandbox.puzzles_trainer.inference import batch_generate
+from chess_sandbox.puzzles_trainer.prompts import (
+    build_ascii_board_prompt,
+    build_concept_detection_prompt,
+    build_legal_captures_prompt,
+    build_piece_captures_prompt,
+    build_puzzle_prompt,
+)
 
 if TYPE_CHECKING:
     from datasets import Dataset  # pyright: ignore[reportMissingTypeStubs]
@@ -113,19 +120,20 @@ class ChessValidationCallback(TrainerCallback):
             table_data.append(
                 [
                     r.get("task_type", ""),
-                    r.get("fen", "")[:40],
-                    r.get("predicted", "")[:60],
-                    r.get("expected", "")[:60],
+                    r.get("fen", ""),
+                    r.get("prompt", ""),
+                    r.get("predicted", ""),
+                    r.get("expected", ""),
                     r.get("exact_match", False),
                 ]
             )
 
         table = wandb.Table(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-            columns=["Task", "FEN", "Predicted", "Expected", "Exact Match"],
+            columns=["Task", "FEN", "Prompt", "Predicted", "Expected", "Exact Match"],
             data=table_data,
         )
         print(f"Logging {json.dumps(table_data, indent=2)} examples to W&B")
-        wandb.log({"eval/examples": table})
+        wandb.log({"eval/examples": table})  # pyright: ignore[reportUnknownMemberType]
 
         print("Logged metrics and examples to W&B\n")
 
@@ -139,12 +147,27 @@ class ChessValidationCallback(TrainerCallback):
         # Build prompts using chat template
         prompts: list[str] = []
         for example in test_samples:
-            question = example.get("question", "")
-            if not question:
-                # Fall back to extracting from messages
-                messages = example.get("messages", [])
-                if messages and len(messages) > 0:
-                    question = messages[0].get("content", "")
+            task_type = example.get("task_type", "unknown")
+
+            fen = example.get("fen", "")
+
+            if task_type == "puzzle":
+                question = build_puzzle_prompt(fen)
+            elif task_type == "ascii_board":
+                question = build_ascii_board_prompt(fen)
+            elif task_type == "concept_detection":
+                question = build_concept_detection_prompt(fen)
+            elif task_type == "legal_captures":
+                question = build_legal_captures_prompt(fen)
+            elif task_type == "piece_captures":
+                square = example.get("square", "")
+                question = build_piece_captures_prompt(fen, square)
+            else:
+                question = example.get("question", "")
+                if not question:
+                    messages = example.get("messages", [])
+                    if messages and len(messages) > 0:
+                        question = messages[0].get("content", "")
 
             chat_messages = [{"role": "user", "content": question}]
             prompt = self.tokenizer.apply_chat_template(chat_messages, tokenize=False, add_generation_prompt=True)  # pyright: ignore[reportUnknownMemberType]
@@ -162,10 +185,11 @@ class ChessValidationCallback(TrainerCallback):
 
         print("  Validating outputs...")
 
-        for example, output in zip(test_samples, all_outputs):
+        for example, output, prompt in zip(test_samples, all_outputs, prompts):
             task_type = example.get("task_type", "unknown")
             expected = self._get_expected(example)
             result = self._validate_output(task_type, example, output, expected)
+            result["prompt"] = prompt
             validation_results.append(result)
 
         return validation_results

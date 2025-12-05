@@ -1,7 +1,5 @@
 """CLI for chess puzzle SFT training."""
 
-from pathlib import Path
-
 import click
 
 from chess_sandbox.puzzles_trainer.trainer import DEFAULT_MODEL, train
@@ -9,7 +7,7 @@ from chess_sandbox.puzzles_trainer.trainer import DEFAULT_MODEL, train
 
 @click.command()
 @click.option(
-    "--model",
+    "--model-id",
     type=str,
     default=DEFAULT_MODEL,
     help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
@@ -17,22 +15,22 @@ from chess_sandbox.puzzles_trainer.trainer import DEFAULT_MODEL, train
 @click.option("--use-4bit", is_flag=True, help="Use 4-bit quantization (CUDA only)")
 @click.option("--max-steps", type=int, default=None, help="Max training steps (for testing)")
 @click.option("--eval-steps", type=int, default=None, help="Eval every N steps (default: 100)")
-@click.option("--output-dir", type=click.Path(path_type=Path), default=None, help="Output directory")
+@click.option("--output-model-id", type=str, default=None, help="Hub model ID (also saves locally)")
 @click.option("--wandb-project", type=str, default=None, help="W&B project name (enables W&B logging)")
 @click.option("--wandb-run-name", type=str, default=None, help="W&B run name (defaults to model name)")
 def main(
-    model: str,
+    model_id: str,
     use_4bit: bool,
     max_steps: int | None,
     eval_steps: int | None,
-    output_dir: Path | None,
+    output_model_id: str | None,
     wandb_project: str | None,
     wandb_run_name: str | None,
 ) -> None:
     """Train a chess puzzle SFT model using LoRA fine-tuning."""
     train(
-        model_id=model,
-        output_dir=output_dir,
+        model_id=model_id,
+        output_model_id=output_model_id,
         use_4bit=use_4bit,
         max_steps=max_steps,
         eval_steps=eval_steps,
