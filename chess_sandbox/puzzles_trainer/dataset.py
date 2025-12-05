@@ -11,7 +11,6 @@ from datasets import Dataset, DatasetDict, Features, Value, load_dataset
 from datasets import Image as HFImage
 from tqdm import tqdm
 
-from chess_sandbox.puzzles_trainer.helper import generate_board_image
 from chess_sandbox.puzzles_trainer.prompts import (
     build_ascii_board_prompt,
     build_concept_detection_prompt,
@@ -550,6 +549,8 @@ def materialize_task_dataset(
 
     train_tasks = all_tasks[:-test_size] if test_size > 0 else all_tasks
     test_tasks = all_tasks[-test_size:] if test_size > 0 else []
+
+    from chess_sandbox.puzzles_trainer.helper import generate_board_image
 
     all_examples = train_tasks + test_tasks
     unique_fens = list({ex["fen"] for ex in all_examples})
