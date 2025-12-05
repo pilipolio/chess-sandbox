@@ -29,14 +29,21 @@ def normalize_answer(answer: str) -> str:
     return answer.strip().lower()
 
 
-def evaluate_example(client: OpenAI, model: str, question: str) -> str:
+ReasoningEffort = str  # "low" | "medium" | "high"
+
+
+def evaluate_example(client: OpenAI, model: str, question: str, reasoning_effort: ReasoningEffort | None = None) -> str:
     """Get model prediction for a question."""
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": question}],
-    )
-    content = response.choices[0].message.content
-    return content.strip() if content else ""
+    kwargs: dict[str, object] = {
+        "model": model,
+        "messages": [{"role": "user", "content": question}],
+    }
+    if reasoning_effort:
+        kwargs["reasoning"] = {"effort": reasoning_effort}
+
+    response = client.chat.completions.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
+    content = response.choices[0].message.content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return content.strip() if content else ""  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def run_evaluation(
@@ -44,6 +51,7 @@ def run_evaluation(
     model: str = DEFAULT_MODEL,
     sample_size: int | None = None,
     split: str = "test",
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> list[EvalResult]:
     """Run evaluation on dataset and return results."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -54,7 +62,10 @@ def run_evaluation(
     if sample_size:
         dataset = dataset.select(range(min(sample_size, len(dataset))))  # pyright: ignore[reportUnknownMemberType]
 
-    print(f"Evaluating {len(dataset)} examples with model: {model}")
+    model_desc = model
+    if reasoning_effort:
+        model_desc += f" (reasoning: {reasoning_effort})"
+    print(f"Evaluating {len(dataset)} examples with model: {model_desc}")
 
     results: list[EvalResult] = []
 
@@ -66,7 +77,7 @@ def run_evaluation(
         fen = ex["fen"]
 
         try:
-            predicted = evaluate_example(client, model, question)
+            predicted = evaluate_example(client, model, question, reasoning_effort)
         except Exception as e:
             print(f"\nError evaluating example: {e}")
             predicted = ""
@@ -137,12 +148,19 @@ def print_summary(results: list[EvalResult]) -> None:
 @click.option("--model", default=DEFAULT_MODEL, help="OpenAI model name")
 @click.option("--sample-size", type=int, default=None, help="Limit number of examples")
 @click.option("--split", default="test", help="Dataset split to evaluate")
+@click.option(
+    "--reasoning-effort",
+    type=click.Choice(["low", "medium", "high"]),
+    default=None,
+    help="Reasoning effort for thinking models",
+)
 @click.option("--output", type=str, default=None, help="Output path for JSONL results")
 def main(
     dataset_id: str,
     model: str,
     sample_size: int | None,
     split: str,
+    reasoning_effort: str | None,
     output: str | None,
 ) -> None:
     """Evaluate an OpenAI model on the puzzle task dataset."""
@@ -151,6 +169,7 @@ def main(
         model=model,
         sample_size=sample_size,
         split=split,
+        reasoning_effort=reasoning_effort,
     )
 
     print_summary(results)
