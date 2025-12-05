@@ -31,5 +31,8 @@ class Settings(BaseSettings):
     # Git settings
     GIT_COMMIT: str = ""
 
+    # LLM API settings
+    OPENROUTER_API_KEY: str = ""
+
 
 settings = Settings()

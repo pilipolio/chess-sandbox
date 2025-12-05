@@ -407,7 +407,7 @@ def _load_toy_tasks(
     include_representation: bool = True,
 ) -> list[dict[str, Any]]:
     """Load toy curriculum tasks."""
-    print(f"Generating {num_exercises} toy exercises (capture + movement)...")
+    print(f"Generating {num_exercises} toy exercises (capture , movement...)")
     # Split evenly between capture and movement
     capture_count = num_exercises // 2
     movement_count = num_exercises - capture_count
@@ -492,7 +492,7 @@ def load_puzzle_dataset(
     return train_dataset, test_dataset
 
 
-def materialize_task_dataset(
+def generate_task_dataset(
     sample_size: int = 1000,
     test_split: float = 0.1,
     seed: int = 42,
@@ -669,7 +669,7 @@ def main(
     """
     themes_tuple = tuple(themes.split(",")) if themes else None
 
-    dataset_dict = materialize_task_dataset(
+    dataset_dict = generate_task_dataset(
         sample_size=sample_size,
         test_split=test_split,
         seed=seed,
