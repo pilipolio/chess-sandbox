@@ -84,8 +84,7 @@ package = true
 include = ["chess_sandbox*"]
 
 [project.scripts]
-puzzles-trainer = "chess_sandbox.puzzles_trainer.cli:main"
-prepare-puzzle-dataset = "chess_sandbox.puzzles_trainer.prepare_dataset:main"
+puzzles-trainer = "chess_sandbox.puzzles_trainer.trainer:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
@@ -146,6 +145,7 @@ exclude = [
     "**/puzzles_trainer/trainer.py",                     # SFT training with TRL
     "**/puzzles_trainer/dataset.py",                     # Dataset loading with HF datasets
     "**/puzzles_trainer/prepare_dataset.py",             # Dataset prep with HF datasets + cairosvg
+    "**/puzzles_trainer/helper.py",                      # Board image generation with cairosvg
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 

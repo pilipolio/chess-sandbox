@@ -57,14 +57,47 @@ This enables concept detection and commentary generation grounded in how chess p
 
 Experimental module for fine-tuning small LLMs on chess puzzles using SFT with LoRA. See [docs/chess-llm-finetuning.md](docs/chess-llm-finetuning.md) for the full approach.
 
+**Datasets:**
+- [pilipolio/chess-puzzle-tasks](https://huggingface.co/datasets/pilipolio/chess-puzzle-tasks) - Lichess puzzles with multiple task types (puzzle solving, ASCII board, legal moves/captures, piece positions)
+- [pilipolio/chess-toy-tasks](https://huggingface.co/datasets/pilipolio/chess-toy-tasks) - Synthetic toy exercises (capture sequences, movement paths, FEN/piece-list conversions, UCI legal moves)
+- [pilipolio/chess-mixed-tasks](https://huggingface.co/datasets/pilipolio/chess-mixed-tasks) - Combination of puzzle and toy tasks for curriculum learning
+
 **Dataset Preparation:**
 
 ```bash
 # Install dependencies (requires system cairo library: brew install cairo)
 uv sync --group prepare-data
 
-# Create puzzle dataset with board images
-uv run prepare-puzzle-dataset --sample-size 1000 --max-rating 1500 --push-to-hub
+# Generate puzzle dataset from Lichess puzzles
+HF_TOKEN=your-token puzzles-trainer generate-samples \
+    --source puzzle \
+    --sample-size 1000 \
+    --max-rating 1500 \
+    --push-to-hub
+
+# Generate toy curriculum (synthetic exercises)
+HF_TOKEN=your-token puzzles-trainer generate-samples \
+    --source toy \
+    --sample-size 500 \
+    --push-to-hub
+
+# Generate mixed dataset (70% puzzle, 30% toy by default)
+HF_TOKEN=your-token puzzles-trainer generate-samples \
+    --source mixed \
+    --sample-size 500 \
+    --toy-ratio 0.3 \
+    --push-to-hub
+```
+
+**LLM Evaluation:**
+
+```bash
+# Evaluate an OpenAI-compatible model on puzzle tasks
+uv run python -m chess_sandbox.puzzles_trainer.llm_evaluation \
+    --dataset-id pilipolio/lichess-puzzle-tasks \
+    --model gpt-4o-mini \
+    --sample-size 100 \
+    --output results.jsonl
 ```
 
 **Training on Modal:**
@@ -81,8 +114,8 @@ modal run chess_sandbox/puzzles_trainer/modal_pipeline.py::train \
 **Local Training:**
 
 ```bash
-uv sync --group sft
-uv run python -m chess_sandbox.puzzles_trainer.cli \
+uv sync --group sft --group prepare-data
+puzzles-trainer train \
     --model-id Qwen/Qwen3-0.6B \
     --max-steps 100 \
     --eval-steps 20
