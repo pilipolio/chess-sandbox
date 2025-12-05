@@ -69,20 +69,20 @@ Experimental module for fine-tuning small LLMs on chess puzzles using SFT with L
 uv sync --group prepare-data
 
 # Generate puzzle dataset from Lichess puzzles
-HF_TOKEN=your-token puzzles-generate-tasks-dataset generate-samples \
+HF_TOKEN=your-token puzzles-generate-task-dataset \
     --source puzzle \
     --sample-size 1000 \
     --max-rating 1500 \
     --push-to-hub
 
 # Generate toy curriculum (synthetic exercises)
-HF_TOKEN=your-token puzzles-generate-tasks-dataset generate-samples \
+HF_TOKEN=your-token puzzles-generate-task-dataset \
     --source toy \
     --sample-size 500 \
     --push-to-hub
 
 # Generate mixed dataset (70% puzzle, 30% toy by default)
-HF_TOKEN=your-token puzzles-generate-tasks-dataset generate-samples \
+HF_TOKEN=your-token puzzles-generate-task-dataset \
     --source mixed \
     --sample-size 500 \
     --toy-ratio 0.3 \
@@ -115,7 +115,7 @@ modal run chess_sandbox/puzzles_trainer/modal_pipeline.py::train \
 
 ```bash
 uv sync --group sft --group prepare-data
-puzzles-generate-tasks-dataset train \
+puzzles-trainer train \
     --model-id Qwen/Qwen3-0.6B \
     --max-steps 100 \
     --eval-steps 20
