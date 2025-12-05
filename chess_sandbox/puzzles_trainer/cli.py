@@ -2,15 +2,13 @@
 
 import click
 
-from chess_sandbox.puzzles_trainer.trainer import DEFAULT_MODEL, train
-
 
 @click.command()
 @click.option(
     "--model-id",
     type=str,
-    default=DEFAULT_MODEL,
-    help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
+    default="Qwen/Qwen3-0.6B",
+    help="HuggingFace model ID (default: Qwen/Qwen3-0.6B)",
 )
 @click.option("--use-4bit", is_flag=True, help="Use 4-bit quantization (CUDA only)")
 @click.option("--max-steps", type=int, default=None, help="Max training steps (for testing)")
@@ -28,7 +26,9 @@ def main(
     wandb_run_name: str | None,
 ) -> None:
     """Train a chess puzzle SFT model using LoRA fine-tuning."""
-    train(
+    from chess_sandbox.puzzles_trainer.trainer import train as train_model
+
+    train_model(
         model_id=model_id,
         output_model_id=output_model_id,
         use_4bit=use_4bit,
