@@ -39,8 +39,8 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "tqdm>=4.67.1",
     "scikit-learn>=1.7.2",
-    "torch>=2.7.0",  # CPU-only by default via pytorch-cpu index (see [tool.uv.sources])
-    "torchvision>=0.22.0,<0.24.0",  # https://github.com/astral-sh/uv/issues/16386
+    "torch>=2.7.0", # CPU-only by default via pytorch-cpu index (see [tool.uv.sources])
+    "torchvision>=0.22.0,<0.24.0", # https://github.com/astral-sh/uv/issues/16386
     "scikit-learn-stubs>=0.0.3",
     "joblib-stubs>=1.5.2.0.20250831",
     "jinja2>=3.1.6",
@@ -60,6 +60,11 @@ dev = [
     "ruff>=0.8.5",
     "types-tqdm>=4.67.0.20250809",
 ]
+prepare-data = [
+    "cairosvg>=2.8.2",
+    "datasets>=4.3.0",
+    "pillow>=12.0.0",
+]
 
 sft = [
     "transformers>=4.40.0",
@@ -67,7 +72,8 @@ sft = [
     "datasets>=2.18.0",
     "peft>=0.12.0",
     "accelerate>=0.30.0",
-    "bitsandbytes>=0.43.0; sys_platform == 'linux'",  # 4-bit quantization (Linux only)
+    "bitsandbytes>=0.43.0; sys_platform == 'linux'", # 4-bit quantization (Linux only)
+    "wandb==0.23.0",
 ]
 
 [tool.uv]
@@ -79,6 +85,7 @@ include = ["chess_sandbox*"]
 
 [project.scripts]
 puzzles-trainer = "chess_sandbox.puzzles_trainer.cli:main"
+prepare-puzzle-dataset = "chess_sandbox.puzzles_trainer.prepare_dataset:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
@@ -138,11 +145,12 @@ exclude = [
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
     "**/puzzles_trainer/trainer.py",                     # SFT training with TRL
     "**/puzzles_trainer/dataset.py",                     # Dataset loading with HF datasets
+    "**/puzzles_trainer/prepare_dataset.py",             # Dataset prep with HF datasets + cairosvg
 ]
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py"
+addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py --ignore=chess_sandbox/puzzles_trainer/prepare_dataset.py"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: marks tests as integration tests requiring Stockfish (deselect with '-m \"not integration\"')",
