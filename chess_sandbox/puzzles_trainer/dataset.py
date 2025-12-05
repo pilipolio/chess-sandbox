@@ -6,6 +6,8 @@ from typing import Literal
 import chess
 from datasets import Dataset, DatasetDict, load_dataset
 
+from chess_sandbox.puzzles_trainer.prompts import build_puzzle_prompt
+
 DATASET_ID = "pilipolio/lichess-puzzles-solutions"
 
 TaskType = Literal["puzzle", "ascii_board", "legal_moves", "concept_detection", "piece_positions"]
@@ -22,15 +24,18 @@ R N B Q K B N R"""
 
 
 def format_puzzle(example: dict) -> dict:
-    """Format puzzle as chat messages for SFT."""
+    """Format puzzle as chat messages for SFT with few-shot examples."""
+    fen = example["fen"]
+    prompt = build_puzzle_prompt(fen)
+
     return {
         "messages": [
-            {"role": "user", "content": example["question"]},
+            {"role": "user", "content": prompt},
             {"role": "assistant", "content": example["answer"]},
         ],
         "task_type": "puzzle",
-        "fen": example["fen"],
-        "question": example["question"],
+        "fen": fen,
+        "question": prompt,
         "answer": example["answer"],
     }
 
