@@ -94,7 +94,11 @@ def batch_generate(
         for i in range(0, len(prompts), batch_size):
             batch = prompts[i : i + batch_size]
 
+            # Use left-padding for decoder-only models during generation
+            original_padding_side = tokenizer.padding_side
+            tokenizer.padding_side = "left"
             inputs = tokenizer(batch, return_tensors="pt", padding=True, truncation=True)  # pyright: ignore[reportUnknownMemberType]
+            tokenizer.padding_side = original_padding_side
             inputs = {k: v.to(model.device) for k, v in inputs.items()}  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
 
             # Build logits processors

@@ -29,7 +29,7 @@ def pip_freeze():
 
 @app.function(  # type: ignore
     gpu="A10G",
-    timeout=7200,  # 2 hours
+    timeout=14400,  # 4 hours
     secrets=[modal.Secret.from_name("huggingface-read-write-secret"), modal.Secret.from_name("wandb")],  # type: ignore
 )
 def train(*arglist: str):

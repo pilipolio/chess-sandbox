@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import chess
+import torch
 from transformers import PreTrainedTokenizerBase, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
 from chess_sandbox.puzzles_trainer.inference import batch_generate
@@ -74,9 +74,10 @@ class ChessValidationCallback(TrainerCallback):
         was_training = model.training
         model.eval()
 
-        # Sample from all task types
+        # Randomly sample from all task types
         num_samples = min(self.num_validation_samples, len(self.test_dataset))
-        test_samples = self.test_dataset.select(range(num_samples))  # pyright: ignore[reportUnknownMemberType]
+        indices: list[int] = torch.randperm(len(self.test_dataset))[:num_samples].tolist()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        test_samples = self.test_dataset.select(indices)  # pyright: ignore[reportUnknownMemberType]
 
         validation_results = self._run_validation(model, test_samples)
 
@@ -132,10 +133,9 @@ class ChessValidationCallback(TrainerCallback):
             columns=["Task", "FEN", "Prompt", "Predicted", "Expected", "Exact Match"],
             data=table_data,
         )
-        print(f"Logging {json.dumps(table_data, indent=2)} examples to W&B")
         wandb.log({"eval/examples": table})  # pyright: ignore[reportUnknownMemberType]
 
-        print("Logged metrics and examples to W&B\n")
+        print("Logged metrics and examples table to W&B\n")
 
         if was_training:
             model.train()
