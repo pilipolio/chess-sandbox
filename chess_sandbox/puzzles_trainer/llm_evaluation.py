@@ -1,4 +1,4 @@
-"""LLM evaluation for chess puzzle tasks using OpenRouter API with Weave tracking."""
+"""LLM evaluation for chess puzzle tasks with Weave tracking."""
 
 import asyncio
 import os
@@ -14,12 +14,18 @@ load_dotenv()
 DEFAULT_DATASET_ID = "pilipolio/lichess-puzzle-tasks"
 DEFAULT_SAMPLE_SIZE = 10
 
-BENCHMARK_MODELS = [
-    "openai/gpt-oss-20b:free",
-    "mistralai/ministral-14b-2512",
-    "qwen/qwen3-32b",
-    "openai/gpt-5-mini",
-]
+MODAL_VLLM_URL = "https://pilipolio--chess-puzzle-vllm-serve-dev.modal.run/v1"
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+
+MODELS: dict[str, str] = {
+    "chess-puzzle": MODAL_VLLM_URL,
+    "openai/gpt-oss-20b:free": OPENROUTER_URL,
+    # "mistralai/ministral-14b-2512": OPENROUTER_URL,
+    "qwen/qwen3-32b": OPENROUTER_URL,
+    "openai/gpt-5-mini": OPENROUTER_URL,
+}
+
+BENCHMARK_MODELS = list(MODELS.keys())
 
 
 def normalize_answer(answer: str) -> str:
@@ -27,27 +33,33 @@ def normalize_answer(answer: str) -> str:
     return answer.strip().lower()
 
 
-def create_client(api_key: str | None = None) -> OpenAI:
-    """Create OpenRouter client."""
-    key = api_key or os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not key:
+def create_client(base_url: str) -> OpenAI:
+    """Create OpenAI-compatible client for the given endpoint."""
+    key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
+
+    if not key and base_url == OPENROUTER_URL:
         raise ValueError("Set OPENROUTER_API_KEY or OPENAI_API_KEY environment variable")
-    return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
+
+    return OpenAI(base_url=base_url, api_key=key or "dummy")
 
 
 class PuzzleModel(weave.Model):
     """Weave model wrapper for chess puzzle evaluation."""
 
     model_name: str
+    base_url: str
 
     @weave.op()
     def predict(self, question: str) -> str:
         """Get model prediction for a question."""
-        client = create_client()
+        client = create_client(self.base_url)
         kwargs: dict[str, object] = {
             "model": self.model_name,
             "messages": [{"role": "user", "content": question}],
         }
+        if self.base_url == MODAL_VLLM_URL:
+            kwargs["max_tokens"] = 256
+            kwargs["temperature"] = 0.7
 
         try:
             response = client.chat.completions.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
@@ -69,12 +81,15 @@ async def run_evaluation(
     model_name: str,
 ) -> dict[str, object]:
     """Run evaluation on dataset using Weave."""
-    model_desc = model_name
-    print(f"Evaluating {len(dataset)} examples with model: {model_desc}")
+    base_url = MODELS.get(model_name)
+    if not base_url:
+        raise ValueError(f"Unknown model: {model_name}. Available: {list(MODELS.keys())}")
+
+    print(f"Evaluating {len(dataset)} examples with model: {model_name}")
 
     examples: list[dict[str, str]] = [dict(ex) for ex in dataset]  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
 
-    model = PuzzleModel(model_name=model_name)
+    model = PuzzleModel(model_name=model_name, base_url=base_url)
     eval_name = f"{dataset.info.dataset_name}-{len(examples)}:{model_name}"
     evaluation = weave.Evaluation(
         name=eval_name,
@@ -155,9 +170,9 @@ def print_benchmark_comparison(all_results: dict[str, dict[str, object]]) -> Non
 @click.option("--model", default=None, help="Single model to evaluate")
 @click.option("--models", default=None, help="Comma-separated models for benchmark")
 @click.option("--benchmark", is_flag=True, help="Run full benchmark with default models")
-@click.option("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE, help="Number of examples to evaluate")
+@click.option("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE, help="Number of examples")
 @click.option("--split", default="test", help="Dataset split to evaluate")
-@click.option("--weave-project", default="chess-puzzles", help="Weave project name for tracking")
+@click.option("--weave-project", default="chess-puzzles", help="Weave project name")
 def main(
     dataset_id: str,
     model: str | None,
@@ -167,7 +182,7 @@ def main(
     split: str,
     weave_project: str,
 ) -> None:
-    """Evaluate LLM models on the puzzle task dataset via OpenRouter with Weave tracking."""
+    """Evaluate chess puzzle models. Supports both Modal vLLM and OpenRouter endpoints."""
     weave.init(weave_project)
 
     print(f"Loading dataset: {dataset_id} (split: {split})")
