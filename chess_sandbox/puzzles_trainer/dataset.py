@@ -28,7 +28,13 @@ DATASET_ID = "Lichess/chess-puzzles"
 DatasetSource = Literal["puzzle", "toy", "mixed"]
 
 TaskType = Literal[
-    "puzzle", "ascii_board", "legal_moves", "legal_captures", "piece_captures", "concept_detection", "piece_positions"
+    "puzzle_best_move",
+    "puzzle_ascii_board",
+    "puzzle_legal_moves",
+    "puzzle_legal_captures",
+    "puzzle_piece_captures",
+    "puzzle_concept_detection",
+    "puzzle_piece_positions",
 ]
 
 
@@ -127,7 +133,7 @@ def format_puzzle(example: dict) -> dict:
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": example["answer"]},
         ],
-        "task_type": "puzzle",
+        "task_type": "puzzle_best_move",
         "fen": fen,
         "question": prompt,
         "answer": example["answer"],
@@ -147,7 +153,7 @@ def format_ascii_board(example: dict) -> dict:
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": ascii_output},
         ],
-        "task_type": "ascii_board",
+        "task_type": "puzzle_ascii_board",
         "fen": fen,
         "question": prompt,
         "answer": ascii_output,
@@ -186,7 +192,7 @@ def format_legal_moves(example: dict) -> dict | None:
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": san_moves},
                 ],
-                "task_type": "legal_moves",
+                "task_type": "puzzle_legal_moves",
                 "fen": fen,
                 "square": square_name,
                 "question": prompt,
@@ -218,7 +224,7 @@ def format_legal_captures(example: dict) -> dict | None:
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": san_captures},
         ],
-        "task_type": "legal_captures",
+        "task_type": "puzzle_legal_captures",
         "fen": fen,
         "question": prompt,
         "answer": san_captures,
@@ -258,7 +264,7 @@ def format_piece_captures(example: dict) -> dict | None:
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": san_captures},
                 ],
-                "task_type": "piece_captures",
+                "task_type": "puzzle_piece_captures",
                 "fen": fen,
                 "square": square_name,
                 "question": prompt,
@@ -281,7 +287,7 @@ def format_concept_detection(example: dict) -> dict:
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": themes_str},
         ],
-        "task_type": "concept_detection",
+        "task_type": "puzzle_concept_detection",
         "fen": fen,
         "question": prompt,
         "answer": themes_str,
@@ -315,7 +321,7 @@ def format_piece_positions(example: dict) -> dict:
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": output},
         ],
-        "task_type": "piece_positions",
+        "task_type": "puzzle_piece_positions",
         "fen": fen,
         "question": prompt,
         "answer": output,
@@ -364,7 +370,7 @@ def _load_puzzle_tasks(
     lichess_dataset: Dataset = load_dataset(DATASET_ID, split="train")  # pyright: ignore[reportAssignmentType]
     print(f"Loaded {len(lichess_dataset)} puzzles")
 
-    print(f"Sampling {sample_size} puzzles with popularity >= {min_popularity}...")
+    print(f"Sampling {sample_size} puzzles (pop>={min_popularity}, rating<={max_rating}, themes={themes})...")
     sampled_indices = stream_and_sample_puzzles(
         lichess_dataset,
         sample_size,
@@ -503,8 +509,9 @@ def generate_task_dataset(
     source: DatasetSource = "puzzle",
     toy_ratio: float = 0.3,
     include_toy_representation: bool = True,
+    include_images: bool = False,
 ) -> DatasetDict:
-    """Create task dataset with board images ready for HF Hub.
+    """Create task dataset optionally with board images, ready for HF Hub.
 
     Args:
         sample_size: Number of source puzzles/exercises to generate.
@@ -517,6 +524,7 @@ def generate_task_dataset(
         source: Data source - "puzzle" (Lichess), "toy" (synthetic), or "mixed".
         toy_ratio: Fraction of toy exercises when source="mixed" (default 0.3).
         include_toy_representation: Include FEN/piece-list conversion tasks for toy.
+        include_images: Whether to generate board images (default True).
 
     Returns:
         DatasetDict with train and test splits.
@@ -552,47 +560,52 @@ def generate_task_dataset(
     test_tasks = all_tasks[-test_size:] if test_size > 0 else []
 
     all_examples = train_tasks + test_tasks
-    unique_fens = list({ex["fen"] for ex in all_examples})
-    print(f"Generating {len(unique_fens)} unique board images for {len(all_examples)} examples...")
 
-    fen_to_image: dict[str, bytes] = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(generate_board_image, fen, image_size): fen for fen in unique_fens}
-        for future in tqdm(as_completed(futures), total=len(unique_fens), desc="Board images"):
-            fen = futures[future]
-            fen_to_image[fen] = future.result()
+    if include_images:
+        unique_fens = list({ex["fen"] for ex in all_examples})
+        print(f"Generating {len(unique_fens)} unique board images for {len(all_examples)} examples...")
 
-    for ex in all_examples:
-        ex["image"] = fen_to_image[ex["fen"]]
+        fen_to_image: dict[str, bytes] = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(generate_board_image, fen, image_size): fen for fen in unique_fens}
+            for future in tqdm(as_completed(futures), total=len(unique_fens), desc="Board images"):
+                fen = futures[future]
+                fen_to_image[fen] = future.result()
 
-    features = Features(
-        {
-            "image": HFImage(),
-            "fen": Value("string"),
-            "task_type": Value("string"),
-            "question": Value("string"),
-            "answer": Value("string"),
-            "source": Value("string"),
-            "messages": [
-                {
-                    "role": Value("string"),
-                    "content": Value("string"),
-                }
-            ],
-        }
-    )
+        for ex in all_examples:
+            ex["image"] = fen_to_image[ex["fen"]]
+
+    base_features: dict[str, Any] = {
+        "fen": Value("string"),
+        "task_type": Value("string"),
+        "question": Value("string"),
+        "answer": Value("string"),
+        "source": Value("string"),
+        "messages": [
+            {
+                "role": Value("string"),
+                "content": Value("string"),
+            }
+        ],
+    }
+    if include_images:
+        base_features["image"] = HFImage()
+
+    features = Features(base_features)
 
     def normalize_example(ex: dict[str, Any]) -> dict[str, Any]:
         """Ensure all examples have consistent fields."""
-        return {
-            "image": ex["image"],
+        result: dict[str, Any] = {
             "fen": ex["fen"],
             "task_type": ex["task_type"],
             "question": ex["question"],
             "answer": ex["answer"],
-            "source": ex.get("source", "lichess"),  # Default to lichess for puzzle tasks
+            "source": ex.get("source", "lichess"),
             "messages": ex["messages"],
         }
+        if include_images:
+            result["image"] = ex["image"]
+        return result
 
     train_normalized = [normalize_example(ex) for ex in train_tasks]
     test_normalized = [normalize_example(ex) for ex in test_tasks]
@@ -639,6 +652,11 @@ DEFAULT_DATASET_IDS = {
     default=True,
     help="Include FEN/piece-list conversion tasks for toy exercises",
 )
+@click.option(
+    "--include-images/--no-images",
+    default=False,
+    help="Include board images (adds -vision suffix to dataset name)",
+)
 @click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
 @click.option(
     "--dataset-id",
@@ -657,10 +675,11 @@ def main(
     source: str,
     toy_ratio: float,
     include_toy_representation: bool,
+    include_images: bool,
     push_to_hub: bool,
     dataset_id: str | None,
 ) -> None:
-    """Generate chess task dataset with board images.
+    """Generate chess task dataset optionally with board images.
 
     Sources:
       - puzzle: Lichess puzzles with multiple task types (SAN moves)
@@ -680,10 +699,15 @@ def main(
         source=source,  # type: ignore[arg-type]
         toy_ratio=toy_ratio,
         include_toy_representation=include_toy_representation,
+        include_images=include_images,
     )
 
     if push_to_hub:
-        hub_dataset_id = dataset_id or DEFAULT_DATASET_IDS[source]
+        if dataset_id:
+            hub_dataset_id = dataset_id
+        else:
+            base_id = DEFAULT_DATASET_IDS[source]
+            hub_dataset_id = f"{base_id}-vision" if include_images else base_id
         dataset_dict.push_to_hub(hub_dataset_id)
         print(f"Pushed dataset to: https://huggingface.co/datasets/{hub_dataset_id}")
 

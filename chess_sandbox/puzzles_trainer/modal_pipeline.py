@@ -13,7 +13,7 @@ import modal
 
 image = (
     modal.Image.from_registry("huggingface/trl:0.25.1")  # type: ignore[reportUnknownMemberType]
-    .pip_install("python-chess", "wandb==0.23.0", "click")
+    .pip_install("python-chess", "wandb==0.23.0", "click", "datasets")
     .add_local_python_source("chess_sandbox")
 )
 
@@ -29,7 +29,7 @@ def pip_freeze():
 
 @app.function(  # type: ignore
     gpu="A10G",
-    timeout=7200,  # 2 hours
+    timeout=14400,  # 4 hours
     secrets=[modal.Secret.from_name("huggingface-read-write-secret"), modal.Secret.from_name("wandb")],  # type: ignore
 )
 def train(*arglist: str):
@@ -45,5 +45,5 @@ def train(*arglist: str):
     Raises:
         RuntimeError: If training fails (non-zero exit code)
     """
-    cmd = ["python", "-m", "chess_sandbox.puzzles_trainer.cli", *arglist]
+    cmd = ["python", "-m", "chess_sandbox.puzzles_trainer.trainer", "train", *arglist]
     subprocess.run(cmd, check=True)
