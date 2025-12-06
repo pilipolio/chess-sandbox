@@ -413,3 +413,162 @@ Mostly notebooks:
 3. Decide path forward:
    - **Option A:** More SFT on instruct model for board/tactical awareness
    - **Option B:** SFT + GRPO on reasoning model (e.g., Qwen3-4B with thinking tokens)
+
+---
+
+## Next Phase: Reasoning Model Pipeline (Option B)
+
+### Rationale
+
+The instruct SFT achieved strong board awareness (100% on ASCII boards, legal moves) but 0% on best_move puzzles. This suggests the model pattern-matches rather than calculates. Reasoning models with native `<think>` tokens can externalize search, making tactical calculation more tractable.
+
+**Concern:** Fine-tuning a reasoning model on chess might degrade general reasoning.
+**Mitigation:** LoRA keeps base weights frozen; chess reasoning may transfer positively.
+
+### Phase 2a: SFT on Reasoning Model
+
+**Base model:** `Qwen/Qwen3-4B` (base, not instruct) or reasoning-tuned variant
+
+**Dataset format with CoT:**
+
+```python
+def format_puzzle_with_reasoning(example):
+    """Generate CoT from engine analysis or synthetic (GPT-5)."""
+    return {
+        "messages": [
+            {
+                "role": "user",
+                "content": f"Position: {example['fen']}\nFind the best move."
+            },
+            {
+                "role": "assistant",
+                "content": f"""<think>
+{example['reasoning']}  # e.g., "The knight on c6 is pinned. Nxe5 wins material."
+</think>
+{example['best_move']}"""
+            }
+        ]
+    }
+```
+
+**Reasoning data sources (in priority order):**
+1. **Structured from puzzles:** Extract tactical themes, piece relationships from existing annotations
+2. **Synthetic from GPT-5:** Generate explanations for puzzle solutions (validate with engine)
+3. **Engine principal variation:** Convert Stockfish PV into natural language
+
+#### Reasoning Data Generation Pipeline
+
+Generate synthetic reasoning traces by providing an LLM (gpt-oss-20b or gpt-5-mini) with rich context from existing SFT tasks:
+
+**Input context per puzzle:**
+- FEN position
+- Puzzle themes (e.g., `backRankMate`, `fork`, `pin`)
+- Solution moves (full sequence, not just first move)
+- Board state features from SFT tasks:
+  - `puzzle_piece_positions`: All pieces with locations
+  - `puzzle_legal_moves`: Legal moves for key pieces
+  - `puzzle_legal_captures`: Available captures
+  - `puzzle_ascii_board`: Visual board representation
+
+**Prompt template:**
+```
+You are a chess instructor explaining puzzle solutions. Given:
+- Position (FEN): {fen}
+- Board:
+{ascii_board}
+- Pieces: {piece_positions}
+- Themes: {themes}
+- Solution: {solution_moves}
+
+Write a concise reasoning trace (2-4 sentences) explaining WHY these moves work.
+Focus on: checks, captures, threats, piece coordination, and the tactical pattern.
+Do NOT just describe the moves - explain the forcing nature and why alternatives fail.
+
+Output format:
+<think>
+[Your reasoning here]
+</think>
+{first_move}
+```
+
+**Example output:**
+```
+Position: 1r4k1/4nppp/8/4Pb2/8/1P5P/r1PR4/3R3K w - - 0 27
+Themes: backRankMate
+Solution: Rd8+ Rxd8 Rxd8#
+
+<think>
+Black's king is trapped on the back rank with no escape squares (g8 blocked by pawns).
+Rd8+ forces Rxd8 (only legal response to check), then Rxd8# delivers mate.
+The two rooks coordinate to exploit the weak back rank.
+</think>
+Rd8+
+```
+
+**Validation:** Parse generated reasoning, verify first move matches solution, check for hallucinated pieces/squares.
+
+**Training config:**
+```python
+SFTConfig(
+    per_device_train_batch_size=4,  # Longer sequences with reasoning
+    gradient_accumulation_steps=4,
+    learning_rate=2e-4,
+    max_length=1024,  # Room for reasoning
+    packing=False,    # CoT benefits from full attention
+)
+```
+
+### Phase 2b: GRPO for Move Quality
+
+**When to start GRPO:** After SFT achieves >50% legality rate on held-out positions.
+
+**Reward function:**
+
+```python
+def chess_reasoning_reward(prompt: str, completion: str) -> float:
+    fen = extract_fen(prompt)
+    move = extract_final_move(completion)  # After </think> tag
+
+    # Primary: move quality (legality + engine eval)
+    move_score = chess_reward(fen, move)  # Returns [-1, 1]
+
+    # Secondary: format compliance (weak signal)
+    has_reasoning = "<think>" in completion and "</think>" in completion
+    format_bonus = 0.05 if has_reasoning else 0.0
+
+    # Optional: penalize empty or very short reasoning
+    think_content = extract_think_content(completion)
+    length_penalty = -0.1 if think_content and len(think_content) < 20 else 0.0
+
+    return move_score + format_bonus + length_penalty
+```
+
+**Key insight:** Don't over-engineer reasoning rewards. Let GRPO discover which reasoning patterns lead to good moves. The primary signal is move quality.
+
+**GRPO config:**
+```python
+GRPOConfig(
+    learning_rate=1e-6,
+    num_generations=8,       # 8 completions per position
+    max_new_tokens=256,      # Cap reasoning length
+    kl_coef=0.04,            # Prevent drift from SFT
+    num_train_epochs=1,      # Single pass, monitor closely
+)
+```
+
+### Evaluation Checkpoints
+
+| Checkpoint | Metric | Target |
+|------------|--------|--------|
+| Pre-SFT baseline | Legality rate | Measure starting point |
+| Post-SFT | Legality rate | >90% |
+| Post-SFT | Best move accuracy (mate-in-1) | >50% |
+| Post-SFT | Reasoning format compliance | >95% |
+| Post-GRPO | Engine eval (avg centipawn loss) | <100 cp |
+| Post-GRPO | Puzzle accuracy by rating | Track improvement curve |
+
+### Open Questions
+
+1. **Reasoning data quality:** How much does synthetic CoT quality matter? Compare GPT-5 vs structured templates.
+2. **Thinking budget:** Should we constrain reasoning length or let GRPO discover optimal verbosity?
+3. **Curriculum in GRPO:** Start with easier positions (lower-rated puzzles) or mixed difficulty?
