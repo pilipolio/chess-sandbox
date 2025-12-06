@@ -87,6 +87,7 @@ include = ["chess_sandbox*"]
 [project.scripts]
 puzzles-trainer = "chess_sandbox.puzzles_trainer.trainer:main"
 puzzles-generate-task-dataset = "chess_sandbox.puzzles_trainer.dataset:main"
+puzzles-generate-reasoning = "chess_sandbox.puzzles_trainer.reasoning_generator:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
