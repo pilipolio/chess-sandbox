@@ -359,3 +359,57 @@ Mostly notebooks:
 
  - [GRPO Ministral-3 with QLoRA using TRL]( https://github.com/huggingface/trl/blob/794d87ff8d46fc41a07ffe9fb96771fee75922d4/examples/notebooks/grpo_ministral3_vl.ipynb#L4)
 
+---
+
+## Experiment Log
+
+### 2024-12-06: Qwen3-4B SFT on Mixed Tasks
+
+**Setup:**
+- Base model: `Qwen/Qwen3-4B-Instruct-2507`
+- Dataset: `pilipolio/chess-mixed-tasks` (~9.5k train, ~1k test)
+- Hardware: Modal A10G (24GB), ~3.3 hours
+- Config: LoRA r=32, batch=8, grad_accum=2, lr=2e-4, cosine schedule, 3 epochs (726 steps with packing)
+
+**Dataset composition:**
+| Task | Count | Purpose |
+|------|-------|---------|
+| `puzzle_best_move` | 141 | Tactical pattern recognition |
+| `puzzle_piece_positions` | 151 | Board awareness |
+| `puzzle_legal_moves` | 131 | Rule understanding |
+| `puzzle_legal_captures` | 100 | Tactical opportunities |
+| `puzzle_ascii_board` | 127 | Visual representation |
+| `puzzle_piece_captures` | 94 | Piece-specific captures |
+| `toy_*` tasks | ~300 | Foundational FEN ↔ piece mapping |
+
+**Results:**
+
+| Metric | Start | End |
+|--------|-------|-----|
+| Eval loss | 2.05 | 0.17 |
+| Token accuracy | 64% | 94% |
+| Exact match (n=10) | 0% | 60% |
+
+**Per-task accuracy (final):**
+| Task | Accuracy | Notes |
+|------|----------|-------|
+| `puzzle_ascii_board` | 100% | Board visualization learned |
+| `toy_fen_to_piece_list` | 100% | FEN parsing works |
+| `puzzle_legal_moves` | 100% | Piece movement understood |
+| `toy_fen_to_legal_moves_uci` | 50% | Partial |
+| `puzzle_best_move` | 0% | Requires deeper tactics |
+| `puzzle_piece_positions` | 0% | Subtle errors (missing pawns) |
+
+**Error patterns observed:**
+1. File confusion: `Qg4` vs `Qh4` (one square off)
+2. Hallucinated captures: generates plausible but illegal moves
+3. Missing pawns in piece lists
+
+**Model:** [pilipolio/chess-puzzle-sft-qwen3-4b](https://huggingface.co/pilipolio/chess-puzzle-sft-qwen3-4b)
+
+**Next steps:**
+1. Host LoRA adapter for inference evaluation via `llm_evaluation.py`
+2. Compare against baseline models (gpt-oss-20b, qwen3-32b, etc.)
+3. Decide path forward:
+   - **Option A:** More SFT on instruct model for board/tactical awareness
+   - **Option B:** SFT + GRPO on reasoning model (e.g., Qwen3-4B with thinking tokens)
