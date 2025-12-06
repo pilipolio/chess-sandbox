@@ -20,7 +20,6 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1"
 MODELS: dict[str, str] = {
     "chess-puzzle": MODAL_VLLM_URL,
     "openai/gpt-oss-20b:free": OPENROUTER_URL,
-    # "mistralai/ministral-14b-2512": OPENROUTER_URL,
     "qwen/qwen3-32b": OPENROUTER_URL,
     "openai/gpt-5-mini": OPENROUTER_URL,
 }
@@ -105,12 +104,12 @@ async def run_benchmark(
     dataset: Dataset,  # pyright: ignore[reportMissingTypeArgument]
     models: list[str],
 ) -> dict[str, dict[str, object]]:
-    """Run benchmark across multiple models."""
-    all_results: dict[str, dict[str, object]] = {}
+    """Run benchmark across multiple models in parallel."""
+    tasks = [run_evaluation(dataset, model_name) for model_name in models]
+    results_list = await asyncio.gather(*tasks)
 
-    for model_name in models:
-        results = await run_evaluation(dataset, model_name)
-        all_results[model_name] = results
+    all_results = dict(zip(models, results_list, strict=True))
+    for model_name, results in all_results.items():
         print_model_summary(model_name, results)
 
     return all_results
