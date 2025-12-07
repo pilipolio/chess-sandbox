@@ -414,6 +414,31 @@ Mostly notebooks:
    - **Option A:** More SFT on instruct model for board/tactical awareness
    - **Option B:** SFT + GRPO on reasoning model (e.g., Qwen3-4B with thinking tokens)
 
+### 2024-12-06: Multi-Model Benchmark on Puzzle Tasks
+
+**Setup:**
+- Dataset: `pilipolio/lichess-puzzle-tasks` (test split, 58 examples)
+- Evaluation: Parallel model evaluation via `asyncio.gather()` in `llm_evaluation.py`
+- Metric: Exact match on best move prediction
+
+**Models evaluated:**
+| Model | Provider | Exact Match |
+|-------|----------|-------------|
+| openai/gpt-5-mini | OpenRouter | 56.9% |
+| openai/gpt-oss-20b:free | OpenRouter | 41.4% |
+| chess-puzzle (Qwen3-4B SFT) | Modal vLLM | 31.0% |
+| qwen/qwen3-32b | OpenRouter | 17.2% |
+
+**Observations:**
+- GPT-5-mini leads, suggesting general reasoning capability helps with chess puzzles
+- Fine-tuned chess-puzzle model (31.0%) underperforms larger general models
+- Qwen3-32b surprisingly weak despite size - may need chess-specific tuning
+- Parallelized benchmark runs 4x faster than sequential execution
+
+**Changes made:**
+- Added parallel model evaluation with `asyncio.gather()` to `run_benchmark()`
+- Removed deprecated mistral model from benchmark config
+
 ---
 
 ## Next Phase: Reasoning Model Pipeline (Option B)
