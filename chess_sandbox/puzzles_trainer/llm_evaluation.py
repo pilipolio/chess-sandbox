@@ -14,7 +14,7 @@ load_dotenv()
 DEFAULT_DATASET_ID = "pilipolio/lichess-puzzle-tasks"
 DEFAULT_SAMPLE_SIZE = 10
 
-MODAL_VLLM_URL = "https://pilipolio--chess-puzzle-vllm-serve-dev.modal.run/v1"
+MODAL_VLLM_URL = "https://pilipolio--chess-puzzle-vllm-serve.modal.run/v1"
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 
 MODELS: dict[str, str] = {
