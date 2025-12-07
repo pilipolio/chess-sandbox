@@ -45,6 +45,7 @@ dependencies = [
     "joblib-stubs>=1.5.2.0.20250831",
     "jinja2>=3.1.6",
     "weave>=0.51.0",
+    "pydantic-ai>=0.4.3",
 ]
 
 [dependency-groups]
