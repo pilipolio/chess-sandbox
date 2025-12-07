@@ -125,7 +125,39 @@ def build_reasoning_context(example: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-REASONING_PROMPT_TEMPLATE = """You are a chess instructor explaining puzzle solutions. Given:
+def build_pgn_template(solution_san: list[str], fen: str) -> str:
+    """Build a PGN template with move numbers for the solution.
+
+    Args:
+        solution_san: List of SAN moves in the solution.
+        fen: Starting position FEN.
+
+    Returns:
+        PGN template string like "27. Rd8+ {comment} Rxd8 {comment} 28. Rxd8# {comment}".
+    """
+    board = chess.Board(fen)
+    template_parts: list[str] = []
+    move_number = board.fullmove_number
+
+    for san_move in solution_san:
+        is_white_move = board.turn == chess.WHITE
+
+        if is_white_move:
+            template_parts.append(f"{move_number}. {san_move} {{comment}}")
+        else:
+            template_parts.append(f"{san_move} {{comment}}")
+            move_number += 1
+
+        try:
+            move = board.parse_san(san_move)
+            board.push(move)
+        except ValueError:
+            break
+
+    return " ".join(template_parts)
+
+
+REASONING_PROMPT_TEMPLATE = """You are a chess instructor analyzing puzzle solutions in structured format.
 
 Position (FEN): {fen}
 
@@ -140,21 +172,34 @@ Themes: {themes}
 
 Solution: {solution_str}
 
-Write a concise reasoning trace (2-4 sentences) explaining WHY these moves work.
-Focus on: checks, captures, threats, piece coordination, and the tactical pattern.
-Do NOT just describe the moves - explain the forcing nature and why alternatives fail.
+Analyze this puzzle in two parts:
 
-Output format:
+1. POSITION (1-2 sentences): Key features - piece placement, weaknesses, threats.
+
+2. PGN ANALYSIS: Write moves with {{brief comments}} like {{check}}, {{forced}}, {{mate}}.
+
+Example output:
 <think>
-[Your reasoning here]
+Position: White has doubled rooks on d-file. Black's king trapped on g8.
+
+27. Rd8+ {{check, attacks b8 rook}} Rxd8 {{forced}} 28. Rxd8# {{mate}}
+</think>
+Rd8+
+
+Your output (use move numbers from position):
+<think>
+Position: [1-2 sentences on key features]
+
+{pgn_template}
 </think>
 {first_move}"""
 
 
 def build_reasoning_prompt(context: dict[str, Any]) -> str:
-    """Build prompt for reasoning generation."""
+    """Build prompt for reasoning generation with PGN template."""
     themes_str = ", ".join(context["themes"]) if context["themes"] else "none"
     solution_str = " ".join(context["solution_san"])
+    pgn_template = build_pgn_template(context["solution_san"], context["fen"])
 
     return REASONING_PROMPT_TEMPLATE.format(
         fen=context["fen"],
@@ -163,6 +208,7 @@ def build_reasoning_prompt(context: dict[str, Any]) -> str:
         legal_captures=context["legal_captures"],
         themes=themes_str,
         solution_str=solution_str,
+        pgn_template=pgn_template,
         first_move=context["first_move_san"],
     )
 
@@ -295,38 +341,19 @@ BACKRANK_MATE_EXAMPLE: dict[str, Any] = {
     "Popularity": 95,
 }
 
-BACKRANK_MATE_REASONING = (
-    "Black's king is trapped on the back rank with no escape squares "
-    "(g8 blocked by pawns, f8 blocked by knight). "
-    "Rd8+ forces Rxd8 (only legal response to check), then Rxd8# delivers mate. "
-    "The two rooks coordinate to exploit the weak back rank."
-)
-
-
-def create_test_example() -> dict[str, Any]:
-    """Create a test example using the hardcoded back-rank mate puzzle.
-
-    This is useful for verifying the output format without API calls.
-    """
-    context = build_reasoning_context(BACKRANK_MATE_EXAMPLE)
-    return format_reasoning_example(context, BACKRANK_MATE_REASONING)
-
 
 def print_test_example() -> None:
-    """Print the hardcoded test example for verification."""
-    example = create_test_example()
+    """Print the test puzzle prompt for verification."""
     context = build_reasoning_context(BACKRANK_MATE_EXAMPLE)
     prompt = build_reasoning_prompt(context)
 
     print("=" * 60)
     print("TEST EXAMPLE: Back-rank mate puzzle")
     print("=" * 60)
-    print(f"\nFEN: {example['fen']}")
-    print(f"Themes: {example['themes']}")
-    print(f"Solution: {example['solution']}")
-    print(f"First move: {example['first_move']}")
-    print(f"\n--- SFT Question ---\n{example['question']}")
-    print(f"\n--- SFT Answer ---\n{example['answer']}")
+    print(f"\nFEN: {context['fen']}")
+    print(f"Themes: {context['themes']}")
+    print(f"Solution: {' '.join(context['solution_san'])}")
+    print(f"First move: {context['first_move_san']}")
     print("\n--- LLM Prompt (sent to generate reasoning) ---")
     print(prompt)
     print("=" * 60)
