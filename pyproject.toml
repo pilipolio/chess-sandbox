@@ -23,37 +23,21 @@ authors = [
 keywords = ["chess", "stockfish", "llm", "openai", "claude", "commentary", "analysis"]
 
 requires-python = ">=3.13"
+# Core dependencies - minimal set for basic CLI and shared utilities
 dependencies = [
     "chess>=1.11.2",
     "click>=8.3.0",
-    "diskcache>=5.6.3",
     "httpx>=0.28.0",
     "huggingface-hub>=0.27.0",
-    "joblib>=1.4.0",
-    "lczerolens>=0.3.3",
-    "modal>=1.2.1",
-    "openai>=2.6.1",
+    "jinja2>=3.1.6",
     "pydantic>=2.10.4",
     "pydantic-settings>=2.11.0",
-    "pyright>=1.1.391",
     "python-dotenv>=1.2.1",
     "tqdm>=4.67.1",
-    "scikit-learn>=1.7.2",
-    "torch>=2.7.0", # CPU-only by default via pytorch-cpu index (see [tool.uv.sources])
-    "torchvision>=0.22.0,<0.24.0", # https://github.com/astral-sh/uv/issues/16386
-    "scikit-learn-stubs>=0.0.3",
-    "joblib-stubs>=1.5.2.0.20250831",
-    "jinja2>=3.1.6",
-    "weave>=0.51.0",
-    "pydantic-ai>=0.4.3",
-    "pydantic-ai-slim[logfire]>=0.4.3",
 ]
 
 [dependency-groups]
-# Note: torch is now in main dependencies as CPU-only by default
-# For GPU support, override the index: UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync
-# See [tool.uv.sources] for CPU index configuration
-
+# Development tools
 dev = [
     "poethepoet>=0.32.0",
     "pyright>=1.1.391",
@@ -63,19 +47,48 @@ dev = [
     "ruff>=0.8.5",
     "types-tqdm>=4.67.0.20250809",
 ]
+
+# ML: concept extraction model training/inference (torch, sklearn, lczerolens)
+# For GPU support, override the index: UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync --group ml
+ml = [
+    "joblib>=1.4.0",
+    "joblib-stubs>=1.5.2.0.20250831",
+    "lczerolens>=0.3.3",
+    "scikit-learn>=1.7.2",
+    "scikit-learn-stubs>=0.0.3",
+    "torch>=2.7.0",
+    "torchvision>=0.22.0,<0.24.0",
+]
+
+# Agents: LLM-based features (commentary, puzzle agent, reasoning generation)
+agents = [
+    "openai>=2.6.1",
+    "pydantic-ai>=0.4.3",
+    "pydantic-ai-slim[logfire]>=0.4.3",
+    "weave>=0.51.0",
+]
+
+# Infra: serverless deployment and caching
+infra = [
+    "diskcache>=5.6.3",
+    "modal>=1.2.1",
+]
+
+# Dataset preparation (board images, HF datasets)
 prepare-data = [
     "cairosvg>=2.8.2",
     "datasets>=4.3.0",
     "pillow>=12.0.0",
 ]
 
+# SFT: supervised fine-tuning with transformers/TRL
 sft = [
-    "transformers>=4.40.0",
-    "trl>=0.8.0",
+    "accelerate>=0.30.0",
+    "bitsandbytes>=0.43.0; sys_platform == 'linux'",
     "datasets>=2.18.0",
     "peft>=0.12.0",
-    "accelerate>=0.30.0",
-    "bitsandbytes>=0.43.0; sys_platform == 'linux'", # 4-bit quantization (Linux only)
+    "transformers>=4.40.0",
+    "trl>=0.8.0",
     "wandb==0.23.0",
 ]
 

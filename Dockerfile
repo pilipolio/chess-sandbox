@@ -13,8 +13,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Copy project definition files for caching
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies using uv
-RUN uv sync --frozen
+# Install dependencies using uv (all groups for testing)
+RUN uv sync --frozen --all-groups
 
 # --- Stage 2: Final Application Image ---
 FROM python:3.13-slim-bookworm AS runner
