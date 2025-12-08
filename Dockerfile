@@ -1,28 +1,7 @@
-# --- Stage 1: Build Stockfish (rarely changes, cached longer) ---
+# --- Stage 1: Install Python Dependencies ---
 # Platform note: CI/CD and Modal use linux/amd64. Local dev on Apple Silicon uses linux/arm64.
 # Both platforms supported via torchvision 0.23.0 (see pyproject.toml for compatibility notes).
 # To force a specific platform: docker build --platform=linux/amd64 ...
-FROM python:3.13-slim-bookworm AS stockfish-builder
-
-ARG VERSION=17.1
-ARG BUILD_PROFILE=native
-WORKDIR /chess
-
-RUN apt-get update \
-    && apt-get install -y wget build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN wget "https://github.com/official-stockfish/Stockfish/archive/refs/tags/sf_$VERSION.tar.gz" \
-    && tar -xf "sf_$VERSION.tar.gz" -C /chess \
-    && rm *.gz
-
-WORKDIR /chess/Stockfish-sf_$VERSION/src
-RUN make net && make build ARCH=$BUILD_PROFILE
-
-# Move compiled binary to standard location
-RUN mv stockfish /usr/local/bin/stockfish
-
-# --- Stage 2: Install Python Dependencies (changes more frequently) ---
 FROM python:3.13-slim-bookworm AS python-deps
 
 ENV PYTHONUNBUFFERED=True
@@ -37,22 +16,43 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies using uv
 RUN uv sync --frozen
 
-# --- Stage 3: Final Application Image ---
+# --- Stage 2: Final Application Image ---
 FROM python:3.13-slim-bookworm AS runner
 
 WORKDIR /app
 
+# Install chess engines
+# - stockfish: Available in Debian repos (v17)
+# - lc0: Temporarily disabled - uncomment below to re-enable
+#   Source: https://github.com/jldblog/lc0-linux-unofficial-builds
+#   Runtime deps: libopenblas for BLAS backend, zlib for weights, libgomp for OpenMP
+RUN apt-get update \
+    && apt-get install -y stockfish \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+# Disabled: lc0 and Maia weights installation
+# RUN apt-get update \
+#     && apt-get install -y wget libopenblas0 zlib1g libgomp1 \
+#     && wget -q -O /usr/local/bin/lc0 \
+#        https://raw.githubusercontent.com/jldblog/lc0-linux-unofficial-builds/main/v0.31/lc0-v0.31-linux-cpu \
+#     && chmod +x /usr/local/bin/lc0 \
+#     && mkdir -p /app/data \
+#     && wget -q -O /app/data/maia-1100.pb.gz \
+#        https://raw.githubusercontent.com/CSSLab/maia-chess/master/maia_weights/maia-1100.pb.gz \
+#     && apt-get clean \
+#     && rm -rf /var/lib/apt/lists/*
+
 # Copy the virtual environment from python-deps stage
 COPY --from=python-deps /app/.venv ./.venv
-
-# Copy Stockfish binary from stockfish-builder stage
-COPY --from=stockfish-builder /usr/local/bin/stockfish /usr/local/bin/stockfish
 
 # Copy application code
 COPY . /app
 
-# Set environment variable for Stockfish path
-ENV STOCKFISH_PATH=/usr/local/bin/stockfish
+# Set environment variables for engine paths
+# Note: Debian apt installs stockfish to /usr/games/
+ENV STOCKFISH_PATH=/usr/games/stockfish
+ENV LC0_PATH=/usr/local/bin/lc0
+ENV MAIA_WEIGHTS_PATH=/app/data/maia-1100.pb.gz
 
 # Set the entrypoint
 CMD ["/app/.venv/bin/python", "/app/chess_sandbox/server.py"]

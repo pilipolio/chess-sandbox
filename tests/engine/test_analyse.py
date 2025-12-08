@@ -18,7 +18,8 @@ def test_analyze_starting_position():
         results = analyze_variations(board, engine, num_lines=1, limit=chess.engine.Limit(depth=1))
 
         assert len(results) == 1
-        assert results[0].score == 0.17
+        assert results[0].score is not None
+        assert 0.15 <= results[0].score <= 0.25
         assert results[0].san_moves == ["e4"]
     finally:
         engine.quit()
