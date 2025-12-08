@@ -235,7 +235,16 @@ async def generate_reasoning_trace(
         temperature=0.7,
     )
 
-    return response.choices[0].message.content or ""
+    message = response.choices[0].message
+    content = message.content or ""
+
+    # Some reasoning models (e.g., gpt-oss-20b) put output in a separate reasoning field
+    if not content and hasattr(message, "reasoning"):
+        reasoning = getattr(message, "reasoning", None)
+        if reasoning:
+            content = str(reasoning)
+
+    return content
 
 
 def parse_reasoning_output(output: str) -> tuple[str | None, str | None]:
