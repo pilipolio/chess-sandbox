@@ -4,6 +4,8 @@ import pytest
 
 from chess_sandbox.engine.maia import MaiaConfig, get_human_moves
 
+pytestmark = pytest.mark.skip(reason="lc0/Maia temporarily disabled")
+
 
 @pytest.mark.integration
 def test_maia_predicts_human_move():

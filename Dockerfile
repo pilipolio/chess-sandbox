@@ -21,20 +21,26 @@ FROM python:3.13-slim-bookworm AS runner
 
 WORKDIR /app
 
-# Install chess engines and wget for downloading weights
+# Install chess engines
 # - stockfish: Available in Debian repos (v17)
-# - lc0: Download pre-compiled binary from unofficial builds
+# - lc0: Temporarily disabled - uncomment below to re-enable
 #   Source: https://github.com/jldblog/lc0-linux-unofficial-builds
+#   Runtime deps: libopenblas for BLAS backend, zlib for weights, libgomp for OpenMP
 RUN apt-get update \
-    && apt-get install -y wget stockfish \
-    && wget -q -O /usr/local/bin/lc0 \
-       https://raw.githubusercontent.com/jldblog/lc0-linux-unofficial-builds/main/v0.31/lc0-v0.31-linux-cpu \
-    && chmod +x /usr/local/bin/lc0 \
-    && mkdir -p /app/data \
-    && wget -q -O /app/data/maia-1100.pb.gz \
-       https://raw.githubusercontent.com/CSSLab/maia-chess/master/maia_weights/maia-1100.pb.gz \
+    && apt-get install -y stockfish \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+# Disabled: lc0 and Maia weights installation
+# RUN apt-get update \
+#     && apt-get install -y wget libopenblas0 zlib1g libgomp1 \
+#     && wget -q -O /usr/local/bin/lc0 \
+#        https://raw.githubusercontent.com/jldblog/lc0-linux-unofficial-builds/main/v0.31/lc0-v0.31-linux-cpu \
+#     && chmod +x /usr/local/bin/lc0 \
+#     && mkdir -p /app/data \
+#     && wget -q -O /app/data/maia-1100.pb.gz \
+#        https://raw.githubusercontent.com/CSSLab/maia-chess/master/maia_weights/maia-1100.pb.gz \
+#     && apt-get clean \
+#     && rm -rf /var/lib/apt/lists/*
 
 # Copy the virtual environment from python-deps stage
 COPY --from=python-deps /app/.venv ./.venv
