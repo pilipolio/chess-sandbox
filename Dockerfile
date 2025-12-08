@@ -22,24 +22,18 @@ RUN make net && make build ARCH=$BUILD_PROFILE
 # Move compiled binary to standard location
 RUN mv stockfish /usr/local/bin/stockfish
 
-# --- Stage 1b: Build lc0 (Leela Chess Zero) for Maia ---
-FROM python:3.13-slim-bookworm AS lc0-builder
-
-ARG LC0_VERSION=0.32
-WORKDIR /chess
+# --- Stage 1b: Download pre-compiled lc0 (Leela Chess Zero) for Maia ---
+# Using unofficial Linux builds from https://github.com/jldblog/lc0-linux-unofficial-builds
+FROM python:3.13-slim-bookworm AS lc0-downloader
 
 RUN apt-get update \
-    && apt-get install -y git python3-pip g++ ninja-build zlib1g-dev libopenblas-dev \
-    && pip3 install --break-system-packages meson \
+    && apt-get install -y wget \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone -b release/$LC0_VERSION --depth 1 https://github.com/LeelaChessZero/lc0.git
-
-WORKDIR /chess/lc0
-RUN ./build.sh
-
-# Move compiled binary to standard location
-RUN mv build/release/lc0 /usr/local/bin/lc0
+# Download pre-compiled lc0 CPU binary (much faster than building from source)
+RUN wget -q -O /usr/local/bin/lc0 \
+    https://raw.githubusercontent.com/jldblog/lc0-linux-unofficial-builds/main/v0.31/lc0-v0.31-linux-cpu \
+    && chmod +x /usr/local/bin/lc0
 
 # --- Stage 2: Install Python Dependencies (changes more frequently) ---
 FROM python:3.13-slim-bookworm AS python-deps
@@ -61,9 +55,9 @@ FROM python:3.13-slim-bookworm AS runner
 
 WORKDIR /app
 
-# Install wget for downloading Maia weights and libopenblas for lc0 runtime
+# Install wget for downloading Maia weights
 RUN apt-get update \
-    && apt-get install -y wget libopenblas0 \
+    && apt-get install -y wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the virtual environment from python-deps stage
@@ -72,8 +66,8 @@ COPY --from=python-deps /app/.venv ./.venv
 # Copy Stockfish binary from stockfish-builder stage
 COPY --from=stockfish-builder /usr/local/bin/stockfish /usr/local/bin/stockfish
 
-# Copy lc0 binary from lc0-builder stage
-COPY --from=lc0-builder /usr/local/bin/lc0 /usr/local/bin/lc0
+# Copy lc0 binary from lc0-downloader stage
+COPY --from=lc0-downloader /usr/local/bin/lc0 /usr/local/bin/lc0
 
 # Download Maia weights (1100 rating model for human move prediction)
 RUN mkdir -p /app/data \
