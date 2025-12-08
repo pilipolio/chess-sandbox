@@ -14,8 +14,8 @@ except ImportError:
 
 class Settings(BaseSettings):
     STOCKFISH_PATH: str = "/usr/local/bin/stockfish"
-    LC0_PATH: str = "/opt/homebrew/bin/lc0"
-    MAIA_WEIGHTS_PATH: str = "data/raw/maia-1500.pb.gz"
+    LC0_PATH: str = "/opt/homebrew/bin/lc0"  # macOS default; override with LC0_PATH env var
+    MAIA_WEIGHTS_PATH: str = "data/maia-1100.pb.gz"  # Docker uses /app/data/maia-1100.pb.gz
 
     # Lichess settings
     LICHESS_API_TOKEN: str = ""
