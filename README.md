@@ -207,19 +207,34 @@ r2qk2r/p1p2p2/p2p1n1p/3Pp1p1/1P1bP3/P1N2QBP/2P2PP1/R4RK1 w kq - 2 15
 
 1. Install dependencies:
 
-**CPU-only (default, ~100MB - recommended for most users):**
+Dependencies are organized into groups by feature. Install only what you need:
+
+| Group | Purpose | Install Command |
+|-------|---------|-----------------|
+| (core) | Minimal CLI and utilities | `uv sync --only-group dev` |
+| `ml` | Concept extraction (torch, sklearn) | `uv sync --group ml` |
+| `agents` | LLM features (openai, pydantic-ai) | `uv sync --group agents` |
+| `infra` | Serverless deployment (modal) | `uv sync --group infra` |
+| `prepare-data` | Dataset generation | `uv sync --group prepare-data` |
+| `sft` | Model fine-tuning | `uv sync --group sft` |
+
+**Recommended installs:**
+
 ```bash
+# Development (core + dev tools)
 uv sync
+
+# Full ML + LLM stack
+uv sync --group ml --group agents --group infra
+
+# Everything
+uv sync --all-groups
 ```
 
-> **Note:** PyTorch installs as CPU-only by default (~100MB), saving ~6.9GB compared to GPU builds. This is sufficient for most use cases including inference and model evaluation.
-
-**GPU with CUDA support (~7GB - only if you have NVIDIA GPU):**
-```bash
-UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync
-```
-
-> **Note:** GPU support requires overriding the default PyTorch index. Replace `cu124` with your desired CUDA version. Only needed for GPU-accelerated training or large-scale inference.
+> **Note:** PyTorch (in `ml` group) installs as CPU-only by default (~100MB). For GPU support:
+> ```bash
+> UV_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync --group ml
+> ```
 
 2. Set environment variables:
 ```bash
