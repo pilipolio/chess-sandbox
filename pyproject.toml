@@ -46,6 +46,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "weave>=0.51.0",
     "pydantic-ai>=0.4.3",
+    "pydantic-ai-slim[logfire]>=0.4.3",
 ]
 
 [dependency-groups]
@@ -89,6 +90,7 @@ include = ["chess_sandbox*"]
 puzzles-trainer = "chess_sandbox.puzzles_trainer.trainer:main"
 puzzles-generate-task-dataset = "chess_sandbox.puzzles_trainer.dataset:main"
 puzzles-generate-reasoning = "chess_sandbox.puzzles_trainer.reasoning_generator:main"
+puzzle-agent = "chess_sandbox.puzzles_trainer.puzzle_agent:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)

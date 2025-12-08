@@ -22,6 +22,9 @@ from dataclasses import dataclass
 
 import chess
 import chess.engine
+import click
+import logfire
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIModel
@@ -34,6 +37,9 @@ from chess_sandbox.engine.analyse import (
     analyze_moves,
     analyze_variations,
 )
+
+logfire.configure()
+logfire.instrument_pydantic_ai()
 
 
 class PuzzleInfo(BaseModel):
@@ -63,43 +69,38 @@ class PuzzleAnalysisOutput(BaseModel):
     key_theme: str = Field(description="The main tactical/strategic theme demonstrated")
 
 
-CHESS_TEACHER_SYSTEM_PROMPT = """You are an experienced chess instructor analyzing a puzzle position.
+CHESS_TEACHER_SYSTEM_PROMPT = """\
+You are a chess instructor explaining your thought process when puzzle solution.
 
-Your task is to explain the puzzle solution as if teaching a student.
-
-PUZZLE CONTEXT:
-- Position (FEN): {fen}
-- Side to move: {side_to_move}
-- Move number: {move_number}
-- Last move played by opponent: {last_move}
-- Puzzle theme: {theme}
-- Expected solution: {expected_line}
+PUZZLE:
+- FEN: {fen}
+- {side_to_move} to move (move {move_number})
+- Theme: {theme}
+- Solution: {expected_line} ({solution_length} moves total)
 
 Board:
 {ascii_board}
 
-ANALYSIS TOOLS:
-You have access to engine analysis tools. Use them to verify your analysis:
-1. analyze_variations_tool: Get top engine lines from the current position
-2. evaluate_moves_tool: Compare specific candidate moves
+YOUR TASK:
+Write the solution showing WHY each move is best by comparing to alternatives.
 
-IMPORTANT: Start by calling analyze_variations_tool to see the engine's top lines.
+STRICT RULES:
+1. Output ONLY the {solution_length} moves of the solution. STOP after the last move.
+2. For natural alternatives, use the evaluate_moves_tool and show in parentheses why they fail.
+3. Keep refutations SHORT (1-2 moves showing the problem).
+
+USE TOOLS:
+- Call evaluate_moves_tool with candidate moves to compare alternatives
 
 OUTPUT FORMAT:
-Generate your analysis in PGN notation with comments in curly brackets:
-- Use SAN notation for moves (e.g., Nf3, exd5, O-O)
-- Add brief comments in {{curly brackets}} after moves
-- Focus on the "why" - explain threats, tactics, and strategic ideas
-- Use proper move numbers (currently move {move_number})
+{move_prefix} [move] {{why it's best}}
+  ([alt]? {{why it fails}} [refutation])
+[opponent reply] {{forced because...}} 
+[next solution move] {{explanation}}
+...END after {solution_length} moves
 
-Example output for Black to move in a deflection puzzle:
-27... Rd8 {{deflecting the queen from defense}} 28. Qxd8+ {{forced capture}} Bxd8
-
-TEACHING APPROACH:
-1. First use analyze_variations_tool to see the best lines
-2. Explain why the puzzle move is best (what it threatens/accomplishes)
-3. Show why the opponent's responses are forced
-4. Connect the solution to the puzzle theme
+EXAMPLE (3-move solution, White to move):
+1. Re8+ {{forces king to corner}} (1. Qxb7? Qd1#) Rxe8 {{only legal}} 2. Qxe8# {{mate}}
 """
 
 
@@ -125,24 +126,7 @@ puzzle_agent: Agent[PuzzleAnalysisDeps, PuzzleAnalysisOutput] = Agent(
 )
 
 
-@puzzle_agent.system_prompt
-def build_system_prompt(ctx: RunContext[PuzzleAnalysisDeps]) -> str:
-    """Build dynamic system prompt with puzzle context."""
-    puzzle = ctx.deps.puzzle_info
-    board = ctx.deps.board
-    side_to_move = "White" if board.turn == chess.WHITE else "Black"
-    return CHESS_TEACHER_SYSTEM_PROMPT.format(
-        fen=puzzle.fen,
-        side_to_move=side_to_move,
-        move_number=board.fullmove_number,
-        last_move=puzzle.last_move or "N/A",
-        theme=puzzle.theme,
-        expected_line=" ".join(puzzle.expected_line),
-        ascii_board=str(board),
-    )
-
-
-@puzzle_agent.tool
+# @puzzle_agent.tool
 def analyze_variations_tool(
     ctx: RunContext[PuzzleAnalysisDeps],
     num_lines: int = 3,
@@ -246,15 +230,125 @@ def analyze_puzzle(
         output_type=PuzzleAnalysisOutput,
     )
 
-    # Copy tool and system prompt registrations
-    agent._system_prompts = puzzle_agent._system_prompts  # pyright: ignore[reportPrivateUsage]
     agent._function_tools = puzzle_agent._function_tools  # pyright: ignore[reportPrivateUsage]
 
     try:
+        side_to_move = "White" if board.turn == chess.WHITE else "Black"
+        move_prefix = f"{board.fullmove_number}..." if board.turn == chess.BLACK else f"{board.fullmove_number}."
+        user_prompt = CHESS_TEACHER_SYSTEM_PROMPT.format(
+            fen=puzzle_info.fen,
+            side_to_move=side_to_move,
+            move_number=board.fullmove_number,
+            move_prefix=move_prefix,
+            last_move=puzzle_info.last_move or "N/A",
+            theme=puzzle_info.theme,
+            expected_line=" ".join(puzzle_info.expected_line),
+            solution_length=len(puzzle_info.expected_line),
+            ascii_board=str(board),
+        )
+
         result = agent.run_sync(
-            "First call analyze_variations_tool to see the best moves, then explain the solution.",
+            user_prompt=user_prompt,
             deps=deps,
         )
-        return result.output
+        return result.output  # type: ignore[reportUnknownReturn]
     finally:
         engine.quit()
+
+
+# Sample puzzle for testing
+SAMPLE_PUZZLE = PuzzleInfo(
+    fen="5rk1/1p3ppp/pq1Q1b2/8/8/1P3N2/P4PPP/3R2K1 b - - 2 27",
+    last_move="Qd6",
+    theme="Mating threat",
+    expected_line=["Rd8", "Qxd8+", "Bxd8"],
+)
+
+
+@click.command("puzzle-agent")
+@click.option(
+    "--fen",
+    type=str,
+    default=SAMPLE_PUZZLE.fen,
+    help="Position in FEN notation",
+)
+@click.option(
+    "--last-move",
+    type=str,
+    default=SAMPLE_PUZZLE.last_move,
+    help="Opponent's last move",
+)
+@click.option(
+    "--theme",
+    type=str,
+    default=SAMPLE_PUZZLE.theme,
+    help="Puzzle theme",
+)
+@click.option(
+    "--expected-line",
+    type=str,
+    default=" ".join(SAMPLE_PUZZLE.expected_line),
+    help="Expected solution moves (space-separated SAN)",
+)
+@click.option(
+    "--model",
+    type=str,
+    default="openai/gpt-5-mini",
+    help="OpenRouter model to use",
+)
+@click.option(
+    "--depth",
+    type=int,
+    default=20,
+    help="Engine analysis depth",
+)
+def main(
+    fen: str,
+    last_move: str | None,
+    theme: str,
+    expected_line: str,
+    model: str,
+    depth: int,
+) -> None:
+    """Analyze a chess puzzle using the pydantic-ai agent.
+
+    Uses engine analysis tools to generate a chess teacher's thought process
+    in PGN notation with comments.
+
+    Example:
+        uv run puzzle-agent --fen "5rk1/1p3ppp/pq1Q1b2/8/8/1P3N2/P4PPP/3R2K1 b - - 2 27"
+    """
+    load_dotenv()
+
+    puzzle_info = PuzzleInfo(
+        fen=fen,
+        last_move=last_move,
+        theme=theme,
+        expected_line=expected_line.split(),
+    )
+
+    click.echo(f"Analyzing puzzle: {fen}")
+    click.echo(f"Theme: {theme}")
+    click.echo(f"Expected line: {expected_line}")
+    click.echo(f"Model: {model}")
+    click.echo("-" * 60)
+
+    board = chess.Board(fen)
+    click.echo(f"\n{board}\n")
+
+    result = analyze_puzzle(puzzle_info, model=model, depth=depth)
+
+    click.echo("=" * 60)
+    click.echo("POSITION ASSESSMENT:")
+    click.echo(result.position_assessment)
+    click.echo()
+    click.echo("SOLUTION PGN:")
+    click.echo(result.solution_pgn)
+    click.echo()
+    click.echo("KEY THEME:")
+    click.echo(result.key_theme)
+    click.echo("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
