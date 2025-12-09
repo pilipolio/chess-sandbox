@@ -31,6 +31,7 @@ class VerificationResult:
     format_errors: list[str] = field(default_factory=_empty_list)
     first_move_correct: bool = False
     extracted_first_move: str | None = None
+    piece_positions_accuracy: float = 0.0
 
 
 SECTION_PATTERNS = {
@@ -40,6 +41,115 @@ SECTION_PATTERNS = {
     "candidate_moves": r"##\s*Step\s*4[:\s]*Candidate\s*Moves",
     "lines_exploration": r"##\s*Step\s*5[:\s]*Lines\s*Exploration",
 }
+
+PIECE_NAME_MAP = {
+    "king": chess.KING,
+    "k": chess.KING,
+    "queen": chess.QUEEN,
+    "q": chess.QUEEN,
+    "rook": chess.ROOK,
+    "r": chess.ROOK,
+    "bishop": chess.BISHOP,
+    "b": chess.BISHOP,
+    "knight": chess.KNIGHT,
+    "n": chess.KNIGHT,
+    "pawn": chess.PAWN,
+    "pawns": chess.PAWN,
+    "p": chess.PAWN,
+}
+
+SQUARE_PATTERN = re.compile(r"[a-h][1-8]")
+
+
+def extract_piece_positions_section(reasoning: str) -> str | None:
+    """Extract the piece positions content from Step 2 section."""
+    pattern = r"##\s*Step\s*2[:\s]*Piece\s*Positions\s*\n(.*?)(?=##\s*Step|</think>|$)"
+    match = re.search(pattern, reasoning, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def parse_flexible_piece_list(
+    text: str,
+) -> list[tuple[chess.PieceType, chess.Square, chess.Color]]:
+    """Parse piece positions from flexible natural language format.
+
+    Supports formats like:
+    - "Qa3" (standard algebraic)
+    - "Queen a3" or "Q a3" (piece name + square)
+    - "pawns a2, b2, c2" (grouped pieces)
+    - "White: Qa3, Kh1. Black: Kg8, Ra8" (color sections)
+    """
+    pieces: list[tuple[chess.PieceType, chess.Square, chess.Color]] = []
+    current_color = chess.WHITE
+    current_piece_type: chess.PieceType | None = None
+
+    tokens = re.split(r"[\s,.:;]+", text)
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i].strip()
+        if not token:
+            i += 1
+            continue
+
+        token_lower = token.lower()
+
+        if token_lower in ("white", "white:"):
+            current_color = chess.WHITE
+            current_piece_type = None
+            i += 1
+            continue
+
+        if token_lower in ("black", "black:"):
+            current_color = chess.BLACK
+            current_piece_type = None
+            i += 1
+            continue
+
+        if token_lower in PIECE_NAME_MAP:
+            current_piece_type = PIECE_NAME_MAP[token_lower]
+            i += 1
+            continue
+
+        square_match = SQUARE_PATTERN.search(token_lower)
+        if square_match:
+            square_str = square_match.group(0)
+            square = chess.parse_square(square_str)
+
+            piece_type = current_piece_type
+            prefix = token_lower[: square_match.start()]
+            if prefix and prefix in PIECE_NAME_MAP:
+                piece_type = PIECE_NAME_MAP[prefix]
+
+            if piece_type is not None:
+                pieces.append((piece_type, square, current_color))
+
+        i += 1
+
+    return pieces
+
+
+def validate_piece_positions(fen: str, piece_text: str) -> float:
+    """Validate piece positions against FEN.
+
+    Returns accuracy as fraction of expected pieces correctly identified (0.0 to 1.0).
+    Extra pieces (hallucinations) count as errors.
+    """
+    board = chess.Board(fen)
+
+    expected: set[tuple[chess.PieceType, chess.Square, chess.Color]] = set()
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            expected.add((piece.piece_type, square, piece.color))
+
+    parsed = set(parse_flexible_piece_list(piece_text))
+
+    correct = len(expected & parsed)
+    errors = len(expected - parsed) + len(parsed - expected)
+    total = correct + errors
+
+    return correct / total if total > 0 else 0.0
 
 
 def parse_sections(reasoning: str) -> dict[str, bool]:
@@ -147,7 +257,12 @@ def verify_reasoning_trace(
     result.sections_found = parse_sections(reasoning)
     sections_count = sum(result.sections_found.values())
 
-    # 2. Extract and validate moves from Solution section
+    # 2. Extract and validate piece positions from Step 2
+    piece_section = extract_piece_positions_section(reasoning)
+    if piece_section:
+        result.piece_positions_accuracy = validate_piece_positions(fen, piece_section)
+
+    # 3. Extract and validate moves from Solution section
     extracted_solution_valid_moves: list[str] = []
     solution_section = extract_solution_section(reasoning)
     if solution_section:
@@ -156,14 +271,14 @@ def verify_reasoning_trace(
     else:
         result.format_errors.append("No Solution section found")
 
-    # 3. Check first move correctness
+    # 4. Check first move correctness
     result.extracted_first_move = extracted_solution_valid_moves[0] if extracted_solution_valid_moves else None
     if result.extracted_first_move and expected_solution:
         normalized_extracted = normalize_move(result.extracted_first_move)
         normalized_expected = normalize_move(expected_solution[0])
         result.first_move_correct = normalized_extracted == normalized_expected
 
-    # 4. Calculate score
+    # 5. Calculate score
     # Section completeness: 30%
     sections_score = 0.3 * (sections_count / 5)
 
