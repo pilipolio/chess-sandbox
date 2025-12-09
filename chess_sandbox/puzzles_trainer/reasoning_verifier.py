@@ -4,10 +4,13 @@ Validates structure, move legality, and correctness of generated reasoning trace
 Assigns a score based on section completeness, move legality, and first move correctness.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 
 import chess
+from chess import pgn
 
 
 def _empty_dict() -> dict[str, bool]:
@@ -36,26 +39,6 @@ SECTION_PATTERNS = {
     "solution": r"##\s*Solution",
 }
 
-# Matches PGN moves like "19. Nxh7!" or "19...Kxh7" with optional annotations
-PGN_MOVE_PATTERN = re.compile(
-    r"""
-    (\d+)           # Move number
-    (\.{1,3})       # 1-3 dots (. for white, ... for black)
-    \s*
-    ([KQRBN]?       # Optional piece letter
-    [a-h]?[1-8]?    # Optional disambiguation
-    x?              # Optional capture
-    [a-h][1-8]      # Destination square
-    (?:=[QRBN])?    # Optional promotion
-    [+#]?)          # Optional check/mate
-    [!?]*           # Optional annotation symbols
-    """,
-    re.VERBOSE,
-)
-
-# Alternative pattern for castling
-CASTLING_PATTERN = re.compile(r"(\d+)(\.{1,3})\s*(O-O(?:-O)?)[+#]?[!?]*")
-
 
 def parse_sections(reasoning: str) -> dict[str, bool]:
     """Check which sections are present in the reasoning trace."""
@@ -68,32 +51,49 @@ def extract_solution_section(reasoning: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def extract_pgn_moves(solution_text: str) -> list[tuple[int, bool, str]]:
+def extract_pgn_moves(solution_text: str) -> list[str]:
     """Extract PGN moves from solution section.
 
-    Returns list of (move_number, is_white, san_move) tuples.
+    Uses chess.pgn.MOVETEXT_REGEX to extract SAN moves, ignoring move numbers.
+    Moves will be validated against the actual position, so move numbers are not needed.
+
+    Filters out square names (like "e7", "b1") that match the regex but aren't valid moves.
+
+    TODO: In the future, we may want to verify move numbers match expected sequence.
+
+    Returns list of SAN move strings in order of appearance.
     """
-    moves: list[tuple[int, bool, str]] = []
+    moves: list[str] = []
 
-    # Find regular moves
-    for match in PGN_MOVE_PATTERN.finditer(solution_text):
-        move_num = int(match.group(1))
-        is_white = len(match.group(2)) == 1  # Single dot = white
-        san = match.group(3)
-        moves.append((move_num, is_white, san))
+    # First, remove comments and other non-move content to avoid regex issues
+    # Comments are in { } brackets
+    import re as re_module
 
-    # Find castling moves
-    for match in CASTLING_PATTERN.finditer(solution_text):
-        move_num = int(match.group(1))
-        is_white = len(match.group(2)) == 1
-        san = match.group(3)
-        moves.append((move_num, is_white, san))
+    text_without_comments = re_module.sub(r"\{[^}]*\}", "", solution_text)
 
-    # Sort by move number and color (white before black)
-    return sorted(moves, key=lambda x: (x[0], not x[1]))
+    # Use chess.pgn's MOVETEXT_REGEX to find all SAN moves
+    # This handles all standard chess notation including castling, promotions, etc.
+    for match in pgn.MOVETEXT_REGEX.finditer(text_without_comments):
+        token = match.group(0)
+        # MOVETEXT_REGEX matches moves in group 1, but also matches other tokens
+        # Check if it's actually a move (not a comment, NAG, result, etc.)
+        if match.group(1):  # Group 1 contains the move
+            san = match.group(1)
+            # Skip non-move tokens like NAGs, results, parentheses, etc.
+            if not any(
+                token.startswith(prefix)
+                for prefix in [";", "$", "(", ")", "*", "1-0", "0-1", "1/2", "--", "Z0", "0000", "@@@@"]
+            ):
+                # Check for check/mate symbols immediately after the move
+                end_pos = match.end()
+                if end_pos < len(text_without_comments) and text_without_comments[end_pos] in "+#":
+                    san += text_without_comments[end_pos]
+                moves.append(san)
+
+    return moves
 
 
-def validate_move_sequence(fen: str, moves: list[tuple[int, bool, str]]) -> tuple[list[str], list[str]]:
+def validate_move_sequence(fen: str, moves: list[str]) -> tuple[list[str], list[str]]:
     """Validate a sequence of moves from a position.
 
     Returns (valid_moves, illegal_moves) where each is a list of SAN strings.
@@ -102,7 +102,7 @@ def validate_move_sequence(fen: str, moves: list[tuple[int, bool, str]]) -> tupl
     valid: list[str] = []
     illegal: list[str] = []
 
-    for _move_num, _is_white, san in moves:
+    for san in moves:
         try:
             # Try to parse the move
             move = board.parse_san(san)
@@ -115,25 +115,6 @@ def validate_move_sequence(fen: str, moves: list[tuple[int, bool, str]]) -> tupl
             illegal.append(san)
 
     return valid, illegal
-
-
-def extract_final_move(reasoning: str) -> str | None:
-    """Extract the final move after </think> tag."""
-    # Look for move after </think>
-    match = re.search(r"</think>\s*\n?\s*([A-Za-z0-9+#=x-]+)", reasoning)
-    if match:
-        return match.group(1).strip()
-
-    # Fallback: last line that looks like a move
-    lines = reasoning.strip().split("\n")
-    for line in reversed(lines):
-        line = line.strip()
-        if re.match(r"^[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?$", line):
-            return line
-        if re.match(r"^O-O(?:-O)?[+#]?$", line):
-            return line
-
-    return None
 
 
 def normalize_move(san: str) -> str:
@@ -165,15 +146,16 @@ def verify_reasoning_trace(
     sections_count = sum(result.sections_found.values())
 
     # 2. Extract and validate moves from Solution section
+    extracted_solution_valid_moves: list[str] = []
     solution_section = extract_solution_section(reasoning)
     if solution_section:
         pgn_moves = extract_pgn_moves(solution_section)
-        _valid_moves, result.illegal_moves = validate_move_sequence(fen, pgn_moves)
+        extracted_solution_valid_moves, result.illegal_moves = validate_move_sequence(fen, pgn_moves)
     else:
         result.format_errors.append("No Solution section found")
 
     # 3. Check first move correctness
-    result.extracted_first_move = extract_final_move(reasoning)
+    result.extracted_first_move = extracted_solution_valid_moves[0] if extracted_solution_valid_moves else None
     if result.extracted_first_move and expected_solution:
         normalized_extracted = normalize_move(result.extracted_first_move)
         normalized_expected = normalize_move(expected_solution[0])

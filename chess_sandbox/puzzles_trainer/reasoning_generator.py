@@ -15,6 +15,7 @@ from typing import Any
 
 import chess
 import click
+import logfire
 from datasets import (  # pyright: ignore[reportMissingTypeStubs]
     Dataset,
     DatasetDict,
@@ -22,11 +23,47 @@ from datasets import (  # pyright: ignore[reportMissingTypeStubs]
 )
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 from tqdm.asyncio import tqdm_asyncio
 
 from chess_sandbox.puzzles_trainer.reasoning_verifier import VerificationResult, verify_reasoning_trace
 
+
+class ReasoningTrace(BaseModel):
+    """Structured reasoning for a chess puzzle."""
+
+    fen_parsing: str = Field(
+        description="Breaking down FEN into each rank (starting from Rank8 to Rank1) to extract piece positions, "
+        "e.g., 'Rank8: r6k -> a8 rook, h8 king. Rank7: pp2r2p -> a7 pawn, b7 pawn, e7 rook, h7 pawn.'"
+    )
+    piece_positions: str = Field(
+        description="List key pieces and their squares, e.g., 'White: Qh6, Re6, Nb3. Black: Kh8, Re7, Qb2, Bg3'"
+    )
+    position_summary: str = Field(
+        description="2-3 sentences combining material balance, king safety, piece activity, move number, "
+        "side to move and the move just played. Mention relevant themes, NOT THE SOLUTION."
+    )
+    candidate_moves_csv: str = Field(
+        description="List candidate moves using comma separated SAN notations: Qxh7, Rxe7, ..."
+    )
+    candidate_moves_reasoning: str = Field(
+        description="Explain candidate moves based on piece positions and side to move, unbiased by the solution "
+        "and using short sentences, e.g., 'White queen on c2 can capture the pawn on h7 along the open b1-h7 "
+        "diagonal c2-d3-e4-f5-g6-h7'"
+    )
+    lines_exploration: str = Field(
+        description="Explore and reason about possible lines you've explored before reaching the solution, "
+        "starting with the 1st move and including opponent responses using SAN notations with comments into "
+        "the reasoning, e.g., '25. Nxf7+ Kg8 {only legal move} 26. Nh6+ Kh8 27. Qg8#'"
+    )
+    solution_pgn: str = Field(
+        description="Solution as a sequence of SAN moves WITHOUT comments, e.g., 'Rxe7 Qb1+ Nc1 Qxc1+ Qxc1'"
+    )
+
+
 load_dotenv()
+logfire.configure()
+logfire.instrument_openai()
 
 DATASET_ID = "Lichess/chess-puzzles"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -120,32 +157,17 @@ def identify_candidate_moves(board: chess.Board) -> dict[str, list[str]]:
     return {"checks": checks, "captures": captures}
 
 
-REASONING_PROMPT_TEMPLATE = """Analyze this chess puzzle. Output EXACTLY:
+REASONING_PROMPT_TEMPLATE = """\
+You are a chess instructor explaining your thought process when solving puzzles for your students.
+Break down step by step how you've arrived at the solution, using the following information:
 
-<think>
-## Position Analysis
-- [2-3 bullet points: material, king safety, piece activity]
-
-## Tactical Assessment
-[One paragraph on the tactical theme]
-
-## Solution
-{move_number}. {first_move} {{why this move wins}} [continue annotating: {solution}]
-</think>
-{first_move}
-
-Position: {puzzle_fen}
-{ascii_board}
-
-Pieces:
-{piece_placement}
-
-Last move: {last_move} | To move: {side_to_move} | Themes: {themes}
-Checks: {checks} | Captures: {captures}
-
-Solution: {solution}
-
-Write the analysis now. Start with <think> and end with just the move {first_move}"""
+Position (FEN): {puzzle_fen}
+Pieces: {piece_positions}
+Candidate moves: {candidate_moves}
+Last move: {last_move}
+To move: {side_to_move}
+Themes: {themes}
+Solution: {solution}"""
 
 
 def build_reasoning_prompt(
@@ -154,29 +176,18 @@ def build_reasoning_prompt(
     themes: list[str],
     solution_san: list[str],
 ) -> str:
-    """Build enhanced prompt with structured context."""
+    """Build prompt with position context for structured output."""
     board = chess.Board(puzzle_fen)
-    ascii_board = str(board)
-    piece_placement = build_piece_placement_summary(board)
-    candidates = identify_candidate_moves(board)
     side_to_move = "White" if board.turn == chess.WHITE else "Black"
-    move_number = board.fullmove_number
-
-    checks_str = ", ".join(candidates["checks"]) if candidates["checks"] else "none"
-    captures_str = ", ".join(candidates["captures"]) if candidates["captures"] else "none"
 
     return REASONING_PROMPT_TEMPLATE.format(
         puzzle_fen=puzzle_fen,
-        ascii_board=ascii_board,
-        piece_placement=piece_placement,
+        piece_positions=build_piece_placement_summary(board),
+        candidate_moves=identify_candidate_moves(board),
         last_move=last_move_san,
         side_to_move=side_to_move,
         themes=", ".join(themes) if themes else "none",
-        checks=checks_str,
-        captures=captures_str,
         solution=" ".join(solution_san),
-        first_move=solution_san[0],
-        move_number=move_number,
     )
 
 
@@ -184,25 +195,40 @@ async def generate_reasoning_trace(
     prompt: str,
     client: AsyncOpenAI,
     model: str = "gpt-oss-20b",
-) -> str:
-    """Generate reasoning trace using OpenAI-compatible API."""
-    response = await client.chat.completions.create(
+) -> ReasoningTrace | None:
+    """Generate structured reasoning trace using OpenAI-compatible API."""
+    response = await client.beta.chat.completions.parse(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=512,
+        response_format=ReasoningTrace,
+        extra_body={
+            "reasoning": {
+                "effort": "low"  # "high", "medium", "low"
+            }
+        },
+        # max_tokens=1024,
         temperature=0.7,
     )
+    return response.choices[0].message.parsed
 
-    message = response.choices[0].message
-    content = message.content or ""
 
-    # Some reasoning models put output in a separate reasoning field
-    if not content and hasattr(message, "reasoning"):
-        reasoning = getattr(message, "reasoning", None)
-        if reasoning:
-            content = str(reasoning)
+def join_reasoning_trace(trace: ReasoningTrace, first_move: str) -> str:
+    """Join structured trace into <think> format for SFT training."""
+    # Prefer solution_pgn if available, otherwise use lines_exploration
+    solution_content = trace.solution_pgn if trace.solution_pgn else trace.lines_exploration
+    return f"""<think>
+## Position Analysis
+{trace.piece_positions}
+{trace.position_summary}
 
-    return content
+## Tactical Assessment
+{trace.candidate_moves_reasoning}
+{trace.candidate_moves_csv}
+
+## Solution
+{solution_content}
+</think>
+{first_move}"""
 
 
 def format_reasoning_example(
@@ -210,13 +236,14 @@ def format_reasoning_example(
     last_move_san: str,
     themes: list[str],
     solution_san: list[str],
-    reasoning: str,
+    trace: ReasoningTrace,
     puzzle_id: str,
     verification: VerificationResult | None = None,
 ) -> dict[str, Any]:
-    """Format puzzle with reasoning for SFT training."""
+    """Format puzzle with structured reasoning for SFT training."""
+    first_move = solution_san[0]
     question = f"Position: {puzzle_fen}\nOpponent's last move: {last_move_san}\nFind the best move."
-    answer = f"<think>\n{reasoning}\n</think>\n{solution_san[0]}"
+    answer = join_reasoning_trace(trace, first_move)
 
     result: dict[str, Any] = {
         "question": question,
@@ -225,8 +252,15 @@ def format_reasoning_example(
         "last_move": last_move_san,
         "solution": " ".join(solution_san),
         "themes": themes,
-        "first_move": solution_san[0],
-        "reasoning": reasoning,
+        "first_move": first_move,
+        # Structured fields for downstream flexibility
+        "fen_parsing": trace.fen_parsing,
+        "piece_positions": trace.piece_positions,
+        "position_summary": trace.position_summary,
+        "candidate_moves_reasoning": trace.candidate_moves_reasoning,
+        "candidate_moves_csv": trace.candidate_moves_csv,
+        "lines_exploration": trace.lines_exploration,
+        "solution_pgn": trace.solution_pgn,
         "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
@@ -260,15 +294,17 @@ async def process_puzzle(
             puzzle_fen, last_move_san, solution_san = result
 
             prompt = build_reasoning_prompt(puzzle_fen, last_move_san, themes, solution_san)
-            output = await generate_reasoning_trace(prompt, client, model)
+            trace = await generate_reasoning_trace(prompt, client, model)
 
-            if not output.strip():
+            if trace is None:
                 return None
 
-            verification = verify_reasoning_trace(puzzle_fen, output, solution_san)
+            # Join trace for verification using existing string-based verifier
+            joined = join_reasoning_trace(trace, solution_san[0])
+            verification = verify_reasoning_trace(puzzle_fen, joined, solution_san)
 
             return format_reasoning_example(
-                puzzle_fen, last_move_san, themes, solution_san, output, puzzle_id, verification
+                puzzle_fen, last_move_san, themes, solution_san, trace, puzzle_id, verification
             )
 
         except Exception as e:
@@ -285,7 +321,7 @@ async def generate_reasoning_dataset(
     max_concurrent: int = 5,
     base_url: str | None = None,
     api_key: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, str]]:
     """Generate reasoning dataset from Lichess puzzles."""
     effective_base_url = base_url or DEFAULT_BASE_URL
     effective_api_key = api_key or os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
@@ -401,7 +437,7 @@ def main(
     # Filter by verification score unless include_failed is set
     total_generated = len(results)
     if not include_failed:
-        results = [r for r in results if r.get("verification_score", 0.0) >= min_score]
+        results = [r for r in results if float(r.get("verification_score", 0.0)) >= min_score]
         filtered_count = total_generated - len(results)
         click.echo(f"Filtered {filtered_count} traces below min_score={min_score}")
 
@@ -410,7 +446,7 @@ def main(
         return
 
     # Show verification stats
-    scores = [r.get("verification_score", 0.0) for r in results]
+    scores = [float(r.get("verification_score", 0.0)) for r in results]
     avg_score = sum(scores) / len(scores) if scores else 0.0
     click.echo(f"Verification scores: avg={avg_score:.2f}, min={min(scores):.2f}, max={max(scores):.2f}")
 

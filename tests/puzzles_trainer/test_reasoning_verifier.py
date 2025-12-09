@@ -1,7 +1,6 @@
 """Tests for reasoning trace verification."""
 
 from chess_sandbox.puzzles_trainer.reasoning_verifier import (
-    extract_final_move,
     extract_pgn_moves,
     extract_solution_section,
     normalize_move,
@@ -100,26 +99,36 @@ class TestExtractPgnMoves:
         text = "19. Nxh7 19...Kxh7 20. Qh7#"
         moves = extract_pgn_moves(text)
         assert len(moves) == 3
-        assert (19, True, "Nxh7") in moves
-        assert (19, False, "Kxh7") in moves
-        assert (20, True, "Qh7#") in moves  # Includes mate symbol
+        assert "Nxh7" in moves
+        assert "Kxh7" in moves
+        assert "Qh7#" in moves  # Includes mate symbol
 
     def test_moves_with_annotations(self):
         text = "19. Nxh7! {sacrifice} 19...Kxh7?? 20. Qh7#"
         moves = extract_pgn_moves(text)
         assert len(moves) == 3
-        assert (19, True, "Nxh7") in moves
+        assert "Nxh7" in moves
 
     def test_castling(self):
         text = "10. O-O Nf6 11. O-O-O"
         moves = extract_pgn_moves(text)
-        castle_moves = [(m, w, s) for m, w, s in moves if "O-O" in s]
+        castle_moves = [m for m in moves if "O-O" in m]
         assert len(castle_moves) == 2
 
     def test_promotion(self):
         text = "40. e8=Q+ 40...Kf7"
         moves = extract_pgn_moves(text)
-        assert any(s == "e8=Q+" for _, _, s in moves)
+        assert "e8=Q+" in moves
+
+    def test_compact_format(self):
+        """Test that compact format (25. Rxe7 Qb1+) works correctly."""
+        text = "25. Rxe7 Qb1+ 26. Nc1 Qxc1+ 27. Qxc1"
+        moves = extract_pgn_moves(text)
+        assert "Rxe7" in moves
+        assert "Qb1+" in moves
+        assert "Nc1" in moves
+        assert "Qxc1+" in moves
+        assert "Qxc1" in moves
 
 
 class TestValidateMoveSequence:
@@ -127,57 +136,49 @@ class TestValidateMoveSequence:
 
     def test_valid_opening_sequence(self):
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-        moves = [(1, True, "e4"), (1, False, "e5"), (2, True, "Nf3")]
+        moves = ["e4", "e5", "Nf3"]
         valid, illegal = validate_move_sequence(fen, moves)
         assert valid == ["e4", "e5", "Nf3"]
         assert illegal == []
 
     def test_illegal_move_detected(self):
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-        moves = [(1, True, "e4"), (1, False, "Nf3")]  # Black can't play Nf3
+        moves = ["e4", "Nf3"]  # Black can't play Nf3
         valid, illegal = validate_move_sequence(fen, moves)
         assert "e4" in valid
         assert "Nf3" in illegal
 
     def test_unparseable_move(self):
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-        moves = [(1, True, "Xyz123")]
+        moves = ["Xyz123"]
         _valid, illegal = validate_move_sequence(fen, moves)
         assert "Xyz123" in illegal
 
+    def test_extract_and_validate_middlegame_sequence(self):
+        """Test combining extraction and validation for a middlegame position."""
+        fen = "r6k/pp2r2p/4Rp1Q/3p4/8/1N1P2b1/PqP3PP/7K w - - 0 25"
+        move_text = "25. Rxe7 Qb1+ 26. Nc1 Qxc1+ 27. Qxc1"
+        moves = extract_pgn_moves(move_text)
+        valid, illegal = validate_move_sequence(fen, moves)
+        assert len(illegal) == 0, f"Found illegal moves: {illegal}"
+        assert "Rxe7" in valid
+        assert "Qb1+" in valid
+        assert "Nc1" in valid
+        assert "Qxc1+" in valid
+        assert "Qxc1" in valid
 
-class TestExtractFinalMove:
-    """Tests for final move extraction."""
-
-    def test_after_think_tag(self):
-        reasoning = """
-        <think>
-        Some analysis here.
-        </think>
-        Nxh7
-        """
-        assert extract_final_move(reasoning) == "Nxh7"
-
-    def test_with_check_symbol(self):
-        reasoning = """
-        </think>
-        Qh7+
-        """
-        assert extract_final_move(reasoning) == "Qh7+"
-
-    def test_castling_move(self):
-        reasoning = """
-        </think>
-        O-O-O
-        """
-        assert extract_final_move(reasoning) == "O-O-O"
-
-    def test_no_think_tag_fallback(self):
-        reasoning = """
-        The best move is
-        Nxe5
-        """
-        assert extract_final_move(reasoning) == "Nxe5"
+    def test_extract_and_validate_sequence_wo_numbers(self):
+        """Test combining extraction and validation for a middlegame position."""
+        fen = "r6k/pp2r2p/4Rp1Q/3p4/8/1N1P2b1/PqP3PP/7K w - - 0 25"
+        move_text = "Rxe7 Qb1+ Nc1 Qxc1+ Qxc1"
+        moves = extract_pgn_moves(move_text)
+        valid, illegal = validate_move_sequence(fen, moves)
+        assert len(illegal) == 0, f"Found illegal moves: {illegal}"
+        assert "Rxe7" in valid
+        assert "Qb1+" in valid
+        assert "Nc1" in valid
+        assert "Qxc1+" in valid
+        assert "Qxc1" in valid
 
 
 class TestNormalizeMove:
@@ -228,7 +229,7 @@ class TestVerifyReasoningTrace:
         """
         result = verify_reasoning_trace(fen, reasoning, ["e5"])
 
-        assert result.first_move_correct is True
+        assert result.first_move_correct is False  # No Solution section, so no move extracted
         assert not all(result.sections_found.values())
         assert result.score <= 0.7  # Penalized for missing sections
 

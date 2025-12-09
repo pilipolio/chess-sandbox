@@ -50,12 +50,12 @@ Solution: 27...Rd8 28.Qxd8+ Bxd8
 ## 2024-12-09: Reasoning Trace Verification for SFT Data
 
 ### Motivation
-Testing reasoning trajectories from open weights models (gpt-oss-120b, Qwen3 Max) for synthetic SFT data generation. Observations:
+Testing reasoning trajectories from open weights models (gpt-oss-120b, Qwen3 Max) for synthetic SFT data generation. Observations from https://openrouter.ai/chat?room=orc-1765226132-q0WSkSjbe8HRTJFj13jK:
 - **gpt-oss-120b**: Gets solutions but reasoning is messy (confused FEN parsing, truncated mid-sentence)
 - **Qwen3 Max**: Good step-by-step structure but hallucinates continuations after correct moves
 
 ### Approach
-Built a score-based verification pipeline to filter generated reasoning traces:
+Rule based aided context engineering + a score-based verification pipeline to filter generated reasoning traces:
 
 1. **Updated prompt template** - Guide models to produce structured output:
    - Position Analysis (Qwen-style)

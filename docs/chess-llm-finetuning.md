@@ -552,7 +552,10 @@ SFTConfig(
 ```python
 def chess_reasoning_reward(prompt: str, completion: str) -> float:
     fen = extract_fen(prompt)
-    move = extract_final_move(completion)  # After </think> tag
+    solution_section = extract_solution_section(completion)
+    pgn_moves = extract_pgn_moves(solution_section) if solution_section else []
+    valid_moves, _ = validate_move_sequence(fen, pgn_moves)
+    move = valid_moves[0] if valid_moves else None  # First valid move from Solution section
 
     # Primary: move quality (legality + engine eval)
     move_score = chess_reward(fen, move)  # Returns [-1, 1]
