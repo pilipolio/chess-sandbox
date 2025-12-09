@@ -101,48 +101,13 @@ Nxh7
 ### Results
 - Verifier correctly identifies missing sections, illegal moves, wrong first moves
 - Score-based filtering allows 1-2 illegal side-line moves while requiring correct solution
-- Ready for gpt-oss-120b batch generation with quality filtering
+- Disapointing results from both gpt-oss-20b/120b so went for gpt-5-nano
 
 ### Next Steps
 - Run batch generation on 1000+ puzzles
+  - Ongoing https://logfire-eu.pydantic.dev/pilipolio/chess-sandbox-puzzles-generation
+  - https://huggingface.co/datasets/pilipolio/chess-reasoning-traces/viewer/default/train
+  - ~200 batches needed (1000 / 5) of ~2500 tokens (~ $0.0001 per generation)
+  - ~17-33 minutes total (200 × 5-10s) for roughly $0.80 and 20-30 minutes for 1,000 examples.
 - Analyze score distribution and failure modes
-- Iterate on prompt to improve section compliance
 
----
-
-## 2024-12-09: Prompt Optimization for Section Compliance
-
-### Problem
-Initial runs with `gpt-oss-20b:free` showed poor format compliance:
-- Verification score: avg=0.37
-- Sections found: 0-1 out of 3
-- Model spent tokens on FEN decoding instead of analysis
-
-### Root Cause
-Format instructions appeared at the END of the prompt. Model focused on position data and ignored structure requirements.
-
-### Solution
-Restructured `REASONING_PROMPT_TEMPLATE`:
-
-1. **Format first**: Put output format at the TOP of prompt
-2. **Compact layout**: Condensed position info to single lines
-3. **Clear directive**: "Analyze this chess puzzle. Output EXACTLY:"
-4. **Direct ending**: "Start with `<think>` and end with just the move {first_move}"
-
-### Results
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Avg Score | 0.37 | **0.80** |
-| Max Score | 0.40 | **1.00** |
-| Sections Found | 0-1/3 | **3/3** |
-| Illegal Moves | Example text copied | **None** |
-
-### Observations
-- Model still meta-reasons about format rather than doing chess analysis
-- This is a limitation of `gpt-oss-20b:free`, not the prompt
-- Better models (gpt-4o-mini, claude-haiku) should produce actual analysis
-- Structure compliance now allows verification to work correctly
-
-### Code Changes
-- `reasoning_generator.py`: Simplified prompt template (~25 lines vs ~35 lines)
