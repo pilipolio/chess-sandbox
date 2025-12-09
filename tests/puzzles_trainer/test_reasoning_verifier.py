@@ -2,10 +2,13 @@
 
 from chess_sandbox.puzzles_trainer.reasoning_verifier import (
     extract_pgn_moves,
+    extract_piece_positions_section,
     extract_solution_section,
     normalize_move,
+    parse_flexible_piece_list,
     parse_sections,
     validate_move_sequence,
+    validate_piece_positions,
     verify_reasoning_trace,
 )
 
@@ -70,6 +73,88 @@ class TestParseSections:
         """
         sections = parse_sections(reasoning)
         assert all(sections.values())
+
+
+class TestExtractPiecePositionsSection:
+    """Tests for piece positions section extraction."""
+
+    def test_extract_section(self):
+        reasoning = """
+        ## Step 1: FEN parsing
+        Some content.
+
+        ## Step 2: Piece Positions
+        White: Qa3, Bc3, Kh1. Black: Kg8, Ra8.
+
+        ## Step 3: Position Summary
+        Summary here.
+        """
+        section = extract_piece_positions_section(reasoning)
+        assert section is not None
+        assert "White: Qa3" in section
+        assert "Black: Kg8" in section
+
+    def test_no_section(self):
+        reasoning = """
+        ## Step 1: FEN parsing
+        Some content.
+        """
+        assert extract_piece_positions_section(reasoning) is None
+
+
+class TestParseFlexiblePieceList:
+    """Tests for flexible piece list parsing."""
+
+    def test_standard_notation(self):
+        text = "White: Qa3, Bc3, Kh1. Black: Kg8, Ra8"
+        pieces = parse_flexible_piece_list(text)
+        assert len(pieces) == 5
+
+    def test_full_piece_names(self):
+        text = "White: Queen a3, Bishop c3, King h1"
+        pieces = parse_flexible_piece_list(text)
+        assert len(pieces) == 3
+
+    def test_grouped_pawns(self):
+        text = "White: pawns a2, b2, c2"
+        pieces = parse_flexible_piece_list(text)
+        assert len(pieces) == 3
+
+    def test_sample_input(self):
+        text = (
+            "White: Qa3, Bc3, Kh1, Ra1, pawns a2, b2, c2, e4, g3, h2. "
+            "Black: Kg8, Ra8, Bc6, Qb7, pawns a7, b7, c7, d7, e6, f7, g6, h6, h7"
+        )
+        pieces = parse_flexible_piece_list(text)
+        white_pieces = [p for p in pieces if p[2]]
+        black_pieces = [p for p in pieces if not p[2]]
+        assert len(white_pieces) == 10
+        assert len(black_pieces) == 13
+
+
+class TestValidatePiecePositions:
+    """Tests for piece position validation."""
+
+    def test_correct_positions(self):
+        fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        text = (
+            "White: Ke1, Qd1, Ra1, Rh1, Bc1, Bf1, Nb1, Ng1, pawns a2, b2, c2, d2, e2, f2, g2, h2. "
+            "Black: Ke8, Qd8, Ra8, Rh8, Bc8, Bf8, Nb8, Ng8, pawns a7, b7, c7, d7, e7, f7, g7, h7"
+        )
+        accuracy = validate_piece_positions(fen, text)
+        assert accuracy == 1.0
+
+    def test_missing_pieces(self):
+        fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        text = "White: Ke1"
+        accuracy = validate_piece_positions(fen, text)
+        assert accuracy == 1 / 32  # 1 correct out of 32 total
+
+    def test_extra_pieces(self):
+        fen = "8/8/8/8/8/8/8/4K3 w - - 0 1"
+        text = "White: Ke1, Qd1"
+        accuracy = validate_piece_positions(fen, text)
+        assert accuracy == 0.5  # 1 correct, 1 extra = 1/2
 
 
 class TestExtractSolutionSection:
