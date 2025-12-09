@@ -34,9 +34,11 @@ class VerificationResult:
 
 
 SECTION_PATTERNS = {
-    "position_analysis": r"##\s*Position\s*Analysis",
-    "tactical_assessment": r"##\s*Tactical\s*Assessment",
-    "solution": r"##\s*Solution",
+    "fen_parsing": r"##\s*Step\s*1[:\s]*FEN\s*parsing",
+    "piece_positions": r"##\s*Step\s*2[:\s]*Piece\s*Positions",
+    "position_summary": r"##\s*Step\s*3[:\s]*Position\s*Summary",
+    "candidate_moves": r"##\s*Step\s*4[:\s]*Candidate\s*Moves",
+    "lines_exploration": r"##\s*Step\s*5[:\s]*Lines\s*Exploration",
 }
 
 
@@ -46,8 +48,8 @@ def parse_sections(reasoning: str) -> dict[str, bool]:
 
 
 def extract_solution_section(reasoning: str) -> str | None:
-    """Extract the Solution section content from reasoning."""
-    match = re.search(r"##\s*Solution\s*\n(.*?)(?=##|\</think\>|$)", reasoning, re.IGNORECASE | re.DOTALL)
+    """Extract the solution content from after </think> tag."""
+    match = re.search(r"</think>\s*\n?\s*(.+?)$", reasoning, re.DOTALL)
     return match.group(1).strip() if match else None
 
 
@@ -163,7 +165,7 @@ def verify_reasoning_trace(
 
     # 4. Calculate score
     # Section completeness: 30%
-    sections_score = 0.3 * (sections_count / 3)
+    sections_score = 0.3 * (sections_count / 5)
 
     # Move legality: 40%
     illegal_count = len(result.illegal_moves)

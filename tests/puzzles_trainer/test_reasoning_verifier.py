@@ -15,80 +15,92 @@ class TestParseSections:
 
     def test_all_sections_present(self):
         reasoning = """
-        ## Position Analysis
+        ## Step 1: FEN parsing
+        Breaking down the position...
+
+        ## Step 2: Piece Positions
+        White: Ke1, Qd1. Black: Ke8...
+
+        ## Step 3: Position Summary
         Material is equal. King safety concerns.
 
-        ## Tactical Assessment
-        Back rank weakness.
+        ## Step 4: Candidate Moves
+        e5, d5, Nf6...
 
-        ## Solution
-        19. Nxh7! Kxh7 20. Qh7#
+        ## Step 5: Lines Exploration
+        1...e5 2. Nf3 Nc6...
         """
         sections = parse_sections(reasoning)
-        assert sections["position_analysis"] is True
-        assert sections["tactical_assessment"] is True
-        assert sections["solution"] is True
+        assert sections["fen_parsing"] is True
+        assert sections["piece_positions"] is True
+        assert sections["position_summary"] is True
+        assert sections["candidate_moves"] is True
+        assert sections["lines_exploration"] is True
 
     def test_missing_sections(self):
         reasoning = """
-        ## Position Analysis
+        ## Step 1: FEN parsing
         Material is equal.
 
         The solution is Nxh7.
         """
         sections = parse_sections(reasoning)
-        assert sections["position_analysis"] is True
-        assert sections["tactical_assessment"] is False
-        assert sections["solution"] is False
+        assert sections["fen_parsing"] is True
+        assert sections["piece_positions"] is False
+        assert sections["position_summary"] is False
+        assert sections["candidate_moves"] is False
+        assert sections["lines_exploration"] is False
 
     def test_case_insensitive(self):
         reasoning = """
-        ## POSITION ANALYSIS
+        ## STEP 1: FEN PARSING
         Test content.
 
-        ## tactical assessment
+        ## step 2: piece positions
         More content.
 
-        ## SOLUTION
+        ## Step 3: Position Summary
+        Summary here.
+
+        ## Step 4: Candidate Moves
         Moves here.
+
+        ## Step 5: Lines Exploration
+        Exploration.
         """
         sections = parse_sections(reasoning)
         assert all(sections.values())
 
 
 class TestExtractSolutionSection:
-    """Tests for solution section extraction."""
+    """Tests for solution section extraction (content after </think>)."""
 
-    def test_extract_between_headers(self):
+    def test_extract_after_think_close(self):
         reasoning = """
-        ## Tactical Assessment
-        Some content.
-
-        ## Solution
+        <think>
+        ## Step 5: Lines Exploration
         19. Nxh7! {sacrifice} Kxh7 20. Qh7#
-
-        ## Another Section
-        More stuff.
-        """
-        solution = extract_solution_section(reasoning)
-        assert solution is not None
-        assert "19. Nxh7!" in solution
-        assert "Another Section" not in solution
-
-    def test_extract_before_think_close(self):
-        reasoning = """
-        ## Solution
-        19. Nxh7! Kxh7 20. Qh7#
         </think>
         Nxh7
         """
         solution = extract_solution_section(reasoning)
         assert solution is not None
-        assert "Nxh7!" in solution
-        assert "</think>" not in solution
+        assert solution == "Nxh7"
 
-    def test_no_solution_section(self):
-        reasoning = "Just some text without proper sections."
+    def test_extract_multiline_solution(self):
+        reasoning = """
+        <think>
+        Some analysis
+        </think>
+        Rxe7 Qb1+ Nc1
+        """
+        solution = extract_solution_section(reasoning)
+        assert solution is not None
+        assert "Rxe7" in solution
+        assert "Qb1+" in solution
+
+    def test_no_think_close_tag(self):
+        reasoning = "Just some text without the closing tag."
         assert extract_solution_section(reasoning) is None
 
 
@@ -201,14 +213,20 @@ class TestVerifyReasoningTrace:
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         reasoning = """
         <think>
-        ## Position Analysis
-        White has played e4, opening the center.
+        ## Step 1: FEN parsing
+        Breaking down the position after e4.
 
-        ## Tactical Assessment
-        Standard opening position. e5 is a solid response.
+        ## Step 2: Piece Positions
+        White: Ke1, Qd1, Ra1, Rh1, pawns. Black: Ke8, Qd8, Ra8, Rh8, pawns.
 
-        ## Solution
-        1...e5 {mirroring White's center control}
+        ## Step 3: Position Summary
+        White has played e4, opening the center. Material is equal.
+
+        ## Step 4: Candidate Moves
+        e5, d5, c5, Nf6 are all playable.
+
+        ## Step 5: Lines Exploration
+        1...e5 {mirroring White's center control} 2. Nf3 Nc6
         </think>
         e5
         """
@@ -229,7 +247,7 @@ class TestVerifyReasoningTrace:
         """
         result = verify_reasoning_trace(fen, reasoning, ["e5"])
 
-        assert result.first_move_correct is False  # No Solution section, so no move extracted
+        assert result.first_move_correct is True  # e5 extracted from after </think>
         assert not all(result.sections_found.values())
         assert result.score <= 0.7  # Penalized for missing sections
 
@@ -237,13 +255,19 @@ class TestVerifyReasoningTrace:
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         reasoning = """
         <think>
-        ## Position Analysis
+        ## Step 1: FEN parsing
         Test.
 
-        ## Tactical Assessment
+        ## Step 2: Piece Positions
         Test.
 
-        ## Solution
+        ## Step 3: Position Summary
+        Test.
+
+        ## Step 4: Candidate Moves
+        Test.
+
+        ## Step 5: Lines Exploration
         1...d5 {Scandinavian}
         </think>
         d5
@@ -254,20 +278,26 @@ class TestVerifyReasoningTrace:
         assert result.extracted_first_move == "d5"
         assert result.score < 0.8  # Missing first move bonus
 
-    def test_illegal_moves_in_analysis(self):
+    def test_illegal_moves_in_solution(self):
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         reasoning = """
         <think>
-        ## Position Analysis
+        ## Step 1: FEN parsing
         Test.
 
-        ## Tactical Assessment
+        ## Step 2: Piece Positions
         Test.
 
-        ## Solution
-        1...e5 2. Nf3 2...Nc6 3. Bb5 3...Qa1
+        ## Step 3: Position Summary
+        Test.
+
+        ## Step 4: Candidate Moves
+        Test.
+
+        ## Step 5: Lines Exploration
+        Test.
         </think>
-        e5
+        e5 Nf3 Nc6 Bb5 Qa1
         """
         result = verify_reasoning_trace(fen, reasoning, ["e5"])
 
@@ -280,13 +310,19 @@ class TestVerifyReasoningTrace:
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         reasoning = """
         <think>
-        ## Position Analysis
+        ## Step 1: FEN parsing
         Basic.
 
-        ## Tactical Assessment
+        ## Step 2: Piece Positions
         Basic.
 
-        ## Solution
+        ## Step 3: Position Summary
+        Basic.
+
+        ## Step 4: Candidate Moves
+        Basic.
+
+        ## Step 5: Lines Exploration
         1...e5
         </think>
         e5

@@ -217,18 +217,24 @@ def join_reasoning_trace(trace: ReasoningTrace, first_move: str) -> str:
     # Prefer solution_pgn if available, otherwise use lines_exploration
     solution_content = trace.solution_pgn if trace.solution_pgn else trace.lines_exploration
     return f"""<think>
-## Position Analysis
+## Step 1: FEN parsing
+{trace.fen_parsing}
+
+## Step 2: Piece Positions
 {trace.piece_positions}
+
+## Step 3: Position Summary
 {trace.position_summary}
 
-## Tactical Assessment
+## Step 4: Candidate Moves
 {trace.candidate_moves_reasoning}
 {trace.candidate_moves_csv}
 
-## Solution
-{solution_content}
+## Step 5: Lines Exploration
+{trace.lines_exploration}
+
 </think>
-{first_move}"""
+{solution_content}"""
 
 
 def format_reasoning_example(
@@ -380,7 +386,7 @@ async def generate_reasoning_dataset(
 @click.option("--max-concurrent", type=int, default=5, help="Max concurrent API requests")
 @click.option("--base-url", type=str, default=None, help="API base URL (default: OpenRouter)")
 @click.option("--api-key", type=str, default=None, help="API key (default: OPENROUTER_API_KEY env var)")
-@click.option("--test-split", type=float, default=0.2, help="Fraction for test set")
+@click.option("--test-split", type=float, default=0.1, help="Fraction for test set")
 @click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
 @click.option(
     "--dataset-id",
