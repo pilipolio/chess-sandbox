@@ -7,7 +7,6 @@ References:
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -118,44 +117,6 @@ def batch_generate(
             for j, output in enumerate(outputs):
                 input_len = int(inputs["input_ids"][j].shape[0])  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
                 generated = tokenizer.decode(output[input_len:], skip_special_tokens=True)  # pyright: ignore[reportUnknownMemberType]
-                generated = strip_think_tags(generated)
                 all_outputs.append(generated)
 
     return all_outputs
-
-
-def strip_think_tags(text: str) -> str:
-    """Strip <think>...</think> blocks from model output.
-
-    Handles truncated outputs gracefully:
-    - Complete blocks: removed entirely
-    - Unclosed <think> at end: stripped from <think> onwards
-    - Orphaned </think> at start: stripped through </think>
-
-    >>> strip_think_tags("hello")
-    'hello'
-    >>> strip_think_tags("<think>reasoning</think>answer")
-    'answer'
-    >>> strip_think_tags("<think>reasoning</think>\\n\\nanswer")
-    'answer'
-    >>> strip_think_tags("prefix<think>middle</think>suffix")
-    'prefixsuffix'
-    >>> strip_think_tags("<think>block1</think>mid<think>block2</think>end")
-    'midend'
-    >>> strip_think_tags("<think>unclosed")
-    ''
-    >>> strip_think_tags("orphan</think>text")
-    'text'
-    >>> strip_think_tags("answer<think>still thinking")
-    'answer'
-    """
-    # First, remove any complete <think>...</think> blocks
-    result = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-
-    # Handle truncated output: unclosed <think> at end
-    result = re.sub(r"<think>.*$", "", result, flags=re.DOTALL)
-
-    # Handle edge case: orphaned </think> at start
-    result = re.sub(r"^.*?</think>", "", result, flags=re.DOTALL)
-
-    return result.strip()

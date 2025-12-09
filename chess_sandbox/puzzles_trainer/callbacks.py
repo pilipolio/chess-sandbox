@@ -10,7 +10,7 @@ import chess
 import torch
 from transformers import PreTrainedTokenizerBase, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
-from chess_sandbox.puzzles_trainer.inference import batch_generate
+from chess_sandbox.puzzles_trainer.inference import batch_generate, strip_think_tags
 from chess_sandbox.puzzles_trainer.prompts import (
     build_ascii_board_prompt,
     build_concept_detection_prompt,
@@ -186,6 +186,7 @@ class ChessValidationCallback(TrainerCallback):
         print("  Validating outputs...")
 
         for example, output, prompt in zip(test_samples, all_outputs, prompts):
+            output = strip_think_tags(output)
             task_type = example.get("task_type", "unknown")
             expected = self._get_expected(example)
             result = self._validate_output(task_type, example, output, expected)

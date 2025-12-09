@@ -111,3 +111,45 @@ Nxh7
   - ~17-33 minutes total (200 × 5-10s) for roughly $0.80 and 20-30 minutes for 1,000 examples.
 - Analyze score distribution and failure modes
 
+---
+
+## 2024-12-09: Reasoning SFT Training - Qwen3-0.6B Baseline
+
+### Setup
+- **Model**: Qwen/Qwen3-0.6B with LoRA (r=32)
+- **Dataset**: pilipolio/chess-reasoning-traces (895 train, 100 test)
+- **Config**: batch_size=2, grad_accum=4, lr=2e-4, max_length=2048
+- **Run**: 50 steps test run (~0.27 epochs)
+
+### Metrics Progression
+| Step | Loss | Token Acc | Sections Found | First Move Acc |
+|------|------|-----------|----------------|----------------|
+| 10   | 1.56 | 64%       | 0.0/5          | 0%             |
+| 20   | 1.26 | 70%       | 4.1/5          | 10%            |
+| 30   | 1.15 | 71%       | 4.5/5          | 0%             |
+
+### Key Observations
+
+**What works:**
+- Model learns section structure quickly (0 → 4.5/5 sections in 30 steps)
+- Loss decreases steadily
+
+**Issues identified:**
+1. **FEN parsing fundamentally broken** - Model misinterprets digit notation:
+   - `3Q4` parsed as "a8 black queen" instead of "3 empty, Queen on d8, 4 empty"
+   - Digits representing empty squares not understood
+
+2. **Generation loops** - Model gets stuck repeating piece lists:
+   ```
+   Re4, Rh4, Re4, Rh4, Re4, Rh4...
+   ```
+
+3. **First move accuracy unstable** - 0% → 10% → 0% suggests model hasn't learned puzzle solving, just format
+
+### W&B Artifacts
+- [Eval examples table](https://wandb.ai/guillaumeallain-test/chess-reasoning-sft/artifacts/run_table/run-f3i0ir1m-evalexamples-9fKLYw/v1/files/eval/examples.table.json)
+
+### Next Steps
+- Run Qwen3-4B with full 3 epochs (larger capacity should help FEN understanding)
+- Consider adding FEN parsing examples to training data if 4B still struggles
+
