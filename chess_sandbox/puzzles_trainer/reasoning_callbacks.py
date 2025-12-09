@@ -40,7 +40,7 @@ class ReasoningValidationCallback(TrainerCallback):
         tokenizer: PreTrainedTokenizerBase,
         test_dataset: Dataset | None,
         num_validation_samples: int = 10,
-        log_examples: int = 5,
+        log_examples: int = 10,
         max_new_tokens: int = 3000,
     ):
         self.tokenizer = tokenizer
@@ -84,41 +84,43 @@ class ReasoningValidationCallback(TrainerCallback):
         sections_counts = [sum(r["sections_found"].values()) for r in results]
 
         metrics: dict[str, Any] = {
-            "eval/num_samples": len(results),
-            "eval/first_move_accuracy": sum(first_move_correct) / len(first_move_correct) if first_move_correct else 0,
-            "eval/legal_move_rate": sum(legal_move_rate) / len(legal_move_rate) if legal_move_rate else 0,
-            "eval/avg_sections_found": sum(sections_counts) / len(sections_counts) if sections_counts else 0,
+            "validate/num_samples": len(results),
+            "validate/first_move_accuracy": sum(first_move_correct) / len(first_move_correct)
+            if first_move_correct
+            else 0,
+            "validate/legal_move_rate": sum(legal_move_rate) / len(legal_move_rate) if legal_move_rate else 0,
+            "validate/avg_sections_found": sum(sections_counts) / len(sections_counts) if sections_counts else 0,
         }
 
         print("\nValidation Results:")
-        print(f"  Samples: {metrics['eval/num_samples']}")
-        print(f"  First move accuracy: {metrics['eval/first_move_accuracy']:.1%}")
-        print(f"  Legal move rate: {metrics['eval/legal_move_rate']:.1%}")
-        print(f"  Avg sections found: {metrics['eval/avg_sections_found']:.1f}/5")
+        print(f"  Samples: {metrics['validate/num_samples']}")
+        print(f"  First move accuracy: {metrics['validate/first_move_accuracy']:.1%}")
+        print(f"  Legal move rate: {metrics['validate/legal_move_rate']:.1%}")
+        print(f"  Avg sections found: {metrics['validate/avg_sections_found']:.1f}/5")
 
         wandb.log(metrics, step=state.global_step)
 
-        # Log examples table with full output as Html
+        # Log examples table
         table_data: list[list[Any]] = []
         for r in results[: self.log_examples]:
-            full_output_html = wandb.Html(f"<pre style='white-space: pre-wrap;'>{r['output']}</pre>")
             table_data.append(
                 [
                     r["fen"],
+                    r["source_url"],
                     r["expected_first_move"],
                     r["extracted_first_move"],
                     r["first_move_correct"],
                     r["legal_move"],
                     sum(r["sections_found"].values()),
-                    full_output_html,
+                    r["output"],
                 ]
             )
 
         table = wandb.Table(
-            columns=["FEN", "Expected", "Extracted", "Correct", "Legal", "Sections", "Output"],
+            columns=["FEN", "Lichess", "Expected", "Extracted", "Correct", "Legal", "Sections", "Output"],
             data=table_data,
         )
-        wandb.log({"eval/examples": table})
+        wandb.log({"validate/examples": table})
 
         print("Logged metrics and examples to W&B\n")
 
@@ -154,6 +156,7 @@ class ReasoningValidationCallback(TrainerCallback):
 
     def _validate_output(self, example: dict[str, Any], output: str) -> dict[str, Any]:
         fen = example.get("fen", "")
+        source_url = example.get("source_url", "")
         expected_first_move = example.get("first_move", "")
         solution_str = example.get("solution", "")
         expected_solution = solution_str.split() if solution_str else []
@@ -180,6 +183,7 @@ class ReasoningValidationCallback(TrainerCallback):
 
         return {
             "fen": fen,
+            "source_url": source_url,
             "expected_first_move": expected_first_move,
             "expected_solution": expected_solution,
             "extracted_first_move": extracted_first_move,

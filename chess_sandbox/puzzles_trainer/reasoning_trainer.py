@@ -4,13 +4,14 @@ Fine-tunes models on structured reasoning traces with <think> sections.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 import torch
 from datasets import load_dataset
+from datasets.load import DatasetDict
 from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import SFTConfig, SFTTrainer
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
@@ -155,20 +156,25 @@ def train(
     output_model_id = output_model_id or f"{DEFAULT_OUTPUT_MODEL_ID}-{model_short_name}"
     Path(output_model_id).mkdir(parents=True, exist_ok=True)
 
-    if wandb_project and not wandb_run_name:
-        wandb_run_name = model_short_name
-
-    if wandb_project:
-        import os
-
-        os.environ["WANDB_PROJECT"] = wandb_project
-
     model, tokenizer = load_model_and_tokenizer(model_id, use_4bit=use_4bit)
 
     print(f"Loading dataset from Hub: {dataset_id}")
-    dataset_dict = load_dataset(dataset_id)
+    dataset_dict: DatasetDict = cast(DatasetDict, load_dataset(dataset_id))
     train_dataset = dataset_dict["train"]
     test_dataset = dataset_dict["test"]
+
+    callbacks: list[TrainerCallback] = []
+    if wandb_project:
+        wandb_run_name = wandb_run_name or model_short_name
+        import os
+
+        os.environ["WANDB_PROJECT"] = wandb_project
+        callbacks.append(
+            ReasoningValidationCallback(
+                tokenizer=tokenizer,
+                test_dataset=test_dataset,
+            )
+        )
 
     print(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
 
@@ -180,15 +186,6 @@ def train(
         wandb_project=wandb_project,
         wandb_run_name=wandb_run_name,
     )
-
-    callbacks = []
-    if wandb_project:
-        callbacks.append(
-            ReasoningValidationCallback(
-                tokenizer=tokenizer,
-                test_dataset=test_dataset,
-            )
-        )
 
     print("\nTraining config:")
     print(f"  Output model ID: {output_model_id}")
