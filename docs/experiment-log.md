@@ -44,3 +44,70 @@ Solution: 27...Rd8 28.Qxd8+ Bxd8
 ### Next Steps
 - Consider adding a tool or prompt instruction to explore opponent's alternatives
 - The agent needs to ask "what if White doesn't play Qxd8+?" to find the back-rank mate threat
+
+---
+
+## 2024-12-09: Reasoning Trace Verification for SFT Data
+
+### Motivation
+Testing reasoning trajectories from open weights models (gpt-oss-120b, Qwen3 Max) for synthetic SFT data generation. Observations from https://openrouter.ai/chat?room=orc-1765226132-q0WSkSjbe8HRTJFj13jK:
+- **gpt-oss-120b**: Gets solutions but reasoning is messy (confused FEN parsing, truncated mid-sentence)
+- **Qwen3 Max**: Good step-by-step structure but hallucinates continuations after correct moves
+
+### Approach
+Rule based aided context engineering + a score-based verification pipeline to filter generated reasoning traces:
+
+1. **Updated prompt template** - Guide models to produce structured output:
+   - Position Analysis (Qwen-style)
+   - Tactical Assessment
+   - Solution (PGN annotation style with `{curly bracket comments}`)
+
+2. **Verifier module** (`reasoning_verifier.py`) with composite scoring:
+   - Section completeness (30%): All three sections present
+   - Move legality (40%): Validate moves in Solution section with python-chess
+   - First move correctness (30%): Must match puzzle solution
+
+3. **CLI integration** with filtering options:
+   - `--min-score 0.6` (default threshold)
+   - `--include-failed` for analysis
+
+### Target Output Format
+```
+<think>
+## Position Analysis
+- Side to move: White
+- Material: Equal
+- Key features: Knight on g5 attacking f7/h7, Black king on g8 with weak back rank
+
+## Tactical Assessment
+- Candidate checks: Nxh7+, Qh7+
+- Themes: Back-rank weakness, knight sacrifice
+
+## Solution
+19. Nxh7! {Deflection sacrifice - removes the h7 pawn}
+19...Kxh7 {Forced}
+20. Qh7# {Checkmate}
+</think>
+Nxh7
+```
+
+### Implementation
+| File | Description |
+|------|-------------|
+| `reasoning_verifier.py` | Score-based validation with section parsing, PGN extraction, move legality |
+| `reasoning_generator.py` | Updated prompt + verifier integration + CLI options |
+| `test_reasoning_verifier.py` | 24 test cases |
+
+### Results
+- Verifier correctly identifies missing sections, illegal moves, wrong first moves
+- Score-based filtering allows 1-2 illegal side-line moves while requiring correct solution
+- Disapointing results from both gpt-oss-20b/120b so went for gpt-5-nano
+
+### Next Steps
+- Run batch generation on 1000+ puzzles
+  - Ongoing https://logfire-eu.pydantic.dev/pilipolio/chess-sandbox-puzzles-generation
+  - https://huggingface.co/datasets/pilipolio/chess-reasoning-traces/viewer/default/train
+  - ~200 batches needed (1000 / 5) of ~2500 tokens (~ $0.0001 per generation)
+  - ~17-33 minutes total (200 × 5-10s) for roughly $0.80 and 20-30 minutes for 1,000 examples.
+- Analyze score distribution and failure modes
+

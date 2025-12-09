@@ -47,3 +47,25 @@ def train(*arglist: str):
     """
     cmd = ["python", "-m", "chess_sandbox.puzzles_trainer.trainer", "train", *arglist]
     subprocess.run(cmd, check=True)
+
+
+@app.function(  # type: ignore
+    gpu="A10G",
+    timeout=14400,  # 4 hours
+    secrets=[modal.Secret.from_name("huggingface-read-write-secret"), modal.Secret.from_name("wandb")],  # type: ignore
+)
+def train_reasoning(*arglist: str):
+    """Train chess reasoning SFT model via Modal subprocess invocation.
+
+    Args:
+        arglist: CLI arguments passed to reasoning_trainer CLI
+            --model-id: HuggingFace model ID (e.g., Qwen/Qwen3-0.6B)
+            --use-4bit: Use 4-bit quantization
+            --max-steps: Max training steps
+            --wandb-project: W&B project name
+
+    Raises:
+        RuntimeError: If training fails (non-zero exit code)
+    """
+    cmd = ["python", "-m", "chess_sandbox.puzzles_trainer.reasoning_trainer", *arglist]
+    subprocess.run(cmd, check=True)
