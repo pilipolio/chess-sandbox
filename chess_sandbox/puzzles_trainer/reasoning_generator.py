@@ -9,9 +9,9 @@ Example:
 """
 
 import asyncio
+import math
 import os
-import re
-from typing import Any, Literal
+from typing import Any
 
 import chess
 import click
@@ -24,192 +24,165 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 
+from chess_sandbox.puzzles_trainer.reasoning_verifier import VerificationResult, verify_reasoning_trace
+
 load_dotenv()
 
 DATASET_ID = "Lichess/chess-puzzles"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
-ModelChoice = Literal["openai/gpt-oss-20b:free", "openai/gpt-4o-mini"]
 
+def extract_puzzle_position_and_solution(fen: str, uci_moves: str) -> tuple[str, str, list[str]] | None:
+    """Extract puzzle position, opponent's last move, and solution.
 
-def get_solution_moves_san(fen: str, uci_moves: str) -> list[str]:
-    """Convert UCI solution moves to SAN notation.
-
-    Args:
-        fen: Starting position FEN.
-        uci_moves: Space-separated UCI moves (e.g., "g6f5 h3g5 f6g5").
+    In Lichess puzzles, the first move is the opponent's setup move.
+    The puzzle position is AFTER this move, and the solution starts from move 2.
 
     Returns:
-        List of SAN moves (e.g., ["Nxf5", "Qxg5", "Nxg5"]).
+        Tuple of (puzzle_fen, last_move_san, solution_san_list) or None if invalid
     """
     board = chess.Board(fen)
-    san_moves: list[str] = []
+    moves = uci_moves.strip().split()
 
-    for uci in uci_moves.strip().split():
-        try:
+    if len(moves) < 2:
+        return None
+
+    try:
+        # First move is opponent's setup
+        opponent_move = chess.Move.from_uci(moves[0])
+        if opponent_move not in board.legal_moves:
+            return None
+        last_move_san = board.san(opponent_move)
+        board.push(opponent_move)
+        puzzle_fen = board.fen()
+
+        # Remaining moves are the solution
+        solution_san: list[str] = []
+        for uci in moves[1:]:
             move = chess.Move.from_uci(uci)
-            if move in board.legal_moves:
-                san_moves.append(board.san(move))
-                board.push(move)
-            else:
+            if move not in board.legal_moves:
                 break
-        except ValueError:
-            break
+            solution_san.append(board.san(move))
+            board.push(move)
 
-    return san_moves
+        if not solution_san:
+            return None
 
+        return puzzle_fen, last_move_san, solution_san
 
-def build_ascii_board(fen: str) -> str:
-    """Generate ASCII board representation from FEN."""
-    return str(chess.Board(fen))
-
-
-def build_piece_positions(fen: str) -> str:
-    """List all pieces by color and position."""
-    board = chess.Board(fen)
-
-    white_pieces: list[str] = []
-    black_pieces: list[str] = []
-
-    for square, piece in board.piece_map().items():
-        piece_str = piece.symbol().upper() + chess.square_name(square)
-        if piece.color == chess.WHITE:
-            white_pieces.append(piece_str)
-        else:
-            black_pieces.append(piece_str)
-
-    white_pieces.sort(key=lambda p: ("KQRBNP".index(p[0]), p[1:]))
-    black_pieces.sort(key=lambda p: ("KQRBNP".index(p[0]), p[1:]))
-
-    return f"White: {', '.join(white_pieces)}\nBlack: {', '.join(black_pieces)}"
+    except ValueError:
+        return None
 
 
-def build_legal_captures(fen: str) -> str:
-    """List all legal captures for side to move."""
-    board = chess.Board(fen)
-    captures = [m for m in board.legal_moves if board.is_capture(m)]
-
-    if not captures:
-        return "none"
-
-    return ", ".join(board.san(m) for m in captures)
-
-
-def build_reasoning_context(example: dict[str, Any]) -> dict[str, Any]:
-    """Build rich context for reasoning generation from a puzzle.
-
-    Args:
-        example: Lichess puzzle with FEN, Moves, Themes, etc.
-
-    Returns:
-        Context dict with fen, ascii_board, piece_positions, legal_captures,
-        themes, solution_san, first_move_san.
-    """
-    fen = str(example["FEN"])
-    uci_moves = str(example["Moves"])
-    themes = list(example.get("Themes", []))
-
-    solution_san = get_solution_moves_san(fen, uci_moves)
-    if not solution_san:
-        raise ValueError(f"Could not parse solution moves: {uci_moves}")
-
-    return {
-        "fen": fen,
-        "ascii_board": build_ascii_board(fen),
-        "piece_positions": build_piece_positions(fen),
-        "legal_captures": build_legal_captures(fen),
-        "themes": themes,
-        "solution_san": solution_san,
-        "first_move_san": solution_san[0],
-        "puzzle_id": str(example.get("PuzzleId", "")),
+def build_piece_placement_summary(board: chess.Board) -> str:
+    """Build compact piece placement summary by color."""
+    piece_names = {
+        chess.KING: "K",
+        chess.QUEEN: "Q",
+        chess.ROOK: "R",
+        chess.BISHOP: "B",
+        chess.KNIGHT: "N",
     }
 
+    def pieces_for_color(color: chess.Color) -> str:
+        pieces: list[str] = []
+        pawn_count = 0
+        for square, piece in board.piece_map().items():
+            if piece.color != color:
+                continue
+            square_name = chess.square_name(square)
+            if piece.piece_type == chess.PAWN:
+                pawn_count += 1
+            else:
+                piece_char = piece_names.get(piece.piece_type, "?")
+                pieces.append(f"{piece_char}{square_name}")
+        if pawn_count > 0:
+            pieces.append(f"pawns ({pawn_count})")
+        return ", ".join(pieces)
 
-def build_pgn_template(solution_san: list[str], fen: str) -> str:
-    """Build a PGN template with move numbers for the solution.
-
-    Args:
-        solution_san: List of SAN moves in the solution.
-        fen: Starting position FEN.
-
-    Returns:
-        PGN template string like "27. Rd8+ {comment} Rxd8 {comment} 28. Rxd8# {comment}".
-    """
-    board = chess.Board(fen)
-    template_parts: list[str] = []
-    move_number = board.fullmove_number
-
-    for san_move in solution_san:
-        is_white_move = board.turn == chess.WHITE
-
-        if is_white_move:
-            template_parts.append(f"{move_number}. {san_move} {{comment}}")
-        else:
-            template_parts.append(f"{san_move} {{comment}}")
-            move_number += 1
-
-        try:
-            move = board.parse_san(san_move)
-            board.push(move)
-        except ValueError:
-            break
-
-    return " ".join(template_parts)
+    white_pieces = pieces_for_color(chess.WHITE)
+    black_pieces = pieces_for_color(chess.BLACK)
+    return f"White: {white_pieces}\nBlack: {black_pieces}"
 
 
-REASONING_PROMPT_TEMPLATE = """You are a chess instructor analyzing puzzle solutions in structured format.
+def identify_candidate_moves(board: chess.Board) -> dict[str, list[str]]:
+    """Identify forcing moves: checks and captures."""
+    checks: list[str] = []
+    captures: list[str] = []
 
-Position (FEN): {fen}
+    for move in board.legal_moves:
+        san = board.san(move)
+        if board.gives_check(move):
+            checks.append(san)
+        elif board.is_capture(move):
+            captures.append(san)
 
-Board:
+    return {"checks": checks, "captures": captures}
+
+
+REASONING_PROMPT_TEMPLATE = """Position (FEN): {puzzle_fen}
+
 {ascii_board}
 
-Pieces: {piece_positions}
+Pieces:
+{piece_placement}
 
-Available captures: {legal_captures}
+Context:
+- Opponent just played: {last_move}
+- Side to move: {side_to_move}
+- Themes: {themes}
 
-Themes: {themes}
+Candidate moves:
+- Checks: {checks}
+- Captures: {captures}
 
-Solution: {solution_str}
+Solution moves: {solution}
 
-Analyze this puzzle in two parts:
+Analyze this position following this exact format:
 
-1. POSITION (1-2 sentences): Key features - piece placement, weaknesses, threats.
-
-2. PGN ANALYSIS: Write moves with {{brief comments}} like {{check}}, {{forced}}, {{mate}}.
-
-Example output:
 <think>
-Position: White has doubled rooks on d-file. Black's king trapped on g8.
+## Position Analysis
+Summarize material balance, king safety, and key piece activity (2-3 bullet points)
 
-27. Rd8+ {{check, attacks b8 rook}} Rxd8 {{forced}} 28. Rxd8# {{mate}}
-</think>
-Rd8+
+## Tactical Assessment
+List the main tactical theme and why the candidate forcing moves matter
 
-Your output (use move numbers from position):
-<think>
-Position: [1-2 sentences on key features]
-
-{pgn_template}
+## Solution
+Annotate the solution in PGN style with {{curly bracket comments}} explaining each move.
+Start from move {move_number}. Format: "{move_number}. {first_move} {{explanation}} ..."
 </think>
 {first_move}"""
 
 
-def build_reasoning_prompt(context: dict[str, Any]) -> str:
-    """Build prompt for reasoning generation with PGN template."""
-    themes_str = ", ".join(context["themes"]) if context["themes"] else "none"
-    solution_str = " ".join(context["solution_san"])
-    pgn_template = build_pgn_template(context["solution_san"], context["fen"])
+def build_reasoning_prompt(
+    puzzle_fen: str,
+    last_move_san: str,
+    themes: list[str],
+    solution_san: list[str],
+) -> str:
+    """Build enhanced prompt with structured context."""
+    board = chess.Board(puzzle_fen)
+    ascii_board = str(board)
+    piece_placement = build_piece_placement_summary(board)
+    candidates = identify_candidate_moves(board)
+    side_to_move = "White" if board.turn == chess.WHITE else "Black"
+    move_number = board.fullmove_number
+
+    checks_str = ", ".join(candidates["checks"]) if candidates["checks"] else "none"
+    captures_str = ", ".join(candidates["captures"]) if candidates["captures"] else "none"
 
     return REASONING_PROMPT_TEMPLATE.format(
-        fen=context["fen"],
-        ascii_board=context["ascii_board"],
-        piece_positions=context["piece_positions"],
-        legal_captures=context["legal_captures"],
-        themes=themes_str,
-        solution_str=solution_str,
-        pgn_template=pgn_template,
-        first_move=context["first_move_san"],
+        puzzle_fen=puzzle_fen,
+        ascii_board=ascii_board,
+        piece_placement=piece_placement,
+        last_move=last_move_san,
+        side_to_move=side_to_move,
+        themes=", ".join(themes) if themes else "none",
+        checks=checks_str,
+        captures=captures_str,
+        solution=" ".join(solution_san),
+        first_move=solution_san[0],
+        move_number=move_number,
     )
 
 
@@ -218,16 +191,7 @@ async def generate_reasoning_trace(
     client: AsyncOpenAI,
     model: str = "gpt-oss-20b",
 ) -> str:
-    """Generate reasoning trace using OpenAI-compatible API.
-
-    Args:
-        prompt: Full prompt with context and instructions.
-        client: AsyncOpenAI client.
-        model: Model ID to use.
-
-    Returns:
-        Raw completion text.
-    """
+    """Generate reasoning trace using OpenAI-compatible API."""
     response = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -238,7 +202,7 @@ async def generate_reasoning_trace(
     message = response.choices[0].message
     content = message.content or ""
 
-    # Some reasoning models (e.g., gpt-oss-20b) put output in a separate reasoning field
+    # Some reasoning models put output in a separate reasoning field
     if not content and hasattr(message, "reasoning"):
         reasoning = getattr(message, "reasoning", None)
         if reasoning:
@@ -247,125 +211,38 @@ async def generate_reasoning_trace(
     return content
 
 
-def parse_reasoning_output(output: str) -> tuple[str | None, str | None]:
-    """Parse <think> tags and final move from model output.
-
-    Returns:
-        Tuple of (reasoning_content, final_move) or (None, None) if parsing fails.
-    """
-    think_match = re.search(r"<think>\s*(.*?)\s*</think>", output, re.DOTALL)
-    reasoning = think_match.group(1).strip() if think_match else None
-
-    # Extract move after </think> tag
-    after_think = re.split(r"</think>\s*", output, maxsplit=1)
-    if len(after_think) > 1:
-        # Take first word/token as the move
-        final_move = after_think[1].strip().split()[0] if after_think[1].strip() else None
-    else:
-        # No </think> tag, try to find move at end
-        final_move = None
-
-    return reasoning, final_move
-
-
-def validate_move(predicted: str | None, expected: str, fen: str) -> bool:
-    """Validate that predicted move matches expected (handles SAN/UCI variations).
-
-    Args:
-        predicted: Predicted move (SAN or UCI).
-        expected: Expected move (SAN).
-        fen: Position FEN for parsing.
-
-    Returns:
-        True if moves match.
-    """
-    if not predicted:
-        return False
-
-    board = chess.Board(fen)
-
-    try:
-        # Try parsing expected as SAN
-        expected_move = board.parse_san(expected)
-    except ValueError:
-        return False
-
-    # Try parsing predicted as SAN first
-    try:
-        predicted_move = board.parse_san(predicted)
-        return predicted_move == expected_move
-    except ValueError:
-        pass
-
-    # Try parsing as UCI
-    try:
-        predicted_move = chess.Move.from_uci(predicted)
-        return predicted_move == expected_move
-    except ValueError:
-        pass
-
-    return False
-
-
 def format_reasoning_example(
-    context: dict[str, Any],
+    puzzle_fen: str,
+    last_move_san: str,
+    themes: list[str],
+    solution_san: list[str],
     reasoning: str,
+    puzzle_id: str,
+    verification: VerificationResult | None = None,
 ) -> dict[str, Any]:
-    """Format puzzle with reasoning for SFT training.
+    """Format puzzle with reasoning for SFT training."""
+    question = f"Position: {puzzle_fen}\nOpponent's last move: {last_move_san}\nFind the best move."
+    answer = f"<think>\n{reasoning}\n</think>\n{solution_san[0]}"
 
-    Args:
-        context: Puzzle context from build_reasoning_context.
-        reasoning: Generated reasoning trace.
-
-    Returns:
-        SFT-ready example with question/answer fields and messages list.
-    """
-    question = f"Position: {context['fen']}\nFind the best move."
-    answer = f"<think>\n{reasoning}\n</think>\n{context['first_move_san']}"
-
-    return {
-        "messages": [
-            {"role": "user", "content": question},
-            {"role": "assistant", "content": answer},
-        ],
-        "task_type": "puzzle_reasoning",
-        "fen": context["fen"],
+    result: dict[str, Any] = {
         "question": question,
         "answer": answer,
-        "themes": context["themes"],
-        "solution": " ".join(context["solution_san"]),
+        "fen": puzzle_fen,
+        "last_move": last_move_san,
+        "solution": " ".join(solution_san),
+        "themes": themes,
+        "first_move": solution_san[0],
         "reasoning": reasoning,
-        "first_move": context["first_move_san"],
-        "source_url": f"https://lichess.org/training/{context['puzzle_id']}",
+        "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
+    if verification is not None:
+        result["verification_score"] = verification.score
+        result["sections_found"] = verification.sections_found
+        result["illegal_moves"] = verification.illegal_moves
+        result["first_move_correct"] = verification.first_move_correct
 
-# Hardcoded example for testing: back-rank mate puzzle
-BACKRANK_MATE_EXAMPLE: dict[str, Any] = {
-    "FEN": "1r4k1/4nppp/8/4Pb2/8/1P5P/r1PR4/3R3K w - - 0 27",
-    "Moves": "d2d8 b8d8 d1d8",  # Rd8+ Rxd8 Rxd8#
-    "Themes": ["backRankMate", "short", "mateIn2"],
-    "PuzzleId": "backrank_test",
-    "Rating": 1200,
-    "Popularity": 95,
-}
-
-
-def print_test_example() -> None:
-    """Print the test puzzle prompt for verification."""
-    context = build_reasoning_context(BACKRANK_MATE_EXAMPLE)
-    prompt = build_reasoning_prompt(context)
-
-    print("=" * 60)
-    print("TEST EXAMPLE: Back-rank mate puzzle")
-    print("=" * 60)
-    print(f"\nFEN: {context['fen']}")
-    print(f"Themes: {context['themes']}")
-    print(f"Solution: {' '.join(context['solution_san'])}")
-    print(f"First move: {context['first_move_san']}")
-    print("\n--- LLM Prompt (sent to generate reasoning) ---")
-    print(prompt)
-    print("=" * 60)
+    return result
 
 
 async def process_puzzle(
@@ -374,27 +251,31 @@ async def process_puzzle(
     model: str,
     semaphore: asyncio.Semaphore,
 ) -> dict[str, Any] | None:
-    """Process a single puzzle: build context, generate reasoning, validate.
-
-    Returns:
-        Formatted example or None if generation/validation failed.
-    """
+    """Process a single puzzle: generate and verify reasoning trace."""
     async with semaphore:
         try:
-            context = build_reasoning_context(example)
-            prompt = build_reasoning_prompt(context)
+            fen = str(example["FEN"])
+            uci_moves = str(example["Moves"])
+            themes = list(example.get("Themes", []))
+            puzzle_id = str(example.get("PuzzleId", ""))
 
-            output = await generate_reasoning_trace(prompt, client, model)
-            reasoning, predicted_move = parse_reasoning_output(output)
-
-            if not reasoning:
+            result = extract_puzzle_position_and_solution(fen, uci_moves)
+            if result is None:
                 return None
 
-            if not validate_move(predicted_move, context["first_move_san"], context["fen"]):
-                # Still use the reasoning but with correct move
-                pass
+            puzzle_fen, last_move_san, solution_san = result
 
-            return format_reasoning_example(context, reasoning)
+            prompt = build_reasoning_prompt(puzzle_fen, last_move_san, themes, solution_san)
+            output = await generate_reasoning_trace(prompt, client, model)
+
+            if not output.strip():
+                return None
+
+            verification = verify_reasoning_trace(puzzle_fen, output, solution_san)
+
+            return format_reasoning_example(
+                puzzle_fen, last_move_san, themes, solution_san, output, puzzle_id, verification
+            )
 
         except Exception as e:
             print(f"Error processing puzzle: {e}")
@@ -403,7 +284,7 @@ async def process_puzzle(
 
 async def generate_reasoning_dataset(
     sample_size: int = 20,
-    model: ModelChoice = "openai/gpt-oss-20b:free",
+    model: str = "openai/gpt-oss-20b:free",
     min_popularity: int = 80,
     max_rating: int | None = None,
     themes: tuple[str, ...] | None = None,
@@ -411,21 +292,7 @@ async def generate_reasoning_dataset(
     base_url: str | None = None,
     api_key: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Generate reasoning dataset from Lichess puzzles.
-
-    Args:
-        sample_size: Number of puzzles to process.
-        model: Model to use for generation (OpenRouter model ID).
-        min_popularity: Minimum puzzle popularity.
-        max_rating: Maximum puzzle rating.
-        themes: Filter by themes (None for all).
-        max_concurrent: Max concurrent API requests.
-        base_url: OpenAI-compatible API base URL (default: OpenRouter).
-        api_key: API key (uses OPENROUTER_API_KEY or OPENAI_API_KEY env var).
-
-    Returns:
-        List of formatted reasoning examples.
-    """
+    """Generate reasoning dataset from Lichess puzzles."""
     effective_base_url = base_url or DEFAULT_BASE_URL
     effective_api_key = api_key or os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
@@ -442,10 +309,6 @@ async def generate_reasoning_dataset(
     themes_lower = [t.lower() for t in themes] if themes else None
     sampled: list[dict[str, Any]] = []
 
-    # Always inject the hardcoded back-rank mate example first for verification
-    sampled.append(BACKRANK_MATE_EXAMPLE)
-    print(f"Injected test example: {BACKRANK_MATE_EXAMPLE['FEN']}")
-
     for example in dataset:  # pyright: ignore[reportUnknownVariableType]
         if example["Popularity"] < min_popularity:  # pyright: ignore[reportCallIssue,reportArgumentType]
             continue
@@ -460,7 +323,7 @@ async def generate_reasoning_dataset(
         if len(sampled) >= sample_size:
             break
 
-    print(f"Sampled {len(sampled)} puzzles (including 1 test example)")
+    print(f"Sampled {len(sampled)} puzzles")
 
     # Process puzzles concurrently
     tasks = [process_puzzle(ex, client, model, semaphore) for ex in sampled]
@@ -487,7 +350,7 @@ async def generate_reasoning_dataset(
 @click.option("--max-concurrent", type=int, default=5, help="Max concurrent API requests")
 @click.option("--base-url", type=str, default=None, help="API base URL (default: OpenRouter)")
 @click.option("--api-key", type=str, default=None, help="API key (default: OPENROUTER_API_KEY env var)")
-@click.option("--test-split", type=float, default=0.1, help="Fraction for test set")
+@click.option("--test-split", type=float, default=0.2, help="Fraction for test set")
 @click.option("--push-to-hub", is_flag=True, help="Push dataset to HuggingFace Hub")
 @click.option(
     "--dataset-id",
@@ -496,9 +359,15 @@ async def generate_reasoning_dataset(
     help="HuggingFace dataset ID",
 )
 @click.option(
-    "--test-example",
+    "--min-score",
+    type=float,
+    default=0.6,
+    help="Minimum verification score to include (0.0-1.0)",
+)
+@click.option(
+    "--include-failed",
     is_flag=True,
-    help="Print hardcoded back-rank mate example and exit (no API calls)",
+    help="Include all traces with verification metadata (for analysis)",
 )
 def main(
     sample_size: int,
@@ -511,26 +380,17 @@ def main(
     api_key: str | None,
     test_split: float,
     push_to_hub: bool,
-    test_example: bool,
     dataset_id: str,
+    min_score: float,
+    include_failed: bool,
 ) -> None:
-    """Generate chess puzzle reasoning traces using LLMs.
-
-    Uses OpenRouter API to generate <think>...</think> reasoning traces
-    for Lichess puzzles, suitable for SFT training.
-
-    Requires OPENROUTER_API_KEY environment variable or --api-key flag.
-    """
-    if test_example:
-        print_test_example()
-        return
-
+    """Generate chess puzzle reasoning traces using LLMs."""
     themes_tuple = tuple(themes.split(",")) if themes else None
 
     results = asyncio.run(
         generate_reasoning_dataset(
             sample_size=sample_size,
-            model=model,  # type: ignore[arg-type]
+            model=model,
             min_popularity=min_popularity,
             max_rating=max_rating,
             themes=themes_tuple,
@@ -544,33 +404,58 @@ def main(
         print("No results generated")
         return
 
-    # Split into train/test
+    # Filter by verification score unless include_failed is set
+    total_generated = len(results)
+    if not include_failed:
+        results = [r for r in results if r.get("verification_score", 0.0) >= min_score]
+        filtered_count = total_generated - len(results)
+        click.echo(f"Filtered {filtered_count} traces below min_score={min_score}")
+
+    if not results:
+        print("No results passed verification")
+        return
+
+    # Show verification stats
+    scores = [r.get("verification_score", 0.0) for r in results]
+    avg_score = sum(scores) / len(scores) if scores else 0.0
+    click.echo(f"Verification scores: avg={avg_score:.2f}, min={min(scores):.2f}, max={max(scores):.2f}")
+
     import random
 
     random.shuffle(results)
-    test_size = int(len(results) * test_split)
+    test_size = math.ceil(len(results) * test_split)
     train_data = results[:-test_size] if test_size > 0 else results
     test_data = results[-test_size:] if test_size > 0 else []
 
+    click.echo(f"Applying test split: {test_split} to {len(results)} examples")
+
     train_dataset = Dataset.from_list(train_data)  # pyright: ignore[reportUnknownMemberType]
     test_dataset = Dataset.from_list(test_data)  # pyright: ignore[reportUnknownMemberType]
+    dataset_dict = DatasetDict({"train": train_dataset, "test": test_dataset})
 
-    print(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
+    click.echo(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
 
-    # Show sample
+    # Show sample with verification info
     if results:
         print("\n--- Sample output ---")
         sample = results[0]
         print(f"FEN: {sample['fen']}")
         print(f"Themes: {sample['themes']}")
         print(f"Solution: {sample['solution']}")
-        print(f"Reasoning: {sample['reasoning']}")
-        print(f"First move: {sample['first_move']}")
+        print(f"Verification score: {sample.get('verification_score', 'N/A')}")
+        print(f"First move correct: {sample.get('first_move_correct', 'N/A')}")
+        print(f"Sections found: {sample.get('sections_found', 'N/A')}")
+        print(f"Illegal moves: {sample.get('illegal_moves', [])}")
+        print(f"Question: {sample['question']}")
+        print(f"Answer: {sample['answer']}")
 
     if push_to_hub:
-        dataset_dict = DatasetDict({"train": train_dataset, "test": test_dataset})
         dataset_dict.push_to_hub(dataset_id)  # pyright: ignore[reportUnknownMemberType]
         print(f"Pushed to: https://huggingface.co/datasets/{dataset_id}")
+    else:
+        import json
+
+        print(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":
