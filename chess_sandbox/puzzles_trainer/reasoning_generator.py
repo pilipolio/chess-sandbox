@@ -120,38 +120,32 @@ def identify_candidate_moves(board: chess.Board) -> dict[str, list[str]]:
     return {"checks": checks, "captures": captures}
 
 
-REASONING_PROMPT_TEMPLATE = """Position (FEN): {puzzle_fen}
+REASONING_PROMPT_TEMPLATE = """Analyze this chess puzzle. Output EXACTLY:
 
+<think>
+## Position Analysis
+- [2-3 bullet points: material, king safety, piece activity]
+
+## Tactical Assessment
+[One paragraph on the tactical theme]
+
+## Solution
+{move_number}. {first_move} {{why this move wins}} [continue annotating: {solution}]
+</think>
+{first_move}
+
+Position: {puzzle_fen}
 {ascii_board}
 
 Pieces:
 {piece_placement}
 
-Context:
-- Opponent just played: {last_move}
-- Side to move: {side_to_move}
-- Themes: {themes}
+Last move: {last_move} | To move: {side_to_move} | Themes: {themes}
+Checks: {checks} | Captures: {captures}
 
-Candidate moves:
-- Checks: {checks}
-- Captures: {captures}
+Solution: {solution}
 
-Solution moves: {solution}
-
-Analyze this position following this exact format:
-
-<think>
-## Position Analysis
-Summarize material balance, king safety, and key piece activity (2-3 bullet points)
-
-## Tactical Assessment
-List the main tactical theme and why the candidate forcing moves matter
-
-## Solution
-Annotate the solution in PGN style with {{curly bracket comments}} explaining each move.
-Start from move {move_number}. Format: "{move_number}. {first_move} {{explanation}} ..."
-</think>
-{first_move}"""
+Write the analysis now. Start with <think> and end with just the move {first_move}"""
 
 
 def build_reasoning_prompt(
