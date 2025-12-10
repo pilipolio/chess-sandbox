@@ -279,16 +279,19 @@ def verify_reasoning_trace(
         result.first_move_correct = normalized_extracted == normalized_expected
 
     # 5. Calculate score
-    # Section completeness: 30%
-    sections_score = 0.3 * (sections_count / 5)
+    # Section completeness: 20%
+    sections_score = 0.2 * (sections_count / 5)
 
-    # Move legality: 40%
+    # Piece positions accuracy: 20%
+    piece_accuracy_score = 0.2 * result.piece_positions_accuracy
+
+    # Move legality: 30%
     illegal_count = len(result.illegal_moves)
-    legality_score = 0.4 * max(0.0, 1 - illegal_count / max(max_illegal_moves, 1))
+    legality_score = 0.3 * max(0.0, 1 - illegal_count / max(max_illegal_moves, 1))
 
     # First move correctness: 30%
     first_move_score = 0.3 if result.first_move_correct else 0.0
 
-    result.score = sections_score + legality_score + first_move_score
+    result.score = sections_score + piece_accuracy_score + legality_score + first_move_score
 
     return result

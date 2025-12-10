@@ -68,6 +68,20 @@ logfire.instrument_openai()
 DATASET_ID = "Lichess/chess-puzzles"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Theme quotas for balanced sampling (must sum to 1.0)
+THEME_QUOTAS: dict[str, float] = {
+    "fork": 0.20,
+    "pin": 0.15,
+    "skewer": 0.10,
+    "discoveredAttack": 0.10,
+    "hangingPiece": 0.10,
+    "backRankMate": 0.10,
+    "mateIn1": 0.10,
+    "deflection": 0.05,
+    "attraction": 0.05,
+    "other": 0.05,  # Catch-all for puzzles not matching above themes
+}
+
 
 def extract_puzzle_position_and_solution(fen: str, uci_moves: str) -> tuple[str, str, list[str]] | None:
     """Extract puzzle position, opponent's last move, and solution.
@@ -76,7 +90,8 @@ def extract_puzzle_position_and_solution(fen: str, uci_moves: str) -> tuple[str,
     The puzzle position is AFTER this move, and the solution starts from move 2.
 
     Returns:
-        Tuple of (puzzle_fen, last_move_san, solution_san_list) or None if invalid
+        Tuple of (puzzle_fen, last_move_san, solution_san_list) or None if invalid.
+        Returns None if ANY move in the solution sequence is illegal (strict validation).
     """
     board = chess.Board(fen)
     moves = uci_moves.strip().split()
@@ -93,12 +108,12 @@ def extract_puzzle_position_and_solution(fen: str, uci_moves: str) -> tuple[str,
         board.push(opponent_move)
         puzzle_fen = board.fen()
 
-        # Remaining moves are the solution
+        # STRICT: Validate ENTIRE solution sequence - reject if any move is illegal
         solution_san: list[str] = []
         for uci in moves[1:]:
             move = chess.Move.from_uci(uci)
             if move not in board.legal_moves:
-                break
+                return None  # Reject puzzle entirely, don't return partial solution
             solution_san.append(board.san(move))
             board.push(move)
 
@@ -142,8 +157,8 @@ def build_piece_placement_summary(board: chess.Board) -> str:
     return f"White: {white_pieces}\nBlack: {black_pieces}"
 
 
-def identify_candidate_moves(board: chess.Board) -> dict[str, list[str]]:
-    """Identify forcing moves: checks and captures."""
+def identify_candidate_moves(board: chess.Board) -> str:
+    """Identify forcing moves: checks and captures, formatted as a string."""
     checks: list[str] = []
     captures: list[str] = []
 
@@ -154,12 +169,17 @@ def identify_candidate_moves(board: chess.Board) -> dict[str, list[str]]:
         elif board.is_capture(move):
             captures.append(san)
 
-    return {"checks": checks, "captures": captures}
+    parts: list[str] = []
+    if checks:
+        parts.append(f"Checks: {', '.join(checks)}")
+    if captures:
+        parts.append(f"Captures: {', '.join(captures)}")
+    return "; ".join(parts) if parts else "None"
 
 
 REASONING_PROMPT_TEMPLATE = """\
 You are a chess instructor explaining your thought process when solving puzzles for your students.
-Break down step by step how you've arrived at the solution, using the following information:
+Break down step by step how you analyze this position and arrive at your answer.
 
 Position (FEN): {puzzle_fen}
 Pieces: {piece_positions}
@@ -167,7 +187,14 @@ Candidate moves: {candidate_moves}
 Last move: {last_move}
 To move: {side_to_move}
 Themes: {themes}
-Solution: {solution}"""
+
+IMPORTANT INSTRUCTIONS:
+1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves), do NOT quote the final solution.
+2. In Lines Exploration, you MUST include at least one refuted line - show why a plausible alternative fails.
+3. Only reveal the solution in the final Solution section.
+
+The correct solution is: {solution}
+Your task is to explain WHY this is correct, including why alternatives fail."""
 
 
 def build_reasoning_prompt(
@@ -244,6 +271,7 @@ def format_reasoning_example(
     solution_san: list[str],
     trace: ReasoningTrace,
     puzzle_id: str,
+    rating: int,
     verification: VerificationResult | None = None,
 ) -> dict[str, Any]:
     """Format puzzle with structured reasoning for SFT training."""
@@ -259,6 +287,7 @@ def format_reasoning_example(
         "solution": " ".join(solution_san),
         "themes": themes,
         "first_move": first_move,
+        "rating": rating,
         # Structured fields for downstream flexibility
         "fen_parsing": trace.fen_parsing,
         "piece_positions": trace.piece_positions,
@@ -292,6 +321,7 @@ async def process_puzzle(
             uci_moves = str(example["Moves"])
             themes = list(example.get("Themes", []))
             puzzle_id = str(example.get("PuzzleId", ""))
+            rating = int(example.get("Rating", 0))
 
             result = extract_puzzle_position_and_solution(fen, uci_moves)
             if result is None:
@@ -310,12 +340,26 @@ async def process_puzzle(
             verification = verify_reasoning_trace(puzzle_fen, joined, solution_san)
 
             return format_reasoning_example(
-                puzzle_fen, last_move_san, themes, solution_san, trace, puzzle_id, verification
+                puzzle_fen, last_move_san, themes, solution_san, trace, puzzle_id, rating, verification
             )
 
         except Exception as e:
             print(f"Error processing puzzle: {e}")
             return None
+
+
+def get_primary_theme(puzzle_themes: list[str]) -> str:
+    """Get the primary theme for quota tracking.
+
+    Returns the first theme that matches a quota category, or 'other' if none match.
+    """
+    themes_lower = {t.lower() for t in puzzle_themes}
+    for theme in THEME_QUOTAS:
+        if theme == "other":
+            continue
+        if theme.lower() in themes_lower:
+            return theme
+    return "other"
 
 
 async def generate_reasoning_dataset(
@@ -327,6 +371,7 @@ async def generate_reasoning_dataset(
     max_concurrent: int = 5,
     base_url: str | None = None,
     api_key: str | None = None,
+    balanced: bool = False,
 ) -> list[dict[str, str]]:
     """Generate reasoning dataset from Lichess puzzles."""
     effective_base_url = base_url or DEFAULT_BASE_URL
@@ -345,6 +390,14 @@ async def generate_reasoning_dataset(
     themes_lower = [t.lower() for t in themes] if themes else None
     sampled: list[dict[str, Any]] = []
 
+    # Theme quota tracking for balanced sampling
+    theme_targets: dict[str, int] = {}
+    theme_counts: dict[str, int] = {}
+    if balanced:
+        theme_targets = {theme: int(sample_size * quota) for theme, quota in THEME_QUOTAS.items()}
+        theme_counts = {theme: 0 for theme in THEME_QUOTAS}
+        print(f"Balanced sampling targets: {theme_targets}")
+
     for example in dataset:  # pyright: ignore[reportUnknownVariableType]
         if example["Popularity"] < min_popularity:  # pyright: ignore[reportCallIssue,reportArgumentType]
             continue
@@ -355,11 +408,28 @@ async def generate_reasoning_dataset(
             if not any(pt.lower() in themes_lower for pt in puzzle_themes):  # pyright: ignore[reportUnknownArgumentType,reportUnknownMemberType,reportUnknownVariableType]
                 continue
 
+        # Balanced sampling: check if this puzzle's theme quota is already full
+        if balanced:
+            puzzle_themes_list: list[str] = list(example.get("Themes", []))  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType,reportAttributeAccessIssue,reportUnknownArgumentType]
+            primary_theme = get_primary_theme(puzzle_themes_list)
+            if theme_counts[primary_theme] >= theme_targets[primary_theme]:
+                continue  # Skip - quota for this theme is full
+            theme_counts[primary_theme] += 1
+
         sampled.append(dict(example))  # pyright: ignore[reportUnknownArgumentType]
-        if len(sampled) >= sample_size:
+
+        # Check termination condition
+        if balanced:
+            # Stop when all quotas are filled
+            if all(theme_counts[t] >= theme_targets[t] for t in THEME_QUOTAS):
+                break
+        elif len(sampled) >= sample_size:
             break
 
-    print(f"Sampled {len(sampled)} puzzles")
+    if balanced:
+        print(f"Sampled {len(sampled)} puzzles with theme distribution: {theme_counts}")
+    else:
+        print(f"Sampled {len(sampled)} puzzles")
 
     # Process puzzles concurrently
     tasks = [process_puzzle(ex, client, model, semaphore) for ex in sampled]
@@ -405,6 +475,11 @@ async def generate_reasoning_dataset(
     is_flag=True,
     help="Include all traces with verification metadata (for analysis)",
 )
+@click.option(
+    "--balanced",
+    is_flag=True,
+    help="Use quota-based theme balancing to prevent mate-puzzle overfit",
+)
 def main(
     sample_size: int,
     model: str,
@@ -419,6 +494,7 @@ def main(
     dataset_id: str,
     min_score: float,
     include_failed: bool,
+    balanced: bool,
 ) -> None:
     """Generate chess puzzle reasoning traces using LLMs."""
     themes_tuple = tuple(themes.split(",")) if themes else None
@@ -433,6 +509,7 @@ def main(
             max_concurrent=max_concurrent,
             base_url=base_url,
             api_key=api_key,
+            balanced=balanced,
         )
     )
 
