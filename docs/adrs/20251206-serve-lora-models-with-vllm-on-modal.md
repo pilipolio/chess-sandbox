@@ -34,7 +34,7 @@ Following [Modal's vLLM inference best practices](https://modal.com/docs/example
 vllm_image = (
     modal.Image.from_registry("nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.12")
     .entrypoint([])
-    .uv_pip_install("vllm==0.11.2", "huggingface-hub==0.36.0")
+    .uv_pip_install("vllm==0.11.2", "huggingface-hub==0.36.0", "outlines==1.2.9")
 )
 
 # Persistent volumes for model caching
@@ -76,6 +76,52 @@ def serve():
 
 * [20251029-use-modal-for-serverless-endpoints.md](20251029-use-modal-for-serverless-endpoints.md) - Modal as platform choice
 * [20251101-use-huggingface-hub-for-versioning.md](20251101-use-huggingface-hub-for-versioning.md) - HF Hub for model storage
+
+## Structured Outputs
+
+vLLM supports structured outputs via the [Outlines library](https://docs.vllm.ai/en/v0.8.2/features/structured_outputs.html). Add `outlines==1.2.9` to the image dependencies.
+
+Use `response_format` with Pydantic models or `guided_json` via `extra_body`.
+
+## Reasoning + Structured Outputs
+
+vLLM supports combining reasoning mode (`<think>` tags) with structured outputs. The structured output engine skips format enforcement when reasoning tokens are detected.
+
+### Server Configuration
+
+```python
+cmd = [
+    "python", "-m", "vllm.entrypoints.openai.api_server",
+    "--model", BASE_MODEL,
+    "--enable-lora",
+    "--lora-modules", f"chess-reasoning={lora_path}",
+    "--max-model-len", "4096",  # Needed for longer reasoning traces
+    "--reasoning-parser", "qwen3",  # Enable <think> tag parsing
+    "--enforce-eager",
+]
+```
+
+### Response Fields
+
+- `message.reasoning` - Thinking content from `<think>` tags
+- `message.reasoning_content` - Same as reasoning (alias)
+- `message.content` - Final output text (after `</think>`)
+- `message.parsed` - Pydantic model instance (if using `response_format`)
+
+### Evaluation Integration
+
+The `reasoning_evaluation.py` script includes `PlainReasoningModel` that captures reasoning:
+
+```python
+response = client.chat.completions.create(...)
+reasoning = getattr(message, "reasoning", None) or getattr(message, "reasoning_content", None)
+```
+
+See [vllm-reasoning-and-structured-outputs.md](../vllm-reasoning-and-structured-outputs.md) for details.
+
+**References:**
+- [vLLM Reasoning Outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs.html)
+- [vLLM Structured Outputs](https://docs.vllm.ai/en/v0.8.2/features/structured_outputs.html)
 
 ## Notes
 

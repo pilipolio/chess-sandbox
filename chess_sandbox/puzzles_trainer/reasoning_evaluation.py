@@ -1,14 +1,14 @@
-"""LLM evaluation for chess puzzle reasoning with Weave tracking."""
+"""LLM evaluation for chess puzzle reasoning with structured outputs and Weave tracking."""
 
 import asyncio
 import os
-import re
 
 import click
 import weave
 from datasets import Dataset, load_dataset  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from dotenv import load_dotenv
 from openai import OpenAI
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -26,47 +26,23 @@ MODELS: dict[str, str] = {
 
 BENCHMARK_MODELS = list(MODELS.keys())
 
-BASELINE_PROMPT_SUFFIX = """
 
-IMPORTANT: Respond with ONLY the best move in standard algebraic notation (e.g., Nf3, Qxg2#, O-O).
-Do not explain your reasoning. Just output the single best move."""
+class ChessReasoningOutput(BaseModel):
+    """Structured output for chess puzzle reasoning."""
 
-
-def format_prompt_for_model(question: str, model_name: str) -> str:
-    """Add format instructions for baseline models."""
-    if model_name == "chess-reasoning":
-        return question
-    return question + BASELINE_PROMPT_SUFFIX
-
-
-MOVE_PATTERN = re.compile(
-    r"\b([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?|O-O(?:-O)?)\b",
-    re.IGNORECASE,
-)
-
-
-def extract_first_move(output: str) -> str:
-    """Extract the first move from model output, handling various formats."""
-    text = output.strip()
-
-    # Handle <think>...</think> format from finetuned model
-    if "</think>" in text:
-        text = text.split("</think>")[-1].strip()
-
-    # Try to find a chess move pattern
-    match = MOVE_PATTERN.search(text)
-    if match:
-        return match.group(1)
-
-    # Fallback: return first token
-    tokens = text.split()
-    if tokens:
-        return tokens[0].strip()
-    return ""
+    piece_positions: str = Field(description="Key pieces and their squares, e.g., 'White: Qh6, Re6. Black: Kh8, Qb6'")
+    candidate_moves: list[str] = Field(description="List of candidate moves in SAN notation")
+    themes: list[str] = Field(
+        description="Tactical/strategic themes: fork, pin, skewer, back-rank, discovered attack, etc."
+    )
+    solution: list[str] = Field(description="Full solution as list of SAN moves")
+    best_move: str = Field(description="The single best move (first move of solution) in SAN notation")
 
 
 def normalize_move(move: str) -> str:
     """Normalize chess move for comparison."""
+    import re
+
     move = move.strip().lower()
     move = re.sub(r"[+#=].*$", "", move)
     return move
@@ -82,39 +58,124 @@ def create_client(base_url: str) -> OpenAI:
     return OpenAI(base_url=base_url, api_key=key or "dummy")
 
 
-class ReasoningPuzzleModel(weave.Model):
-    """Weave model wrapper for chess reasoning puzzle evaluation."""
+class ReasoningModelOutput(BaseModel):
+    """Output from reasoning model including raw reasoning trace."""
+
+    best_move: str = Field(description="The best move extracted from model output")
+    reasoning: str | None = Field(default=None, description="Raw reasoning trace from model")
+
+
+class StructuredReasoningModel(weave.Model):
+    """Weave model wrapper for chess reasoning with structured outputs."""
 
     model_name: str
     base_url: str
 
     @weave.op()
-    def predict(self, question: str) -> str:
-        """Get model prediction for a question."""
-        prompt = format_prompt_for_model(question, self.model_name)
+    def predict(self, question: str) -> ChessReasoningOutput | None:
+        """Get structured model prediction for a question."""
         client = create_client(self.base_url)
-        kwargs: dict[str, object] = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if self.base_url == MODAL_VLLM_URL:
-            kwargs["max_tokens"] = 1024
-            kwargs["temperature"] = 0.7
 
         try:
-            response = client.chat.completions.create(**kwargs)  # pyright: ignore[reportArgumentType, reportUnknownVariableType, reportCallIssue]
-            content = response.choices[0].message.content  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            return content.strip() if content else ""  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            response = client.beta.chat.completions.parse(
+                model=self.model_name,
+                messages=[{"role": "user", "content": question}],
+                response_format=ChessReasoningOutput,
+                max_tokens=1024,
+                temperature=0.7,
+            )
+            return response.choices[0].message.parsed
         except Exception as e:
             print(f"\nError evaluating example with {self.model_name}: {e}")
-            return ""
+            return None
+
+
+class PlainReasoningModel(weave.Model):
+    """Weave model wrapper for plain text reasoning models (like fine-tuned Qwen3)."""
+
+    model_name: str
+    base_url: str
+
+    @weave.op()
+    def predict(self, question: str) -> ReasoningModelOutput | None:
+        """Get plain text prediction with reasoning trace."""
+        client = create_client(self.base_url)
+
+        try:
+            response = client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": question}],
+                max_tokens=2048,
+                temperature=0.7,
+            )
+            message = response.choices[0].message
+            content = message.content or ""
+            reasoning = getattr(message, "reasoning", None) or getattr(message, "reasoning_content", None)
+
+            best_move = content.strip().split("\n")[0].strip() if content else ""
+
+            return ReasoningModelOutput(best_move=best_move, reasoning=reasoning)
+        except Exception as e:
+            print(f"\nError evaluating example with {self.model_name}: {e}")
+            return None
 
 
 @weave.op()
-def first_move_scorer(first_move: str, output: str) -> dict[str, bool]:
+def first_move_scorer(first_move: str, output: ChessReasoningOutput | None) -> dict[str, bool]:
     """Score model output against expected first move."""
-    predicted = extract_first_move(output)
-    return {"first_move_match": normalize_move(predicted) == normalize_move(first_move)}
+    if output is None:
+        return {"first_move_match": False}
+    return {"first_move_match": normalize_move(output.best_move) == normalize_move(first_move)}
+
+
+@weave.op()
+def plain_first_move_scorer(first_move: str, output: ReasoningModelOutput | None) -> dict[str, bool]:
+    """Score plain model output against expected first move."""
+    if output is None:
+        return {"first_move_match": False}
+    return {"first_move_match": normalize_move(output.best_move) == normalize_move(first_move)}
+
+
+@weave.op()
+def reasoning_scorer(first_move: str, output: ReasoningModelOutput | None) -> dict[str, float | bool]:
+    """Score reasoning quality."""
+    if output is None or not output.reasoning:
+        return {"has_reasoning": False, "reasoning_length": 0.0, "mentions_solution": False}
+
+    return {
+        "has_reasoning": True,
+        "reasoning_length": float(len(output.reasoning)),
+        "mentions_solution": first_move.lower() in output.reasoning.lower(),
+    }
+
+
+@weave.op()
+def candidate_scorer(first_move: str, output: ChessReasoningOutput | None) -> dict[str, bool]:
+    """Check if correct move is in candidate moves."""
+    if output is None:
+        return {"candidate_includes_solution": False}
+    normalized_first = normalize_move(first_move)
+    normalized_candidates = [normalize_move(m) for m in output.candidate_moves]
+    return {"candidate_includes_solution": normalized_first in normalized_candidates}
+
+
+@weave.op()
+def theme_scorer(themes: list[str], output: ChessReasoningOutput | None) -> dict[str, float]:
+    """Jaccard similarity between predicted and actual themes."""
+    if output is None or not themes:
+        return {"theme_jaccard": 0.0}
+    expected = {t.lower() for t in themes}
+    predicted = {t.lower() for t in output.themes}
+    if not expected and not predicted:
+        return {"theme_jaccard": 1.0}
+    if not expected or not predicted:
+        return {"theme_jaccard": 0.0}
+    intersection = expected & predicted
+    union = expected | predicted
+    return {"theme_jaccard": len(intersection) / len(union)}
+
+
+PLAIN_REASONING_MODELS = {"chess-reasoning"}
 
 
 async def run_evaluation(
@@ -128,14 +189,21 @@ async def run_evaluation(
 
     print(f"Evaluating {len(dataset)} examples with model: {model_name}")
 
-    examples: list[dict[str, str]] = [dict(ex) for ex in dataset]  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+    examples: list[dict[str, object]] = [dict(ex) for ex in dataset]  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
 
-    model = ReasoningPuzzleModel(model_name=model_name, base_url=base_url)
-    eval_name = f"reasoning-{len(examples)}:{model_name}"
+    if model_name in PLAIN_REASONING_MODELS:
+        model: weave.Model = PlainReasoningModel(model_name=model_name, base_url=base_url)
+        scorers: list[object] = [plain_first_move_scorer, reasoning_scorer]
+        eval_name = f"reasoning-plain-{len(examples)}:{model_name}"
+    else:
+        model = StructuredReasoningModel(model_name=model_name, base_url=base_url)
+        scorers = [first_move_scorer, candidate_scorer, theme_scorer]
+        eval_name = f"reasoning-structured-{len(examples)}:{model_name}"
+
     evaluation = weave.Evaluation(
         name=eval_name,
         dataset=examples,  # pyright: ignore[reportArgumentType]
-        scorers=[first_move_scorer],
+        scorers=scorers,  # pyright: ignore[reportArgumentType]
     )
 
     results = await evaluation.evaluate(model)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
@@ -157,52 +225,85 @@ async def run_benchmark(
     return all_results
 
 
+def get_metric(results: dict[str, object], scorer: str, metric: str) -> float | None:
+    """Extract a metric value from Weave results."""
+    scorer_data = results.get(scorer, {})
+    if isinstance(scorer_data, dict):
+        metric_info = scorer_data.get(metric, {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if isinstance(metric_info, dict):
+            return metric_info.get("true_fraction") or metric_info.get("mean", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportReturnType]
+    return None
+
+
 def print_model_summary(model: str, results: dict[str, object]) -> None:
     """Print summary for a single model from Weave evaluation results."""
-    scorer_data = results.get("first_move_scorer", {})
-    if isinstance(scorer_data, dict):
-        match_info = scorer_data.get("first_move_match", {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        if isinstance(match_info, dict):
-            mean = match_info.get("true_fraction", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            print(f"{model}: {mean * 100:.1f}% first move accuracy")
-            return
-    print(f"{model}: Results available in Weave UI")
+    first_move = get_metric(results, "first_move_scorer", "first_move_match")
+    candidates = get_metric(results, "candidate_scorer", "candidate_includes_solution")
+    themes = get_metric(results, "theme_scorer", "theme_jaccard")
+
+    parts = [f"{model}:"]
+    if first_move is not None:
+        parts.append(f"first_move={first_move * 100:.1f}%")
+    if candidates is not None:
+        parts.append(f"candidates={candidates * 100:.1f}%")
+    if themes is not None:
+        parts.append(f"themes={themes * 100:.1f}%")
+    print(" ".join(parts))
 
 
 def print_summary(results: dict[str, object]) -> None:
     """Print evaluation summary."""
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("EVALUATION SUMMARY")
-    print("=" * 60)
-    scorer_data = results.get("first_move_scorer", {})
-    if isinstance(scorer_data, dict):
-        match_info = scorer_data.get("first_move_match", {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        if isinstance(match_info, dict):
-            mean = match_info.get("true_fraction", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            print(f"Overall first move accuracy: {mean * 100:.1f}%")
-    print("=" * 60)
+    print("=" * 70)
+
+    first_move = get_metric(results, "first_move_scorer", "first_move_match")
+    plain_first_move = get_metric(results, "plain_first_move_scorer", "first_move_match")
+    candidates = get_metric(results, "candidate_scorer", "candidate_includes_solution")
+    themes = get_metric(results, "theme_scorer", "theme_jaccard")
+    has_reasoning = get_metric(results, "reasoning_scorer", "has_reasoning")
+    reasoning_length = get_metric(results, "reasoning_scorer", "reasoning_length")
+    mentions_solution = get_metric(results, "reasoning_scorer", "mentions_solution")
+
+    if first_move is not None:
+        print(f"First move accuracy: {first_move * 100:.1f}%")
+    if plain_first_move is not None:
+        print(f"First move accuracy: {plain_first_move * 100:.1f}%")
+    if candidates is not None:
+        print(f"Candidate includes solution: {candidates * 100:.1f}%")
+    if themes is not None:
+        print(f"Theme Jaccard similarity: {themes * 100:.1f}%")
+    if has_reasoning is not None:
+        print(f"Has reasoning: {has_reasoning * 100:.1f}%")
+    if reasoning_length is not None:
+        print(f"Avg reasoning length: {reasoning_length:.0f} chars")
+    if mentions_solution is not None:
+        print(f"Mentions solution in reasoning: {mentions_solution * 100:.1f}%")
+
+    print("=" * 70)
     print("Full results available in Weave UI")
 
 
 def print_benchmark_comparison(all_results: dict[str, dict[str, object]]) -> None:
     """Print comparison table for benchmark results."""
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 80)
     print("BENCHMARK COMPARISON")
-    print("=" * 60)
-    print(f"{'Model':<40} {'First Move':>15}")
-    print("-" * 60)
+    print("=" * 80)
+    print(f"{'Model':<35} {'First Move':>12} {'Candidates':>12} {'Themes':>12}")
+    print("-" * 80)
 
     for model, results in all_results.items():
-        scorer_data = results.get("first_move_scorer", {})
-        if isinstance(scorer_data, dict):
-            match_info = scorer_data.get("first_move_match", {})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            if isinstance(match_info, dict):
-                mean = match_info.get("true_fraction", 0)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-                print(f"{model:<40} {mean * 100:>14.1f}%")
-                continue
-        print(f"{model:<40} {'N/A':>15}")
+        first_move = get_metric(results, "first_move_scorer", "first_move_match")
+        candidates = get_metric(results, "candidate_scorer", "candidate_includes_solution")
+        themes = get_metric(results, "theme_scorer", "theme_jaccard")
 
-    print("=" * 60)
+        fm_str = f"{first_move * 100:.1f}%" if first_move is not None else "N/A"
+        cand_str = f"{candidates * 100:.1f}%" if candidates is not None else "N/A"
+        theme_str = f"{themes * 100:.1f}%" if themes is not None else "N/A"
+
+        print(f"{model:<35} {fm_str:>12} {cand_str:>12} {theme_str:>12}")
+
+    print("=" * 80)
     print("Full results available in Weave UI")
 
 
@@ -223,7 +324,7 @@ def main(
     split: str,
     weave_project: str,
 ) -> None:
-    """Evaluate chess reasoning puzzle models."""
+    """Evaluate chess reasoning puzzle models with structured outputs."""
     weave.init(weave_project)
 
     print(f"Loading dataset: {dataset_id} (split: {split})")

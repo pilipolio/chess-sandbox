@@ -27,7 +27,7 @@ vllm_image = (
         "nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.12"
     )
     .entrypoint([])
-    .uv_pip_install("vllm==0.11.2", "huggingface-hub==0.36.0")  # type: ignore[reportUnknownMemberType]
+    .uv_pip_install("vllm==0.11.2", "huggingface-hub==0.36.0", "outlines==1.2.9")  # type: ignore[reportUnknownMemberType]
 )
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)  # type: ignore[reportUnknownMemberType]
@@ -64,13 +64,15 @@ def serve():
         "--port",
         str(VLLM_PORT),
         "--max-model-len",
-        "2048",
+        "4096",
         "--enable-lora",
         "--lora-modules",
         f"chess-reasoning={lora_path}",
         "--max-lora-rank",
         "32",
         "--enforce-eager",
+        "--reasoning-parser",
+        "qwen3",
     ]
 
     subprocess.Popen(cmd)
