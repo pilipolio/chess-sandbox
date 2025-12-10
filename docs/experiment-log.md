@@ -216,8 +216,44 @@ Debug testing shows models do follow the format and return valid chess moves. Th
 
 The extraction pipeline works correctly - baseline LLMs are simply not strong at tactical chess puzzles. This validates that the SFT training provides meaningful improvement (6% vs 0%).
 
-### Next Steps
-- Train for more epochs to improve finetuned model accuracy
-- Consider stronger base models (Qwen3-8B, Qwen3-14B)
-- Analyze which puzzle types/themes the finetuned model solves correctly
+### Observations
+
+**Model over-indexes on mate patterns:**
+The finetuned model hallucinates mating ideas even on non-mate puzzles. Example on [skewer puzzle](https://lichess.org/training/029B5) (solution: `Rd8+` winning the queen):
+
+```
+## Step 4: Candidate Moves
+Rxe5# captures the Black king on e5 with the rook from e8, delivering mate...
+Rxe5#, Rxg6, Rxh6
+```
+
+The model fabricates a checkmate (`Rxe5#`) that doesn't exist, missing the actual skewer tactic entirely. This suggests:
+1. Training data is mate-heavy (puzzles often end in checkmate)
+2. Model learned "find mate" as a default heuristic rather than evaluating the actual position
+
+**Dataset theme imbalance confirmed:**
+- ~60-70% of puzzles are mateIn1/mateIn2
+- Only ~5-8% fork, ~3-5% skewer, rare pins
+- Model overfits to mate patterns, struggles with material-winning tactics
+
+### Next Steps: GRPO with Verifiable Rewards
+
+Move to reinforcement learning (GRPO) using verifiable chess rewards:
+- **Legality reward**: -1.0 for illegal moves (hard constraint)
+- **Engine eval**: Stockfish centipawn score normalized to [-1, 1]
+- **Format bonus**: Small reward for valid `<think>` structure
+
+### Open Questions for GRPO
+
+1. **Relaxed thinking vs structured output**: Should we keep the strict 5-step format or let the model reason freely? Free-form may discover better patterns but loses interpretability.
+
+2. **Rewarding intermediate steps**: Should we verify intermediate reasoning (piece positions, candidate moves) or only reward the final move? Options:
+   - Final move only (simpler, lets model discover its own reasoning style)
+   - Verify piece positions accuracy (grounds the model in board state)
+   - Verify candidate moves are legal (catches hallucinations early)
+
+3. **Structured output for grounding**: Force model to output piece positions and candidate moves as structured data before the solution? This could:
+   - Prevent hallucinations like the fake `Rxe5#`
+   - Add computational overhead
+   - Be verified programmatically as part of reward
 

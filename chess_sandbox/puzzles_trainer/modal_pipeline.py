@@ -13,7 +13,7 @@ import modal
 
 image = (
     modal.Image.from_registry("huggingface/trl:0.25.1")  # type: ignore[reportUnknownMemberType]
-    .pip_install("python-chess", "wandb==0.23.0", "click", "datasets")
+    .pip_install("python-chess", "wandb==0.23.0", "click", "datasets", "bitsandbytes==0.48.2")
     .add_local_python_source("chess_sandbox")
 )
 

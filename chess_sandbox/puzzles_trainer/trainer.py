@@ -104,7 +104,7 @@ def get_training_config(
         "bf16": device == "cuda",
         "fp16": device == "mps",
         "optim": "adamw_torch",
-        "eval_strategy": "steps",
+        # "eval_strategy": "steps",
         "eval_steps": eval_steps or 100,
         "push_to_hub": True,
     }
