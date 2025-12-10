@@ -105,13 +105,15 @@ def batch_generate(
             if max_thinking_tokens is not None:
                 logits_processor.append(ThinkingTokenBudgetProcessor(tokenizer, max_thinking_tokens))
 
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,  # pyright: ignore[reportUnknownMemberType]
-                logits_processor=logits_processor if logits_processor else None,
-            )
+            # Use fp16 autocast for consistent dtype with 4-bit quantized models
+            with torch.amp.autocast("cuda", dtype=torch.float16):  # type: ignore[attr-defined]
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    pad_token_id=tokenizer.pad_token_id,  # pyright: ignore[reportUnknownMemberType]
+                    logits_processor=logits_processor if logits_processor else None,
+                )
 
             # Decode only the generated tokens
             for j, output in enumerate(outputs):

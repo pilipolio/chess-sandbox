@@ -91,6 +91,7 @@ def get_training_config(
         "output_dir": output_model_id,
         "hub_model_id": output_model_id,
         "per_device_train_batch_size": 2,
+        "per_device_eval_batch_size": 4,  # OOM with default 8 with Qwen3-4B 4bits
         "gradient_accumulation_steps": 4,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",
