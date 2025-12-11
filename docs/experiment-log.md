@@ -257,3 +257,105 @@ Move to reinforcement learning (GRPO) using verifiable chess rewards:
    - Add computational overhead
    - Be verified programmatically as part of reward
 
+---
+
+## 2024-12-11: Model Comparison - gpt-4.1-nano vs gpt-5-nano
+
+### Motivation
+Eyeballing 3 samples from gpt-4.1-nano revealed systematic issues with reasoning quality despite correct final answers. Tested gpt-5-nano as alternative.
+
+### Results
+
+| Metric | gpt-4.1-nano | gpt-5-nano |
+|--------|--------------|------------|
+| Verification score | 0.84-0.93 | **1.00** (3/3) |
+| First move correct | 3/3 | 3/3 |
+| FEN parsing | Broken (phantom pieces) | **Accurate** (per-square) |
+| Piece positions | Hallucinated | **Correct** |
+| Solution in candidates | 1/3 | **3/3** |
+| Reasoning supports answer | 0/3 | **3/3** |
+
+### Key Issues with gpt-4.1-nano
+1. **FEN parsing broken**: Digits misinterpreted (e.g., `5rk1` → phantom h8 rook)
+2. **Piece positions hallucinated**: Lists pawns on non-existent squares
+3. **Post-hoc rationalization**: Explores wrong moves, then outputs correct solution
+4. **Candidate moves miss solution**: Often doesn't include the winning move
+
+### gpt-5-nano Improvements
+- Square-by-square FEN breakdown: `f8 black rook, g8 black king, h8 empty`
+- Solution move always in candidate list with explanation
+- Refuted lines shown: explains WHY alternatives fail
+- Reasoning genuinely supports conclusion
+
+### Decision
+**Default model changed to `openai/gpt-5-nano`** for reasoning trace generation.
+
+For larger batch runs, consider `openai/gpt-5-mini` for higher quality at ~3x cost.
+
+### Recommended Models (OpenRouter)
+| Use Case | Model | Notes |
+|----------|-------|-------|
+| Quick iteration | `openai/gpt-5-nano` | Fast, cheap, good quality |
+| Production SFT data | `openai/gpt-5-mini` | Higher quality reasoning |
+| Baseline comparison | `openai/gpt-4o-mini` | Alternative provider |
+
+---
+
+## 2024-12-11: GRPO Pipeline - First Test Runs
+
+### Setup
+- **Implementation**: TRL 0.25.1 GRPOTrainer with custom chess reward function
+- **Infrastructure**: Modal A10G (24GB), 8hr timeout
+- **Reward function**: 4-component weighted score
+  - Legality (40%): -1.0 for illegal first move
+  - Correctness (40%): First move matches puzzle solution
+  - Format (15%): 5 reasoning sections present
+  - Piece accuracy (5%): Board awareness from Step 2
+
+### Files Created
+| File | Description |
+|------|-------------|
+| `grpo_rewards.py` | Reward functions reusing reasoning_verifier |
+| `grpo_trainer.py` | GRPOTrainer wrapper with Click CLI |
+| `modal_grpo.py` | Modal deployment config |
+
+### Test Results
+
+| Model | Max Steps | Reward Mean | Clipped Ratio | Issue |
+|-------|-----------|-------------|---------------|-------|
+| Qwen/Qwen3-0.6B | 10 | -1.0 | 100% | Base model doesn't know format |
+| pilipolio/chess-reasoning-sft-qwen3-0.6b | 10 | -1.0 | 100% | Completions truncated |
+| pilipolio/chess-reasoning-sft-qwen3-4b | 10 | -1.0 | 100% | Completions truncated |
+
+### Root Cause Analysis
+
+**Problem**: All completions hit max length (512 tokens) without terminating.
+
+**Evidence**:
+- `completions/clipped_ratio: 1.0` (100% clipped)
+- `completions/mean_terminated_length: 0.0` (no EOS tokens)
+- `reward: -1.0` (all marked illegal due to truncated output)
+
+**Dataset analysis**:
+```
+Answer lengths (chars):
+  Mean: 1705
+  95th percentile: 2317
+  Approx tokens: 426 avg, 579 95th pct
+```
+
+The `max_completion_length=512` is too short - 95th percentile needs ~580 tokens.
+
+### Potential Issues
+
+1. **Max length too short**: Need 768-1024 tokens for full reasoning traces
+2. **Model not terminating**: Even with more tokens, model may not emit EOS
+3. **LoRA stacking**: Warning about "multiple adapters" when loading SFT checkpoint
+
+### Next Steps
+
+1. **Increase max_completion_length** to 1024 tokens
+2. **Debug generation**: Sample a few completions to verify format
+3. **Check EOS behavior**: Verify tokenizer pad/eos tokens match training
+4. **Consider curriculum**: Start with shorter puzzles or legality-only reward
+

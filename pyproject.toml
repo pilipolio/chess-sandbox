@@ -27,6 +27,7 @@ requires-python = ">=3.13"
 dependencies = [
     "chess>=1.11.2",
     "click>=8.3.0",
+    "datasets>=4.3.0",
     "httpx>=0.28.0",
     "huggingface-hub>=0.27.0",
     "jinja2>=3.1.6",
@@ -105,6 +106,7 @@ puzzles-generate-task-dataset = "chess_sandbox.puzzles_trainer.dataset:main"
 puzzles-generate-reasoning = "chess_sandbox.puzzles_trainer.reasoning_generator:main"
 puzzle-agent = "chess_sandbox.puzzles_trainer.puzzle_agent:main"
 reasoning-trainer = "chess_sandbox.puzzles_trainer.reasoning_trainer:main"
+grpo-trainer = "chess_sandbox.puzzles_trainer.grpo_trainer:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
@@ -164,6 +166,7 @@ exclude = [
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
     "**/puzzles_trainer/trainer.py",                     # SFT training with TRL
     "**/puzzles_trainer/reasoning_trainer.py",           # Reasoning SFT training with TRL
+    "**/puzzles_trainer/grpo_trainer.py",                # GRPO training with TRL
     "**/puzzles_trainer/dataset.py",                     # Dataset loading with HF datasets
     "**/puzzles_trainer/prepare_dataset.py",             # Dataset prep with HF datasets + cairosvg
     "**/puzzles_trainer/helper.py",                      # Board image generation with cairosvg

@@ -426,6 +426,7 @@ source = { editable = "." }
 dependencies = [
     { name = "chess" },
     { name = "click" },
+    { name = "datasets" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "jinja2" },
@@ -485,6 +486,7 @@ sft = [
 requires-dist = [
     { name = "chess", specifier = ">=1.11.2" },
     { name = "click", specifier = ">=8.3.0" },
+    { name = "datasets", specifier = ">=4.3.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "huggingface-hub", specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
