@@ -32,6 +32,8 @@ class VerificationResult:
     first_move_correct: bool = False
     extracted_first_move: str | None = None
     piece_positions_accuracy: float = 0.0
+    lines_exploration_valid: bool = False
+    lines_exploration_illegal: list[str] = field(default_factory=_empty_list)
 
 
 SECTION_PATTERNS = {
@@ -64,6 +66,13 @@ SQUARE_PATTERN = re.compile(r"[a-h][1-8]")
 def extract_piece_positions_section(reasoning: str) -> str | None:
     """Extract the piece positions content from Step 2 section."""
     pattern = r"##\s*Step\s*2[:\s]*Piece\s*Positions\s*\n(.*?)(?=##\s*Step|</think>|$)"
+    match = re.search(pattern, reasoning, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def extract_lines_exploration_section(reasoning: str) -> str | None:
+    """Extract the lines exploration content from Step 5 section."""
+    pattern = r"##\s*Step\s*5[:\s]*Lines\s*Exploration\s*\n(.*?)(?=</think>|$)"
     match = re.search(pattern, reasoning, re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else None
 
@@ -234,6 +243,92 @@ def normalize_move(san: str) -> str:
     return re.sub(r"[!?]+$", "", san).strip()
 
 
+def validate_pgn_lines(fen: str, pgn_text: str) -> tuple[bool, list[str]]:
+    """Validate all moves in PGN-formatted lines_exploration are legal.
+
+    Parses moves manually and validates each one against the board position,
+    handling variations (in parentheses) and comments (in braces).
+
+    Args:
+        fen: Starting position FEN
+        pgn_text: PGN movetext with variations and comments
+
+    Returns:
+        (is_valid, illegal_moves) - True if all legal, list of illegal move strings
+
+    >>> validate_pgn_lines("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "1. e4 e5 2. Nf3")
+    (True, [])
+    >>> validate_pgn_lines("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "1. e4 e5 (1... Nf6) 2. Nf3")
+    (True, [])
+    >>> valid, illegal = validate_pgn_lines("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "1. e5")
+    >>> valid
+    False
+    >>> "e5" in illegal[0]
+    True
+    """
+    illegal_moves: list[str] = []
+
+    def validate_moves_recursive(pgn: str, board: chess.Board) -> None:
+        """Validate moves in PGN text, handling variations recursively."""
+        text = pgn.strip()
+        if not text:
+            return
+
+        pos = 0
+        while pos < len(text):
+            char = text[pos]
+
+            if char == "{":
+                end = text.find("}", pos)
+                if end == -1:
+                    break
+                pos = end + 1
+                continue
+
+            if char == "(":
+                depth = 1
+                start = pos + 1
+                end = start
+                while end < len(text) and depth > 0:
+                    if text[end] == "(":
+                        depth += 1
+                    elif text[end] == ")":
+                        depth -= 1
+                    end += 1
+                variation_text = text[start : end - 1]
+                board_copy = board.copy()
+                if board_copy.move_stack:
+                    board_copy.pop()
+                validate_moves_recursive(variation_text, board_copy)
+                pos = end
+                continue
+
+            if char in "0123456789.… \t\n":
+                pos += 1
+                continue
+
+            move_match = re.match(r"([KQRBNP]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?|O-O-O|O-O)", text[pos:])
+            if move_match:
+                san = move_match.group(0)
+                try:
+                    move = board.parse_san(san)
+                    if move not in board.legal_moves:
+                        illegal_moves.append(f"{san} (illegal at {board.fen()})")
+                    else:
+                        board.push(move)
+                except ValueError:
+                    illegal_moves.append(f"{san} (invalid at {board.fen()})")
+                pos += len(san)
+                continue
+
+            pos += 1
+
+    board = chess.Board(fen)
+    validate_moves_recursive(pgn_text, board)
+
+    return len(illegal_moves) == 0, illegal_moves
+
+
 def verify_reasoning_trace(
     fen: str,
     reasoning: str,
@@ -270,6 +365,13 @@ def verify_reasoning_trace(
         extracted_solution_valid_moves, result.illegal_moves = validate_move_sequence(fen, pgn_moves)
     else:
         result.format_errors.append("No Solution section found")
+
+    # 3b. Extract and validate lines_exploration (PGN format with variations)
+    lines_section = extract_lines_exploration_section(reasoning)
+    if lines_section:
+        result.lines_exploration_valid, result.lines_exploration_illegal = validate_pgn_lines(fen, lines_section)
+    else:
+        result.lines_exploration_valid = False
 
     # 4. Check first move correctness
     result.extracted_first_move = extracted_solution_valid_moves[0] if extracted_solution_valid_moves else None
