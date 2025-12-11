@@ -1,9 +1,10 @@
-"""Lichess study export and PGN validation utilities.
+"""Lichess study export utilities.
 
 This module provides functions for:
-- Validating PGN move sequences against a FEN position
 - Building annotated PGN from reasoning traces
 - Exporting to Lichess studies via API
+
+PGN validation is handled by chess_sandbox.puzzles_trainer.reasoning_verifier.
 """
 
 import io
@@ -15,93 +16,7 @@ import click
 import httpx
 
 from chess_sandbox.config import settings
-
-
-def validate_pgn_moves(fen: str, pgn_text: str) -> tuple[bool, list[str]]:
-    """Validate all moves in PGN are legal from the given FEN.
-
-    Parses moves manually and validates each one against the board position.
-
-    Args:
-        fen: Starting position FEN
-        pgn_text: PGN movetext (may include variations and comments)
-
-    Returns:
-        (is_valid, illegal_moves) - True if all legal, list of illegal move strings found
-
-    >>> validate_pgn_moves("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "1. e4 e5 2. Nf3")
-    (True, [])
-    >>> validate_pgn_moves("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "1. e4 e5 (1... Nf6) 2. Nf3")
-    (True, [])
-    >>> valid, illegal = validate_pgn_moves("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "1. e5")
-    >>> valid
-    False
-    >>> "e5" in illegal[0]
-    True
-    """
-    illegal_moves: list[str] = []
-
-    def validate_moves_recursive(pgn: str, board: chess.Board) -> None:
-        """Validate moves in PGN text, handling variations recursively."""
-        import re
-
-        text = pgn.strip()
-        if not text:
-            return
-
-        pos = 0
-        while pos < len(text):
-            char = text[pos]
-
-            if char == "{":
-                end = text.find("}", pos)
-                if end == -1:
-                    break
-                pos = end + 1
-                continue
-
-            if char == "(":
-                depth = 1
-                start = pos + 1
-                end = start
-                while end < len(text) and depth > 0:
-                    if text[end] == "(":
-                        depth += 1
-                    elif text[end] == ")":
-                        depth -= 1
-                    end += 1
-                variation_text = text[start : end - 1]
-                board_copy = board.copy()
-                if board_copy.move_stack:
-                    board_copy.pop()
-                validate_moves_recursive(variation_text, board_copy)
-                pos = end
-                continue
-
-            if char in "0123456789.… \t\n":
-                pos += 1
-                continue
-
-            move_match = re.match(r"([KQRBNP]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?|O-O-O|O-O)", text[pos:])
-            if move_match:
-                san = move_match.group(0)
-                try:
-                    move = board.parse_san(san)
-                    if move not in board.legal_moves:
-                        illegal_moves.append(f"{san} (illegal at {board.fen()})")
-                    else:
-                        board.push(move)
-                except ValueError:
-                    illegal_moves.append(f"{san} (invalid at {board.fen()})")
-                pos += len(san)
-                continue
-
-            pos += 1
-
-    board = chess.Board(fen)
-    validate_moves_recursive(pgn_text, board)
-
-    return len(illegal_moves) == 0, illegal_moves
+from chess_sandbox.puzzles_trainer.reasoning_verifier import validate_pgn_lines
 
 
 def build_annotated_pgn(
@@ -144,7 +59,7 @@ def build_annotated_pgn(
     >>> len(illegal)
     0
     """
-    is_valid, illegal_moves = validate_pgn_moves(fen, lines_exploration)
+    is_valid, illegal_moves = validate_pgn_lines(fen, lines_exploration)
 
     game = chess.pgn.Game()
     game.headers["Event"] = ", ".join(themes) if themes else "Chess Puzzle"
