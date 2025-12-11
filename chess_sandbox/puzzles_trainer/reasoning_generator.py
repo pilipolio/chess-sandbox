@@ -27,8 +27,20 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from tqdm.asyncio import tqdm_asyncio
 
+from chess_sandbox.engine.analyse import EngineConfig
 from chess_sandbox.engine.maia import HumanMove, MaiaConfig, analyze_human_moves
 from chess_sandbox.puzzles_trainer.reasoning_verifier import VerificationResult, verify_reasoning_trace
+
+
+class RefutedLine(BaseModel):
+    """A refuted human-likely move with Stockfish's response."""
+
+    human_move: str  # SAN notation (e.g., "Qxb6")
+    human_policy: float  # Maia policy % (e.g., 62.0)
+    refutation_line: list[str]  # SAN moves showing refutation (2-ply)
+    score: float | None  # Evaluation in pawns (None for mate)
+    mate_in: int | None  # Mate-in-N if applicable
+    explanation: str  # Short description of why it fails
 
 
 class ReasoningTrace(BaseModel):
@@ -53,13 +65,10 @@ class ReasoningTrace(BaseModel):
         "unbiased by the solution and using short sentences, e.g., 'White queen on c2 can deliver "
         "a check and capture the pawn on h7 along the open b1-h7 diagonal c2-d3-e4-f5-g6-h7'"
     )
-    lines_exploration: str = Field(
-        description="Explore lines in PGN format with variations and comments. "
-        "Main solution line first, then alternatives in parentheses with explanations in braces. "
-        "Mark dubious moves with ? and strong moves with !. "
-        "Example: '25. Rxe7 Qb1+ (25. Qf8+? Rxf8 {forced} 26. Rxe7 {allows counterplay}) 26. Nc1 Qxc1+'"
+    lines_pgn_with_comments: str = Field(
+        description="Copy the provided PGN exactly, ONLY adding {comments} after key moves. "
+        "Do NOT modify, add, or remove any moves."
     )
-    solution_pgn: list[str] = Field(description="Solution as a sequence of SAN moves, e.g., 'Rxe7 Qb1+ Nc1 Qxc1+ Qxc1'")
 
 
 load_dotenv()
@@ -188,6 +197,205 @@ def format_maia_predictions(maia_moves: list[HumanMove]) -> str:
     return ", ".join(parts)
 
 
+def format_score_for_prompt(score: float | None, mate_in: int | None, is_white_to_move: bool) -> str:
+    """Format engine score for prompt display using standard chess notation.
+
+    Args:
+        score: Score in centipawns from white's perspective (None for mate)
+        mate_in: Mate-in-N if applicable (positive = mating, negative = getting mated)
+        is_white_to_move: Whether it's white's turn
+
+    Returns:
+        Formatted string like "+1.5", "-#3", or "N/A"
+    """
+    if mate_in is not None:
+        # Mate score: adjust sign based on side to move
+        # Positive mate_in means the side to move is getting mated
+        adjusted_mate = -mate_in if is_white_to_move else mate_in
+        sign = "+" if adjusted_mate > 0 else "-"
+        return f"{sign}#{abs(mate_in)}"
+
+    if score is not None:
+        # Regular score: adjust perspective if black to move
+        adjusted_score = score / 100 if is_white_to_move else -score / 100
+        return f"{adjusted_score:+.1f}"
+
+    return "N/A"
+
+
+def build_refutation_explanation(score: float | None, mate_in: int | None, is_white_to_move: bool) -> str:
+    """Generate human-readable explanation for why a move fails."""
+    if mate_in is not None:
+        # Getting mated
+        return "leads to forced mate"
+
+    if score is None:
+        return "unclear"
+
+    # Score is in centipawns from white's perspective; adjust for side to move
+    relative_score = score if is_white_to_move else -score
+
+    if relative_score < -300:
+        return "loses significant material"
+    if relative_score < -100:
+        return "loses material"
+    if relative_score < -30:
+        return "gives opponent advantage"
+
+    return "inferior to the solution"
+
+
+def generate_refuted_lines(
+    board: chess.Board,
+    maia_moves: list[HumanMove],
+    solution_first_move: str,
+    stockfish_engine: chess.engine.SimpleEngine,
+    limit: chess.engine.Limit,
+) -> list[RefutedLine]:
+    """Generate refutation lines for human-likely moves that aren't the solution.
+
+    Args:
+        board: Current puzzle position
+        maia_moves: Top Maia predictions with policy %
+        solution_first_move: The correct first move (SAN)
+        stockfish_engine: Pre-instantiated Stockfish engine
+        limit: Analysis limit (depth)
+
+    Returns:
+        List of RefutedLine objects for non-solution moves (2-ply refutations)
+    """
+    refuted_lines: list[RefutedLine] = []
+    is_white_to_move = board.turn == chess.WHITE
+
+    for maia_move in maia_moves:
+        # Skip if this is the solution move
+        if maia_move.san_move == solution_first_move:
+            continue
+
+        # Play the human move
+        board_after_human = board.copy()
+        move = board_after_human.parse_san(maia_move.san_move)
+        board_after_human.push(move)
+
+        # Get Stockfish's best response (2-ply: opponent response + one more)
+        results = stockfish_engine.analyse(board_after_human, limit, multipv=1)
+
+        # multipv=1 still returns a list
+        if not results:
+            continue
+        result = results[0]
+
+        pv: list[chess.Move] = result.get("pv", [])
+        if not pv:
+            continue
+
+        # Extract 2-ply refutation line
+        refutation_moves: list[str] = []
+        temp_board = board_after_human.copy()
+        for pv_move in pv[:2]:
+            refutation_moves.append(temp_board.san(pv_move))
+            temp_board.push(pv_move)
+
+        # Extract score
+        engine_score: chess.engine.PovScore | None = result.get("score")
+        score: float | None = None
+        mate_in: int | None = None
+
+        if engine_score:
+            pov_score = engine_score.white()
+            score = pov_score.score()
+            mate_in = pov_score.mate()
+
+        explanation = build_refutation_explanation(score, mate_in, is_white_to_move)
+
+        refuted_lines.append(
+            RefutedLine(
+                human_move=maia_move.san_move,
+                human_policy=maia_move.policy,
+                refutation_line=refutation_moves,
+                score=score,
+                mate_in=mate_in,
+                explanation=explanation,
+            )
+        )
+
+    return refuted_lines
+
+
+def build_lines_exploration_pgn(
+    board: chess.Board,
+    solution_san: list[str],
+    refuted_lines: list[RefutedLine] | None = None,
+) -> str:
+    """Build valid PGN with solution as main line and refuted lines as variations.
+
+    Variations are placed immediately after the first move (the branching point)
+    so PGN parsers correctly understand they are alternatives to that move.
+
+    Example: 25. Rxe7! (25. Rxf6? Re1+ {mate}) (25. hxg3? Rxe6) Qb1+ 26. Nc1
+
+    Args:
+        board: Starting position
+        solution_san: Solution moves in SAN notation
+        refuted_lines: Optional refuted alternative moves
+
+    Returns:
+        Valid PGN string with main line and variations
+    """
+    move_number = board.fullmove_number
+    is_white = board.turn == chess.WHITE
+    parts: list[str] = []
+
+    # First move with ! annotation
+    if solution_san:
+        first_move = solution_san[0]
+        if is_white:
+            parts.append(f"{move_number}. {first_move}!")
+        else:
+            parts.append(f"{move_number}... {first_move}!")
+
+    # Insert variations immediately after first move (they are alternatives to it)
+    if refuted_lines:
+        for rl in refuted_lines:
+            var_parts: list[str] = []
+
+            if is_white:
+                var_parts.append(f"{move_number}. {rl.human_move}?")
+            else:
+                var_parts.append(f"{move_number}... {rl.human_move}?")
+
+            if rl.refutation_line:
+                var_parts.extend(rl.refutation_line)
+
+            var_parts.append(f"{{{rl.explanation}}}")
+            parts.append(f"({' '.join(var_parts)})")
+
+    # Continue with remaining solution moves
+    if len(solution_san) > 1:
+        temp_board = board.copy()
+        # Push first move
+        try:
+            first_move_obj = temp_board.parse_san(solution_san[0])
+            temp_board.push(first_move_obj)
+        except (chess.InvalidMoveError, chess.AmbiguousMoveError, ValueError):
+            pass
+
+        for san in solution_san[1:]:
+            if temp_board.turn == chess.WHITE:
+                current_move_num = temp_board.fullmove_number
+                parts.append(f"{current_move_num}. {san}")
+            else:
+                parts.append(san)
+
+            try:
+                move = temp_board.parse_san(san)
+                temp_board.push(move)
+            except (chess.InvalidMoveError, chess.AmbiguousMoveError, ValueError):
+                break
+
+    return " ".join(parts)
+
+
 def identify_candidate_moves(board: chess.Board) -> tuple[str, str]:
     """Identify forcing moves: checks and captures.
 
@@ -222,19 +430,15 @@ Last move: {last_move}
 To move: {side_to_move}
 Themes: {themes}
 
+Lines PGN (solution + refuted alternatives):
+{lines_pgn}
+
 IMPORTANT INSTRUCTIONS:
 1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves), do NOT quote the final solution.
-2. In Lines Exploration, you MUST include at least one refuted line - show why a plausible alternative fails.
-3. Only reveal the solution in the final Solution section.
-4. Consider human move predictions as likely moves to explore or refute.
-5. Format Lines Exploration as valid PGN with variations:
-   - Write the winning line as the main sequence
-   - Put refuted alternatives in parentheses: (25. Qf8+? Rxf8 26. Rxe7)
-   - Add explanations in curly braces: {{this allows counterplay}}
-   - Use ? for dubious moves, ! for strong moves
+2. For lines_pgn_with_comments: copy the Lines PGN above exactly, ONLY adding {{comments}} after key moves.
+   Do NOT modify, add, or remove any chess moves - the PGN structure must remain identical.
 
-The correct solution is: {solution}
-Your task is to explain WHY this is correct, including why alternatives fail."""
+Your task is to explain WHY the solution works and why alternatives fail."""
 
 
 def build_reasoning_prompt(
@@ -243,24 +447,33 @@ def build_reasoning_prompt(
     themes: list[str],
     solution_san: list[str],
     maia_moves: list[HumanMove] | None = None,
-) -> str:
-    """Build prompt with position context for structured output."""
+    refuted_lines: list[RefutedLine] | None = None,
+) -> tuple[str, str]:
+    """Build prompt with position context for structured output.
+
+    Returns:
+        Tuple of (prompt, lines_pgn) where lines_pgn is the pre-built valid PGN
+    """
     board = chess.Board(puzzle_fen)
     side_to_move = "White" if board.turn == chess.WHITE else "Black"
     checks_str, captures_str = identify_candidate_moves(board)
     human_moves_str = format_maia_predictions(maia_moves) if maia_moves else "None"
 
-    return REASONING_PROMPT_TEMPLATE.format(
+    # Build valid PGN from solution + refuted lines
+    lines_pgn = build_lines_exploration_pgn(board, solution_san, refuted_lines)
+
+    prompt = REASONING_PROMPT_TEMPLATE.format(
         puzzle_fen=puzzle_fen,
         piece_positions=build_piece_placement_summary(board),
         candidate_checks=checks_str,
         candidate_captures=captures_str,
         human_moves=human_moves_str,
+        lines_pgn=lines_pgn,
         last_move=last_move_san,
         side_to_move=side_to_move,
         themes=", ".join(themes) if themes else "none",
-        solution=" ".join(solution_san),
     )
+    return prompt, lines_pgn
 
 
 async def generate_reasoning_trace(
@@ -284,10 +497,8 @@ async def generate_reasoning_trace(
     return response.choices[0].message.parsed
 
 
-def join_reasoning_trace(trace: ReasoningTrace, first_move: str) -> str:
+def join_reasoning_trace(trace: ReasoningTrace, lines_pgn: str) -> str:
     """Join structured trace into <think> format for SFT training."""
-    # Prefer solution_pgn if available, otherwise use lines_exploration
-    solution_content = trace.solution_pgn if trace.solution_pgn else trace.lines_exploration
     return f"""<think>
 ## Step 1: FEN parsing
 {trace.fen_parsing}
@@ -303,10 +514,10 @@ def join_reasoning_trace(trace: ReasoningTrace, first_move: str) -> str:
 {trace.candidate_moves_csv}
 
 ## Step 5: Lines Exploration
-{trace.lines_exploration}
+{trace.lines_pgn_with_comments}
 
 </think>
-{solution_content}"""
+{lines_pgn}"""
 
 
 def format_reasoning_example(
@@ -315,6 +526,7 @@ def format_reasoning_example(
     themes: list[str],
     solution_san: list[str],
     trace: ReasoningTrace,
+    lines_pgn: str,
     puzzle_id: str,
     rating: int,
     verification: VerificationResult | None = None,
@@ -322,7 +534,7 @@ def format_reasoning_example(
     """Format puzzle with structured reasoning for SFT training."""
     first_move = solution_san[0]
     question = f"Position: {puzzle_fen}\nOpponent's last move: {last_move_san}\nFind the best move."
-    answer = join_reasoning_trace(trace, first_move)
+    answer = join_reasoning_trace(trace, lines_pgn)
 
     result: dict[str, Any] = {
         "question": question,
@@ -339,8 +551,8 @@ def format_reasoning_example(
         "position_summary": trace.position_summary,
         "candidate_moves_reasoning": trace.candidate_moves_reasoning,
         "candidate_moves_csv": trace.candidate_moves_csv,
-        "lines_exploration": trace.lines_exploration,
-        "solution_pgn": trace.solution_pgn,
+        "lines_exploration": lines_pgn,
+        "lines_pgn_with_comments": trace.lines_pgn_with_comments,
         "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
@@ -359,45 +571,75 @@ async def process_puzzle(
     model: str,
     semaphore: asyncio.Semaphore,
     maia_engine: chess.engine.SimpleEngine | None = None,
+    stockfish_engine: chess.engine.SimpleEngine | None = None,
     maia_top_n: int = 3,
+    refutation_depth: int = 20,
 ) -> dict[str, Any] | None:
     """Process a single puzzle: generate and verify reasoning trace."""
     async with semaphore:
-        try:
-            fen = str(example["FEN"])
-            uci_moves = str(example["Moves"])
-            themes = list(example.get("Themes", []))
-            puzzle_id = str(example.get("PuzzleId", ""))
-            rating = int(example.get("Rating", 0))
+        fen = str(example["FEN"])
+        uci_moves = str(example["Moves"])
+        themes = list(example.get("Themes", []))
+        puzzle_id = str(example.get("PuzzleId", ""))
+        rating = int(example.get("Rating", 0))
 
-            result = extract_puzzle_position_and_solution(fen, uci_moves)
-            if result is None:
-                return None
+        result = extract_puzzle_position_and_solution(fen, uci_moves)
+        if result is None:
+            return None
 
-            puzzle_fen, last_move_san, solution_san = result
+        puzzle_fen, last_move_san, solution_san = result
 
-            maia_moves: list[HumanMove] | None = None
-            if maia_engine is not None:
-                board = chess.Board(puzzle_fen)
-                maia_moves = get_maia_predictions(board, maia_engine, maia_top_n)
+        maia_moves: list[HumanMove] | None = None
+        if maia_engine is not None:
+            board = chess.Board(puzzle_fen)
+            maia_moves = get_maia_predictions(board, maia_engine, maia_top_n)
 
-            prompt = build_reasoning_prompt(puzzle_fen, last_move_san, themes, solution_san, maia_moves)
-            trace = await generate_reasoning_trace(prompt, client, model)
-
-            if trace is None:
-                return None
-
-            # Join trace for verification using existing string-based verifier
-            joined = join_reasoning_trace(trace, solution_san[0])
-            verification = verify_reasoning_trace(puzzle_fen, joined, solution_san)
-
-            return format_reasoning_example(
-                puzzle_fen, last_move_san, themes, solution_san, trace, puzzle_id, rating, verification
+        # Generate refuted lines for Maia predictions that aren't the solution
+        refuted_lines: list[RefutedLine] | None = None
+        if maia_moves and stockfish_engine is not None:
+            board = chess.Board(puzzle_fen)
+            refuted_lines = generate_refuted_lines(
+                board=board,
+                maia_moves=maia_moves,
+                solution_first_move=solution_san[0],
+                stockfish_engine=stockfish_engine,
+                limit=chess.engine.Limit(depth=refutation_depth),
             )
 
-        except Exception as e:
-            print(f"Error processing puzzle: {e}")
+        prompt, lines_pgn = build_reasoning_prompt(
+            puzzle_fen, last_move_san, themes, solution_san, maia_moves, refuted_lines
+        )
+
+        # Validate the pre-built PGN (should always pass - bug check)
+        from chess_sandbox.puzzles_trainer.reasoning_verifier import validate_pgn_lines
+
+        lines_pgn_valid, lines_pgn_illegal = validate_pgn_lines(puzzle_fen, lines_pgn)
+        if not lines_pgn_valid:
+            # Bug in build_lines_exploration_pgn - log and skip
+            print(f"BUG: Pre-built PGN invalid: {lines_pgn_illegal[:3]}")
             return None
+
+        trace = await generate_reasoning_trace(prompt, client, model)
+
+        if trace is None:
+            return None
+
+        # Validate the LLM's commented version
+        lines_with_comments_valid, lines_with_comments_illegal = validate_pgn_lines(
+            puzzle_fen, trace.lines_pgn_with_comments
+        )
+
+        # Join trace for verification using existing string-based verifier
+        joined = join_reasoning_trace(trace, lines_pgn)
+        verification = verify_reasoning_trace(puzzle_fen, joined, solution_san)
+
+        # Add lines validation to verification result
+        verification.lines_exploration_valid = lines_with_comments_valid
+        verification.lines_exploration_illegal = lines_with_comments_illegal
+
+        return format_reasoning_example(
+            puzzle_fen, last_move_san, themes, solution_san, trace, lines_pgn, puzzle_id, rating, verification
+        )
 
 
 def get_primary_theme(puzzle_themes: list[str]) -> str:
@@ -437,16 +679,18 @@ async def generate_reasoning_dataset(
     client = AsyncOpenAI(base_url=effective_base_url, api_key=effective_api_key or "dummy")
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    # Initialize Maia engine if requested
+    # Initialize engines if requested
     maia_engine: chess.engine.SimpleEngine | None = None
+    stockfish_engine: chess.engine.SimpleEngine | None = None
     if use_maia:
-        try:
-            maia_config = MaiaConfig.default()
-            maia_engine = maia_config.instantiate()
-            print(f"Maia engine initialized (top {maia_top_n} predictions)")
-        except Exception as e:
-            print(f"Warning: Failed to initialize Maia engine: {e}")
-            print("Continuing without human move predictions")
+        maia_config = MaiaConfig.default()
+        maia_engine = maia_config.instantiate()
+        print(f"Maia engine initialized (top {maia_top_n} predictions)")
+
+        # Initialize Stockfish for refutation analysis
+        stockfish_config = EngineConfig.stockfish(num_lines=1, depth=20)
+        stockfish_engine = stockfish_config.instantiate()
+        print("Stockfish engine initialized for refutation analysis")
 
     print(f"Loading dataset: {DATASET_ID}")
     dataset: Dataset = load_dataset(DATASET_ID, split="train")  # type: ignore[assignment]
@@ -498,7 +742,9 @@ async def generate_reasoning_dataset(
 
     try:
         # Process puzzles concurrently
-        tasks = [process_puzzle(ex, client, model, semaphore, maia_engine, maia_top_n) for ex in sampled]
+        tasks = [
+            process_puzzle(ex, client, model, semaphore, maia_engine, stockfish_engine, maia_top_n) for ex in sampled
+        ]
         results: list[dict[str, Any] | None] = await tqdm_asyncio.gather(*tasks, desc="Generating reasoning")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
 
         # Filter out failures
@@ -507,9 +753,11 @@ async def generate_reasoning_dataset(
 
         return valid_results
     finally:
-        # Clean up Maia engine
+        # Clean up engines
         if maia_engine is not None:
             maia_engine.quit()
+        if stockfish_engine is not None:
+            stockfish_engine.quit()
 
 
 @click.command("generate-reasoning-dataset")
