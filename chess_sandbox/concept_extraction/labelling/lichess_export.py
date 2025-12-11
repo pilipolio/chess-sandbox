@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 import httpx
 
-from chess_sandbox.config import settings
+from chess_sandbox.lichess_export import import_pgn_to_lichess
 
 from .labeller import LabelledPosition
 
@@ -191,33 +191,6 @@ def position_to_pgn(position: LabelledPosition, use_validated: bool = False) -> 
 
     pgn_lines.append("")
     return "\n".join(pgn_lines)
-
-
-def import_pgn_to_lichess(study_id: str, pgn_content: str) -> dict[str, str]:
-    """Import PGN content to a Lichess study.
-
-    Args:
-        study_id: The Lichess study ID to import into
-        pgn_content: The PGN content to import
-
-    Returns:
-        Response from Lichess API
-
-    Raises:
-        httpx.HTTPStatusError: If the API request fails
-    """
-    if not settings.LICHESS_API_TOKEN:
-        msg = "LICHESS_API_TOKEN not set in environment"
-        raise ValueError(msg)
-
-    url = f"https://lichess.org/api/study/{study_id}/import-pgn"
-    headers = {"Authorization": f"Bearer {settings.LICHESS_API_TOKEN}"}
-    data = {"pgn": pgn_content}
-
-    response = httpx.post(url, headers=headers, data=data, timeout=30)
-    response.raise_for_status()
-
-    return response.json()
 
 
 @click.command()

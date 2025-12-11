@@ -14,6 +14,7 @@ import os
 from typing import Any
 
 import chess
+import chess.engine
 import click
 import logfire
 from datasets import (  # pyright: ignore[reportMissingTypeStubs]
@@ -26,6 +27,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from tqdm.asyncio import tqdm_asyncio
 
+from chess_sandbox.engine.maia import HumanMove, MaiaConfig, analyze_human_moves
 from chess_sandbox.puzzles_trainer.reasoning_verifier import VerificationResult, verify_reasoning_trace
 
 
@@ -40,25 +42,24 @@ class ReasoningTrace(BaseModel):
         description="List key pieces and their squares, e.g., 'White: Qh6, Re6, Nb3. Black: Kh8, Re7, Qb2, Bg3'"
     )
     position_summary: str = Field(
-        description="2-3 sentences combining material balance, king safety, piece activity, move number, "
-        "side to move and the move just played. Mention relevant themes, NOT THE SOLUTION."
+        description="A single short sentence summarising material balance, king safety, piece activity, move number, "
+        "side to move and the move just played. NO LINES"
     )
-    candidate_moves_csv: str = Field(
-        description="List candidate moves using comma separated SAN notations: Qxh7, Rxe7, ..."
+    candidate_moves_csv: list[str] = Field(
+        description="Candidate moves using comma separated SAN notations: Qxh7, Rxe7, ..."
     )
     candidate_moves_reasoning: str = Field(
-        description="Explain candidate moves based on piece positions and side to move, unbiased by the solution "
-        "and using short sentences, e.g., 'White queen on c2 can capture the pawn on h7 along the open b1-h7 "
-        "diagonal c2-d3-e4-f5-g6-h7'"
+        description="Explain candidate moves based on piece positions and relevant tactical themes, "
+        "unbiased by the solution and using short sentences, e.g., 'White queen on c2 can deliver "
+        "a check and capture the pawn on h7 along the open b1-h7 diagonal c2-d3-e4-f5-g6-h7'"
     )
     lines_exploration: str = Field(
-        description="Explore and reason about possible lines you've explored before reaching the solution, "
-        "starting with the 1st move and including opponent responses using SAN notations with comments into "
-        "the reasoning, e.g., '25. Nxf7+ Kg8 {only legal move} 26. Nh6+ Kh8 27. Qg8#'"
+        description="Explore lines in PGN format with variations and comments. "
+        "Main solution line first, then alternatives in parentheses with explanations in braces. "
+        "Mark dubious moves with ? and strong moves with !. "
+        "Example: '25. Rxe7 Qb1+ (25. Qf8+? Rxf8 {forced} 26. Rxe7 {allows counterplay}) 26. Nc1 Qxc1+'"
     )
-    solution_pgn: str = Field(
-        description="Solution as a sequence of SAN moves WITHOUT comments, e.g., 'Rxe7 Qb1+ Nc1 Qxc1+ Qxc1'"
-    )
+    solution_pgn: list[str] = Field(description="Solution as a sequence of SAN moves, e.g., 'Rxe7 Qb1+ Nc1 Qxc1+ Qxc1'")
 
 
 load_dotenv()
@@ -157,8 +158,42 @@ def build_piece_placement_summary(board: chess.Board) -> str:
     return f"White: {white_pieces}\nBlack: {black_pieces}"
 
 
-def identify_candidate_moves(board: chess.Board) -> str:
-    """Identify forcing moves: checks and captures, formatted as a string."""
+def get_maia_predictions(
+    board: chess.Board,
+    engine: chess.engine.SimpleEngine,
+    top_n: int = 3,
+) -> list[HumanMove]:
+    """Get top N Maia human move predictions for a position.
+
+    Args:
+        board: Chess board position to analyze
+        engine: Pre-instantiated Maia engine
+        top_n: Number of top predictions to return
+
+    Returns:
+        List of HumanMove objects sorted by policy probability (descending)
+    """
+    try:
+        moves = analyze_human_moves(board, engine, nodes=1)
+        return moves[:top_n]
+    except Exception:
+        return []
+
+
+def format_maia_predictions(maia_moves: list[HumanMove]) -> str:
+    """Format Maia predictions as a string for the prompt."""
+    if not maia_moves:
+        return "None"
+    parts = [f"{m.san_move} ({m.policy:.0f}%)" for m in maia_moves]
+    return ", ".join(parts)
+
+
+def identify_candidate_moves(board: chess.Board) -> tuple[str, str]:
+    """Identify forcing moves: checks and captures.
+
+    Returns:
+        Tuple of (checks_str, captures_str)
+    """
     checks: list[str] = []
     captures: list[str] = []
 
@@ -169,12 +204,9 @@ def identify_candidate_moves(board: chess.Board) -> str:
         elif board.is_capture(move):
             captures.append(san)
 
-    parts: list[str] = []
-    if checks:
-        parts.append(f"Checks: {', '.join(checks)}")
-    if captures:
-        parts.append(f"Captures: {', '.join(captures)}")
-    return "; ".join(parts) if parts else "None"
+    checks_str = ", ".join(checks) if checks else "None"
+    captures_str = ", ".join(captures) if captures else "None"
+    return checks_str, captures_str
 
 
 REASONING_PROMPT_TEMPLATE = """\
@@ -183,7 +215,9 @@ Break down step by step how you analyze this position and arrive at your answer.
 
 Position (FEN): {puzzle_fen}
 Pieces: {piece_positions}
-Candidate moves: {candidate_moves}
+Candidate checks: {candidate_checks}
+Candidate captures: {candidate_captures}
+Most likely human moves: {human_moves}
 Last move: {last_move}
 To move: {side_to_move}
 Themes: {themes}
@@ -192,6 +226,12 @@ IMPORTANT INSTRUCTIONS:
 1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves), do NOT quote the final solution.
 2. In Lines Exploration, you MUST include at least one refuted line - show why a plausible alternative fails.
 3. Only reveal the solution in the final Solution section.
+4. Consider human move predictions as likely moves to explore or refute.
+5. Format Lines Exploration as valid PGN with variations:
+   - Write the winning line as the main sequence
+   - Put refuted alternatives in parentheses: (25. Qf8+? Rxf8 26. Rxe7)
+   - Add explanations in curly braces: {{this allows counterplay}}
+   - Use ? for dubious moves, ! for strong moves
 
 The correct solution is: {solution}
 Your task is to explain WHY this is correct, including why alternatives fail."""
@@ -202,15 +242,20 @@ def build_reasoning_prompt(
     last_move_san: str,
     themes: list[str],
     solution_san: list[str],
+    maia_moves: list[HumanMove] | None = None,
 ) -> str:
     """Build prompt with position context for structured output."""
     board = chess.Board(puzzle_fen)
     side_to_move = "White" if board.turn == chess.WHITE else "Black"
+    checks_str, captures_str = identify_candidate_moves(board)
+    human_moves_str = format_maia_predictions(maia_moves) if maia_moves else "None"
 
     return REASONING_PROMPT_TEMPLATE.format(
         puzzle_fen=puzzle_fen,
         piece_positions=build_piece_placement_summary(board),
-        candidate_moves=identify_candidate_moves(board),
+        candidate_checks=checks_str,
+        candidate_captures=captures_str,
+        human_moves=human_moves_str,
         last_move=last_move_san,
         side_to_move=side_to_move,
         themes=", ".join(themes) if themes else "none",
@@ -313,6 +358,8 @@ async def process_puzzle(
     client: AsyncOpenAI,
     model: str,
     semaphore: asyncio.Semaphore,
+    maia_engine: chess.engine.SimpleEngine | None = None,
+    maia_top_n: int = 3,
 ) -> dict[str, Any] | None:
     """Process a single puzzle: generate and verify reasoning trace."""
     async with semaphore:
@@ -329,7 +376,12 @@ async def process_puzzle(
 
             puzzle_fen, last_move_san, solution_san = result
 
-            prompt = build_reasoning_prompt(puzzle_fen, last_move_san, themes, solution_san)
+            maia_moves: list[HumanMove] | None = None
+            if maia_engine is not None:
+                board = chess.Board(puzzle_fen)
+                maia_moves = get_maia_predictions(board, maia_engine, maia_top_n)
+
+            prompt = build_reasoning_prompt(puzzle_fen, last_move_san, themes, solution_san, maia_moves)
             trace = await generate_reasoning_trace(prompt, client, model)
 
             if trace is None:
@@ -372,6 +424,8 @@ async def generate_reasoning_dataset(
     base_url: str | None = None,
     api_key: str | None = None,
     balanced: bool = False,
+    use_maia: bool = False,
+    maia_top_n: int = 3,
 ) -> list[dict[str, str]]:
     """Generate reasoning dataset from Lichess puzzles."""
     effective_base_url = base_url or DEFAULT_BASE_URL
@@ -382,6 +436,17 @@ async def generate_reasoning_dataset(
 
     client = AsyncOpenAI(base_url=effective_base_url, api_key=effective_api_key or "dummy")
     semaphore = asyncio.Semaphore(max_concurrent)
+
+    # Initialize Maia engine if requested
+    maia_engine: chess.engine.SimpleEngine | None = None
+    if use_maia:
+        try:
+            maia_config = MaiaConfig.default()
+            maia_engine = maia_config.instantiate()
+            print(f"Maia engine initialized (top {maia_top_n} predictions)")
+        except Exception as e:
+            print(f"Warning: Failed to initialize Maia engine: {e}")
+            print("Continuing without human move predictions")
 
     print(f"Loading dataset: {DATASET_ID}")
     dataset: Dataset = load_dataset(DATASET_ID, split="train")  # type: ignore[assignment]
@@ -431,15 +496,20 @@ async def generate_reasoning_dataset(
     else:
         print(f"Sampled {len(sampled)} puzzles")
 
-    # Process puzzles concurrently
-    tasks = [process_puzzle(ex, client, model, semaphore) for ex in sampled]
-    results: list[dict[str, Any] | None] = await tqdm_asyncio.gather(*tasks, desc="Generating reasoning")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    try:
+        # Process puzzles concurrently
+        tasks = [process_puzzle(ex, client, model, semaphore, maia_engine, maia_top_n) for ex in sampled]
+        results: list[dict[str, Any] | None] = await tqdm_asyncio.gather(*tasks, desc="Generating reasoning")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
 
-    # Filter out failures
-    valid_results: list[dict[str, Any]] = [r for r in results if r is not None]
-    print(f"Generated {len(valid_results)}/{len(sampled)} reasoning traces")
+        # Filter out failures
+        valid_results: list[dict[str, Any]] = [r for r in results if r is not None]
+        print(f"Generated {len(valid_results)}/{len(sampled)} reasoning traces")
 
-    return valid_results
+        return valid_results
+    finally:
+        # Clean up Maia engine
+        if maia_engine is not None:
+            maia_engine.quit()
 
 
 @click.command("generate-reasoning-dataset")
@@ -447,8 +517,8 @@ async def generate_reasoning_dataset(
 @click.option(
     "--model",
     type=str,
-    default="openai/gpt-oss-20b:free",
-    help="OpenRouter model ID (e.g., openai/gpt-oss-20b:free, openai/gpt-4o-mini)",
+    default="openai/gpt-5-nano",
+    help="OpenRouter model ID (e.g., openai/gpt-5-nano, openai/gpt-4o-mini)",
 )
 @click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity")
 @click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating")
@@ -480,6 +550,23 @@ async def generate_reasoning_dataset(
     is_flag=True,
     help="Use quota-based theme balancing to prevent mate-puzzle overfit",
 )
+@click.option(
+    "--use-maia",
+    is_flag=True,
+    help="Include Maia human move predictions in candidate moves",
+)
+@click.option(
+    "--maia-top-n",
+    type=int,
+    default=3,
+    help="Number of top Maia predictions to include (default: 3)",
+)
+@click.option(
+    "--export-lichess-study-id",
+    type=str,
+    default=None,
+    help="Export results to Lichess study with this ID",
+)
 def main(
     sample_size: int,
     model: str,
@@ -495,6 +582,9 @@ def main(
     min_score: float,
     include_failed: bool,
     balanced: bool,
+    use_maia: bool,
+    maia_top_n: int,
+    export_lichess_study_id: str | None,
 ) -> None:
     """Generate chess puzzle reasoning traces using LLMs."""
     themes_tuple = tuple(themes.split(",")) if themes else None
@@ -510,6 +600,8 @@ def main(
             base_url=base_url,
             api_key=api_key,
             balanced=balanced,
+            use_maia=use_maia,
+            maia_top_n=maia_top_n,
         )
     )
 
@@ -548,27 +640,22 @@ def main(
 
     click.echo(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
 
-    # Show sample with verification info
-    if results:
-        print("\n--- Sample output ---")
-        sample = results[0]
-        print(f"FEN: {sample['fen']}")
-        print(f"Themes: {sample['themes']}")
-        print(f"Solution: {sample['solution']}")
-        print(f"Verification score: {sample.get('verification_score', 'N/A')}")
-        print(f"First move correct: {sample.get('first_move_correct', 'N/A')}")
-        print(f"Sections found: {sample.get('sections_found', 'N/A')}")
-        print(f"Illegal moves: {sample.get('illegal_moves', [])}")
-        print(f"Question: {sample['question']}")
-        print(f"Answer: {sample['answer']}")
-
     if push_to_hub:
         dataset_dict.push_to_hub(dataset_id)  # pyright: ignore[reportUnknownMemberType]
-        print(f"Pushed to: https://huggingface.co/datasets/{dataset_id}")
-    else:
+        click.echo(f"Pushed to: https://huggingface.co/datasets/{dataset_id}")
+    elif not export_lichess_study_id:
         import json
 
-        print(json.dumps(results, indent=2))
+        click.echo(json.dumps(results, indent=2))
+
+    if export_lichess_study_id:
+        from chess_sandbox.lichess_export import export_traces_to_lichess
+
+        click.echo(f"\nExporting {len(results)} traces to Lichess study: {export_lichess_study_id}")
+        export_result = export_traces_to_lichess(results, export_lichess_study_id, model)
+        click.echo(f"Exported: {export_result['exported_count']}, Skipped: {export_result['skipped_count']}")
+        if export_result["response"]:
+            click.echo(f"Study URL: https://lichess.org/study/{export_lichess_study_id}")
 
 
 if __name__ == "__main__":
