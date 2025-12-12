@@ -35,3 +35,9 @@ Check for documentation impacted by command line or api changes. Don't modify `C
 ## Configuration
 
 See `pyproject.toml` for all tool configurations.
+
+## LLM Models (OpenRouter)
+
+Prefer OpenAI gpt-5-* models via OpenRouter for LLM tasks:
+- `openai/gpt-5-nano`: Default for quick iteration, low cost
+- `openai/gpt-5-mini`: Higher quality, ~3x cost

@@ -84,7 +84,7 @@ def get_lora_config() -> LoraConfig:
 def get_grpo_config(
     output_model_id: str,
     num_generations: int = 8,
-    max_completion_length: int = 512,
+    max_completion_length: int = 1024,
     max_steps: int | None = None,
     use_vllm: bool = False,
     vllm_gpu_memory_utilization: float = 0.4,
@@ -96,7 +96,7 @@ def get_grpo_config(
     Key parameters:
     - num_generations: 8 completions per prompt (balance quality vs compute)
     - beta: 0.0 (KL coefficient disabled per recent GRPO best practices)
-    - max_completion_length: 512 (enough for reasoning + solution)
+    - max_completion_length: 1024 (enough for full reasoning trace + solution)
     """
     device = get_device()
 
@@ -181,7 +181,7 @@ def train(
     use_vllm: bool = False,
     vllm_gpu_memory_utilization: float = 0.4,
     num_generations: int = 8,
-    max_completion_length: int = 512,
+    max_completion_length: int = 1024,
     max_steps: int | None = None,
     wandb_project: str | None = None,
     wandb_run_name: str | None = None,
@@ -266,7 +266,7 @@ def train(
 @click.option("--use-vllm", is_flag=True, help="Use vLLM for accelerated generation")
 @click.option("--vllm-gpu-memory", type=float, default=0.4, help="vLLM GPU memory utilization (default: 0.4)")
 @click.option("--num-generations", type=int, default=8, help="Completions per prompt (default: 8)")
-@click.option("--max-completion-length", type=int, default=512, help="Max tokens to generate (default: 512)")
+@click.option("--max-completion-length", type=int, default=1024, help="Max tokens to generate (default: 1024)")
 @click.option("--max-steps", type=int, default=None, help="Max training steps (for testing)")
 @click.option("--wandb-project", type=str, default=None, help="W&B project name")
 @click.option("--wandb-run-name", type=str, default=None, help="W&B run name")

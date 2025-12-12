@@ -67,6 +67,7 @@ agents = [
     "pydantic-ai>=0.4.3",
     "pydantic-ai-slim[logfire]>=0.4.3",
     "weave>=0.51.0",
+    "logfire==4.16.0"
 ]
 
 # Infra: serverless deployment and caching
@@ -107,6 +108,8 @@ puzzles-generate-reasoning = "chess_sandbox.puzzles_trainer.reasoning_generator:
 puzzle-agent = "chess_sandbox.puzzles_trainer.puzzle_agent:main"
 reasoning-trainer = "chess_sandbox.puzzles_trainer.reasoning_trainer:main"
 grpo-trainer = "chess_sandbox.puzzles_trainer.grpo_trainer:main"
+grpo-debug = "chess_sandbox.puzzles_trainer.grpo_debug:main"
+test-eos = "chess_sandbox.puzzles_trainer.test_eos_behavior:main"
 
 # Configure PyTorch CPU-only source to avoid 7GB GPU dependencies
 # This makes torch default to CPU-only builds (~100MB vs 7GB with CUDA)
@@ -167,6 +170,8 @@ exclude = [
     "**/puzzles_trainer/trainer.py",                     # SFT training with TRL
     "**/puzzles_trainer/reasoning_trainer.py",           # Reasoning SFT training with TRL
     "**/puzzles_trainer/grpo_trainer.py",                # GRPO training with TRL
+    "**/puzzles_trainer/grpo_debug.py",                  # GRPO debug utilities with torch
+    "**/puzzles_trainer/test_eos_behavior.py",           # EOS behavior testing with torch
     "**/puzzles_trainer/dataset.py",                     # Dataset loading with HF datasets
     "**/puzzles_trainer/prepare_dataset.py",             # Dataset prep with HF datasets + cairosvg
     "**/puzzles_trainer/helper.py",                      # Board image generation with cairosvg

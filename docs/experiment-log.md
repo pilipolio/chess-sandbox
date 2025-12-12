@@ -359,3 +359,84 @@ The `max_completion_length=512` is too short - 95th percentile needs ~580 tokens
 3. **Check EOS behavior**: Verify tokenizer pad/eos tokens match training
 4. **Consider curriculum**: Start with shorter puzzles or legality-only reward
 
+---
+
+## 2024-12-12: Debug Tools & Model Comparison
+
+### Motivation
+GRPO pipeline showing -1.0 rewards due to truncation. Added debug tooling to diagnose generation behavior before fixing.
+
+### Implementation
+
+**New files:**
+| File | Description |
+|------|-------------|
+| `grpo_debug.py` | Sample generations with reward diagnostics |
+| `test_eos_behavior.py` | Test EOS token termination behavior |
+| `modal_grpo_debug.py` | Modal deployment for GPU-accelerated debug |
+
+**Fix applied:**
+- `grpo_trainer.py`: `max_completion_length` default changed from 512 to 1024
+
+**CLI entry points added:**
+- `uv run grpo-debug --model-id MODEL --num-samples 5 --verbose`
+- `uv run test-eos --base-model Qwen/Qwen3-0.6B`
+
+### Results: 0.6B SFT Model (Local)
+
+| Metric | Value |
+|--------|-------|
+| EOS emitted | 0/3 |
+| Has `</think>` | 0/3 |
+| Correct move | 0/3 |
+| Average reward | -1.0 |
+
+**Issue:** Model stuck in degenerate generation loops:
+```
+Kf1# (no mate available)
+Kf1# (no mate available)
+Kf1# (no mate available)
+...
+```
+
+### Results: 4B SFT Model (Modal A10G)
+
+| Metric | Value |
+|--------|-------|
+| EOS emitted | 4/5 |
+| Has `</think>` | 4/5 |
+| Correct move | 1/5 (20%) |
+| Average length | ~800 tokens |
+
+**Per-sample breakdown:**
+| Sample | Expected | Got | Status |
+|--------|----------|-----|--------|
+| 0 | h6 | h6 | ✓ |
+| 1 | Qf7# | None | ✗ (truncated at 1024) |
+| 2 | Qxh2# | Qxg2# | ✗ (wrong square) |
+| 3 | Qf1# | Qxh2+ | ✗ (wrong move) |
+| 4 | Qxh2# | Qh1# | ✗ (wrong square) |
+
+### Analysis
+
+**0.6B model:**
+- FEN parsing fundamentally broken (same issue as SFT training)
+- Generation loops prevent termination
+- Not viable for GRPO without significant improvements
+
+**4B model:**
+- Terminates properly with EOS and `</think>` tags
+- Produces structured output with valid format
+- Wrong moves suggest positional understanding issues, not format issues
+- Good candidate for GRPO training (can generate rewards > -1.0)
+
+### Conclusions
+
+1. **Truncation fix validated**: 1024 tokens sufficient for 4/5 samples
+2. **4B model ready for GRPO**: Proper termination enables meaningful reward signal
+3. **0.6B model not viable**: Generation loops and broken FEN parsing prevent learning
+4. **Next step**: Run GRPO training with 4B SFT checkpoint
+
+### Note on Debug Files
+The `modal_grpo_debug.py` file is a temporary debug utility. Consider removing after GRPO training is stable.
+
