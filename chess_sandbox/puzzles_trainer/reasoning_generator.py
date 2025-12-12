@@ -61,13 +61,17 @@ class ReasoningTrace(BaseModel):
         description="Candidate moves using comma separated SAN notations: Qxh7, Rxe7, ..."
     )
     candidate_moves_reasoning: str = Field(
-        description="Explain candidate moves based on piece positions and relevant tactical themes, "
-        "unbiased by the solution and using short sentences, e.g., 'White queen on c2 can deliver "
-        "a check and capture the pawn on h7 along the open b1-h7 diagonal c2-d3-e4-f5-g6-h7'"
+        description="Describe the MECHANICS of how candidate moves work based on piece geometry. "
+        "Focus on squares, files, diagonals, and piece coordination - NOT tactical implications. "
+        "Example: 'The queen on c2 can capture the pawn on h7 along the open b1-h7 diagonal c2-d3-e4-f5-g6-h7. "
+        "The rook on e1 can deliver check on e8 along the open e-file.' "
+        "Do NOT evaluate consequences like recaptures or material gain - save that for lines exploration."
     )
     lines_pgn_with_comments: str = Field(
-        description="Copy the provided PGN exactly, ONLY adding {comments} after key moves. "
-        "Do NOT modify, add, or remove any moves."
+        description="Copy the provided PGN exactly, replacing each {COMMENT} placeholder with a short comment. "
+        "Do NOT modify, add, or remove any moves. Comments should be specific to the move played: "
+        "reference themes (fork, pin, back-rank mate), translate evaluations ('+3 = winning a piece'), "
+        "explain tactical ideas ('threatens mate on h7'). Keep comments concise (3-10 words)."
     )
 
 
@@ -91,6 +95,8 @@ THEME_QUOTAS: dict[str, float] = {
     "attraction": 0.05,
     "other": 0.05,  # Catch-all for puzzles not matching above themes
 }
+
+FILTERED_OUT_THEMES = ["advantage", "crushing", "short", "long"]
 
 
 def extract_puzzle_position_and_solution(fen: str, uci_moves: str) -> tuple[str, str, list[str]] | None:
@@ -223,28 +229,6 @@ def format_score_for_prompt(score: float | None, mate_in: int | None, is_white_t
     return "N/A"
 
 
-def build_refutation_explanation(score: float | None, mate_in: int | None, is_white_to_move: bool) -> str:
-    """Generate human-readable explanation for why a move fails."""
-    if mate_in is not None:
-        # Getting mated
-        return "leads to forced mate"
-
-    if score is None:
-        return "unclear"
-
-    # Score is in centipawns from white's perspective; adjust for side to move
-    relative_score = score if is_white_to_move else -score
-
-    if relative_score < -300:
-        return "loses significant material"
-    if relative_score < -100:
-        return "loses material"
-    if relative_score < -30:
-        return "gives opponent advantage"
-
-    return "inferior to the solution"
-
-
 def generate_refuted_lines(
     board: chess.Board,
     maia_moves: list[HumanMove],
@@ -306,8 +290,6 @@ def generate_refuted_lines(
             score = pov_score.score()
             mate_in = pov_score.mate()
 
-        explanation = build_refutation_explanation(score, mate_in, is_white_to_move)
-
         refuted_lines.append(
             RefutedLine(
                 human_move=maia_move.san_move,
@@ -315,7 +297,7 @@ def generate_refuted_lines(
                 refutation_line=refutation_moves,
                 score=score,
                 mate_in=mate_in,
-                explanation=explanation,
+                explanation=format_score_for_prompt(score, mate_in, is_white_to_move),
             )
         )
 
@@ -346,13 +328,13 @@ def build_lines_exploration_pgn(
     is_white = board.turn == chess.WHITE
     parts: list[str] = []
 
-    # First move with ! annotation
+    # First move with ! annotation and {COMMENT} placeholder
     if solution_san:
         first_move = solution_san[0]
         if is_white:
-            parts.append(f"{move_number}. {first_move}!")
+            parts.append(f"{move_number}. {first_move}! {{COMMENT}}")
         else:
-            parts.append(f"{move_number}... {first_move}!")
+            parts.append(f"{move_number}... {first_move}! {{COMMENT}}")
 
     # Insert variations immediately after first move (they are alternatives to it)
     if refuted_lines:
@@ -360,13 +342,15 @@ def build_lines_exploration_pgn(
             var_parts: list[str] = []
 
             if is_white:
-                var_parts.append(f"{move_number}. {rl.human_move}?")
+                var_parts.append(f"{move_number}. {rl.human_move}? {{COMMENT}}")
             else:
-                var_parts.append(f"{move_number}... {rl.human_move}?")
+                var_parts.append(f"{move_number}... {rl.human_move}? {{COMMENT}}")
 
             if rl.refutation_line:
-                var_parts.extend(rl.refutation_line)
+                for refut_move in rl.refutation_line:
+                    var_parts.append(f"{refut_move} {{COMMENT}}")
 
+            # Add engine eval at the end of refuted line
             var_parts.append(f"{{{rl.explanation}}}")
             parts.append(f"({' '.join(var_parts)})")
 
@@ -383,9 +367,9 @@ def build_lines_exploration_pgn(
         for san in solution_san[1:]:
             if temp_board.turn == chess.WHITE:
                 current_move_num = temp_board.fullmove_number
-                parts.append(f"{current_move_num}. {san}")
+                parts.append(f"{current_move_num}. {san} {{COMMENT}}")
             else:
-                parts.append(san)
+                parts.append(f"{san} {{COMMENT}}")
 
             try:
                 move = temp_board.parse_san(san)
@@ -435,8 +419,18 @@ Lines PGN (solution + refuted alternatives):
 
 IMPORTANT INSTRUCTIONS:
 1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves), do NOT quote the final solution.
-2. For lines_pgn_with_comments: copy the Lines PGN above exactly, ONLY adding {{comments}} after key moves.
-   Do NOT modify, add, or remove any chess moves - the PGN structure must remain identical.
+
+2. For candidate_moves_reasoning: Focus ONLY on piece movement MECHANICS.
+   - Describe HOW pieces can move: squares, files, diagonals, piece coordination
+   - Do NOT evaluate tactical consequences (recaptures, material gain) - save that for lines
+   - Example: "The queen on c2 can reach h7 along the open b1-h7 diagonal"
+
+3. For lines_pgn_with_comments: Copy the PGN exactly, replacing each {{COMMENT}} with a short comment.
+   - Do NOT modify, add, or remove any chess moves
+   - Each comment should explain that specific move:
+     * For solution moves: "threatens...", "forces...", "exploits the pin"
+     * For refuted moves: "but this allows...", "loses to..."
+     * Keep comments concise (3-10 words)
 
 Your task is to explain WHY the solution works and why alternatives fail."""
 
@@ -471,7 +465,7 @@ def build_reasoning_prompt(
         lines_pgn=lines_pgn,
         last_move=last_move_san,
         side_to_move=side_to_move,
-        themes=", ".join(themes) if themes else "none",
+        themes=", ".join([f for f in themes if f not in FILTERED_OUT_THEMES]) if themes else "none",
     )
     return prompt, lines_pgn
 
@@ -891,10 +885,6 @@ def main(
     if push_to_hub:
         dataset_dict.push_to_hub(dataset_id)  # pyright: ignore[reportUnknownMemberType]
         click.echo(f"Pushed to: https://huggingface.co/datasets/{dataset_id}")
-    elif not export_lichess_study_id:
-        import json
-
-        click.echo(json.dumps(results, indent=2))
 
     if export_lichess_study_id:
         from chess_sandbox.lichess_export import export_traces_to_lichess
@@ -904,6 +894,10 @@ def main(
         click.echo(f"Exported: {export_result['exported_count']}, Skipped: {export_result['skipped_count']}")
         if export_result["response"]:
             click.echo(f"Study URL: https://lichess.org/study/{export_lichess_study_id}")
+    else:
+        import json
+
+        click.echo(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":
