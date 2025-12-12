@@ -257,3 +257,186 @@ Move to reinforcement learning (GRPO) using verifiable chess rewards:
    - Add computational overhead
    - Be verified programmatically as part of reward
 
+---
+
+## 2024-12-11: Model Comparison - gpt-4.1-nano vs gpt-5-nano
+
+### Motivation
+Eyeballing 3 samples from gpt-4.1-nano revealed systematic issues with reasoning quality despite correct final answers. Tested gpt-5-nano as alternative.
+
+### Results
+
+| Metric | gpt-4.1-nano | gpt-5-nano |
+|--------|--------------|------------|
+| Verification score | 0.84-0.93 | **1.00** (3/3) |
+| First move correct | 3/3 | 3/3 |
+| FEN parsing | Broken (phantom pieces) | **Accurate** (per-square) |
+| Piece positions | Hallucinated | **Correct** |
+| Solution in candidates | 1/3 | **3/3** |
+| Reasoning supports answer | 0/3 | **3/3** |
+
+### Key Issues with gpt-4.1-nano
+1. **FEN parsing broken**: Digits misinterpreted (e.g., `5rk1` → phantom h8 rook)
+2. **Piece positions hallucinated**: Lists pawns on non-existent squares
+3. **Post-hoc rationalization**: Explores wrong moves, then outputs correct solution
+4. **Candidate moves miss solution**: Often doesn't include the winning move
+
+### gpt-5-nano Improvements
+- Square-by-square FEN breakdown: `f8 black rook, g8 black king, h8 empty`
+- Solution move always in candidate list with explanation
+- Refuted lines shown: explains WHY alternatives fail
+- Reasoning genuinely supports conclusion
+
+### Decision
+**Default model changed to `openai/gpt-5-nano`** for reasoning trace generation.
+
+For larger batch runs, consider `openai/gpt-5-mini` for higher quality at ~3x cost.
+
+### Recommended Models (OpenRouter)
+| Use Case | Model | Notes |
+|----------|-------|-------|
+| Quick iteration | `openai/gpt-5-nano` | Fast, cheap, good quality |
+| Production SFT data | `openai/gpt-5-mini` | Higher quality reasoning |
+| Baseline comparison | `openai/gpt-4o-mini` | Alternative provider |
+
+---
+
+## 2024-12-11: GRPO Pipeline - First Test Runs
+
+### Setup
+- **Implementation**: TRL 0.25.1 GRPOTrainer with custom chess reward function
+- **Infrastructure**: Modal A10G (24GB), 8hr timeout
+- **Reward function**: 4-component weighted score
+  - Legality (40%): -1.0 for illegal first move
+  - Correctness (40%): First move matches puzzle solution
+  - Format (15%): 5 reasoning sections present
+  - Piece accuracy (5%): Board awareness from Step 2
+
+### Files Created
+| File | Description |
+|------|-------------|
+| `grpo_rewards.py` | Reward functions reusing reasoning_verifier |
+| `grpo_trainer.py` | GRPOTrainer wrapper with Click CLI |
+| `modal_grpo.py` | Modal deployment config |
+
+### Test Results
+
+| Model | Max Steps | Reward Mean | Clipped Ratio | Issue |
+|-------|-----------|-------------|---------------|-------|
+| Qwen/Qwen3-0.6B | 10 | -1.0 | 100% | Base model doesn't know format |
+| pilipolio/chess-reasoning-sft-qwen3-0.6b | 10 | -1.0 | 100% | Completions truncated |
+| pilipolio/chess-reasoning-sft-qwen3-4b | 10 | -1.0 | 100% | Completions truncated |
+
+### Root Cause Analysis
+
+**Problem**: All completions hit max length (512 tokens) without terminating.
+
+**Evidence**:
+- `completions/clipped_ratio: 1.0` (100% clipped)
+- `completions/mean_terminated_length: 0.0` (no EOS tokens)
+- `reward: -1.0` (all marked illegal due to truncated output)
+
+**Dataset analysis**:
+```
+Answer lengths (chars):
+  Mean: 1705
+  95th percentile: 2317
+  Approx tokens: 426 avg, 579 95th pct
+```
+
+The `max_completion_length=512` is too short - 95th percentile needs ~580 tokens.
+
+### Potential Issues
+
+1. **Max length too short**: Need 768-1024 tokens for full reasoning traces
+2. **Model not terminating**: Even with more tokens, model may not emit EOS
+3. **LoRA stacking**: Warning about "multiple adapters" when loading SFT checkpoint
+
+### Next Steps
+
+1. **Increase max_completion_length** to 1024 tokens
+2. **Debug generation**: Sample a few completions to verify format
+3. **Check EOS behavior**: Verify tokenizer pad/eos tokens match training
+4. **Consider curriculum**: Start with shorter puzzles or legality-only reward
+
+---
+
+## 2024-12-12: Debug Tools & Model Comparison
+
+### Motivation
+GRPO pipeline showing -1.0 rewards due to truncation. Added debug tooling to diagnose generation behavior before fixing.
+
+### Implementation
+
+**New files:**
+| File | Description |
+|------|-------------|
+| `grpo_debug.py` | Sample generations with reward diagnostics |
+| `test_eos_behavior.py` | Test EOS token termination behavior |
+| `modal_grpo_debug.py` | Modal deployment for GPU-accelerated debug |
+
+**Fix applied:**
+- `grpo_trainer.py`: `max_completion_length` default changed from 512 to 1024
+
+**CLI entry points added:**
+- `uv run grpo-debug --model-id MODEL --num-samples 5 --verbose`
+- `uv run test-eos --base-model Qwen/Qwen3-0.6B`
+
+### Results: 0.6B SFT Model (Local)
+
+| Metric | Value |
+|--------|-------|
+| EOS emitted | 0/3 |
+| Has `</think>` | 0/3 |
+| Correct move | 0/3 |
+| Average reward | -1.0 |
+
+**Issue:** Model stuck in degenerate generation loops:
+```
+Kf1# (no mate available)
+Kf1# (no mate available)
+Kf1# (no mate available)
+...
+```
+
+### Results: 4B SFT Model (Modal A10G)
+
+| Metric | Value |
+|--------|-------|
+| EOS emitted | 4/5 |
+| Has `</think>` | 4/5 |
+| Correct move | 1/5 (20%) |
+| Average length | ~800 tokens |
+
+**Per-sample breakdown:**
+| Sample | Expected | Got | Status |
+|--------|----------|-----|--------|
+| 0 | h6 | h6 | ✓ |
+| 1 | Qf7# | None | ✗ (truncated at 1024) |
+| 2 | Qxh2# | Qxg2# | ✗ (wrong square) |
+| 3 | Qf1# | Qxh2+ | ✗ (wrong move) |
+| 4 | Qxh2# | Qh1# | ✗ (wrong square) |
+
+### Analysis
+
+**0.6B model:**
+- FEN parsing fundamentally broken (same issue as SFT training)
+- Generation loops prevent termination
+- Not viable for GRPO without significant improvements
+
+**4B model:**
+- Terminates properly with EOS and `</think>` tags
+- Produces structured output with valid format
+- Wrong moves suggest positional understanding issues, not format issues
+- Good candidate for GRPO training (can generate rewards > -1.0)
+
+### Conclusions
+
+1. **Truncation fix validated**: 1024 tokens sufficient for 4/5 samples
+2. **4B model ready for GRPO**: Proper termination enables meaningful reward signal
+3. **0.6B model not viable**: Generation loops and broken FEN parsing prevent learning
+4. **Next step**: Run GRPO training with 4B SFT checkpoint
+
+### Note on Debug Files
+The `modal_grpo_debug.py` file is a temporary debug utility. Consider removing after GRPO training is stable.
+
