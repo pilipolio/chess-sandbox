@@ -67,11 +67,22 @@ class ReasoningTrace(BaseModel):
         "The rook on e1 can deliver check on e8 along the open e-file.' "
         "Do NOT evaluate consequences like recaptures or material gain - save that for lines exploration."
     )
-    lines_pgn_with_comments: str = Field(
+    candidate_lines_reasoning: str = Field(
+        description="Explore candidate moves by calculating concrete lines. "
+        "For each promising candidate, trace 2-3 moves ahead showing opponent responses. "
+        "Example: 'If Qxh7+ Kxh7, then Rh1+ forces Kg8, and Rh8# is mate. "
+        "If Rxe7 instead, Qxe7 recaptures and Black keeps material.' "
+        "This analysis leads to identifying the correct solution."
+    )
+    final_lines_pgn: str = Field(
         description="Copy the provided PGN exactly, replacing each {COMMENT} placeholder with a short comment. "
         "Do NOT modify, add, or remove any moves. Comments should be specific to the move played: "
         "reference themes (fork, pin, back-rank mate), translate evaluations ('+3 = winning a piece'), "
         "explain tactical ideas ('threatens mate on h7'). Keep comments concise (3-10 words)."
+    )
+    solution_moves_sans: list[str] = Field(
+        description="The solution moves extracted from the PGN, as a list of SAN strings. "
+        "Example: ['Rxe7', 'Qb1+', 'Nc1']"
     )
 
 
@@ -193,14 +204,6 @@ def get_maia_predictions(
         return moves[:top_n]
     except Exception:
         return []
-
-
-def format_maia_predictions(maia_moves: list[HumanMove]) -> str:
-    """Format Maia predictions as a string for the prompt."""
-    if not maia_moves:
-        return "None"
-    parts = [f"{m.san_move} ({m.policy:.0f}%)" for m in maia_moves]
-    return ", ".join(parts)
 
 
 def format_score_for_prompt(score: float | None, mate_in: int | None, is_white_to_move: bool) -> str:
@@ -380,25 +383,34 @@ def build_lines_exploration_pgn(
     return " ".join(parts)
 
 
-def identify_candidate_moves(board: chess.Board) -> tuple[str, str]:
-    """Identify forcing moves: checks and captures.
+def build_candidate_moves_context(
+    board: chess.Board,
+    maia_moves: list[HumanMove] | None = None,
+    policy_threshold: float = 10.0,
+) -> str:
+    """Build unified candidate moves context from checks, captures, and human-likely moves.
+
+    Args:
+        board: Current position
+        maia_moves: Optional Maia predictions with policy %
+        policy_threshold: Minimum policy % to include Maia moves (default 10%)
 
     Returns:
-        Tuple of (checks_str, captures_str)
+        Comma-separated string of candidate moves (deduplicated)
     """
-    checks: list[str] = []
-    captures: list[str] = []
+    candidates: set[str] = set()
 
     for move in board.legal_moves:
         san = board.san(move)
-        if board.gives_check(move):
-            checks.append(san)
-        elif board.is_capture(move):
-            captures.append(san)
+        if board.gives_check(move) or board.is_capture(move):
+            candidates.add(san)
 
-    checks_str = ", ".join(checks) if checks else "None"
-    captures_str = ", ".join(captures) if captures else "None"
-    return checks_str, captures_str
+    if maia_moves:
+        for m in maia_moves:
+            if m.policy >= policy_threshold:
+                candidates.add(m.san_move)
+
+    return ", ".join(sorted(candidates)) if candidates else "None"
 
 
 REASONING_PROMPT_TEMPLATE = """\
@@ -407,9 +419,7 @@ Break down step by step how you analyze this position and arrive at your answer.
 
 Position (FEN): {puzzle_fen}
 Pieces: {piece_positions}
-Candidate checks: {candidate_checks}
-Candidate captures: {candidate_captures}
-Most likely human moves: {human_moves}
+Candidate moves: {candidate_moves}
 Last move: {last_move}
 To move: {side_to_move}
 Themes: {themes}
@@ -425,12 +435,19 @@ IMPORTANT INSTRUCTIONS:
    - Do NOT evaluate tactical consequences (recaptures, material gain) - save that for lines
    - Example: "The queen on c2 can reach h7 along the open b1-h7 diagonal"
 
-3. For lines_pgn_with_comments: Copy the PGN exactly, replacing each {{COMMENT}} with a short comment.
+3. For candidate_lines_reasoning: Calculate concrete lines for promising candidates.
+   - Trace 2-3 moves ahead with opponent responses
+   - Show why some lines fail and others succeed
+   - This analysis should lead to the solution
+
+4. For final_lines_pgn: Copy the PGN exactly, replacing each {{COMMENT}} with a short comment.
    - Do NOT modify, add, or remove any chess moves
    - Each comment should explain that specific move:
      * For solution moves: "threatens...", "forces...", "exploits the pin"
      * For refuted moves: "but this allows...", "loses to..."
      * Keep comments concise (3-10 words)
+
+5. For solution_moves_sans: Extract just the solution moves (marked with !) as a list.
 
 Your task is to explain WHY the solution works and why alternatives fail."""
 
@@ -450,8 +467,7 @@ def build_reasoning_prompt(
     """
     board = chess.Board(puzzle_fen)
     side_to_move = "White" if board.turn == chess.WHITE else "Black"
-    checks_str, captures_str = identify_candidate_moves(board)
-    human_moves_str = format_maia_predictions(maia_moves) if maia_moves else "None"
+    candidate_moves = build_candidate_moves_context(board, maia_moves)
 
     # Build valid PGN from solution + refuted lines
     lines_pgn = build_lines_exploration_pgn(board, solution_san, refuted_lines)
@@ -459,9 +475,7 @@ def build_reasoning_prompt(
     prompt = REASONING_PROMPT_TEMPLATE.format(
         puzzle_fen=puzzle_fen,
         piece_positions=build_piece_placement_summary(board),
-        candidate_checks=checks_str,
-        candidate_captures=captures_str,
-        human_moves=human_moves_str,
+        candidate_moves=candidate_moves,
         lines_pgn=lines_pgn,
         last_move=last_move_san,
         side_to_move=side_to_move,
@@ -507,8 +521,11 @@ def join_reasoning_trace(trace: ReasoningTrace, lines_pgn: str) -> str:
 {trace.candidate_moves_reasoning}
 {trace.candidate_moves_csv}
 
-## Step 5: Lines Exploration
-{trace.lines_pgn_with_comments}
+## Step 5: Candidate Lines Analysis
+{trace.candidate_lines_reasoning}
+
+## Step 6: Solution
+{trace.final_lines_pgn}
 
 </think>
 {lines_pgn}"""
@@ -545,8 +562,10 @@ def format_reasoning_example(
         "position_summary": trace.position_summary,
         "candidate_moves_reasoning": trace.candidate_moves_reasoning,
         "candidate_moves_csv": trace.candidate_moves_csv,
+        "candidate_lines_reasoning": trace.candidate_lines_reasoning,
         "lines_exploration": lines_pgn,
-        "lines_pgn_with_comments": trace.lines_pgn_with_comments,
+        "final_lines_pgn": trace.final_lines_pgn,
+        "solution_moves_sans": trace.solution_moves_sans,
         "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
@@ -619,9 +638,7 @@ async def process_puzzle(
             return None
 
         # Validate the LLM's commented version
-        lines_with_comments_valid, lines_with_comments_illegal = validate_pgn_lines(
-            puzzle_fen, trace.lines_pgn_with_comments
-        )
+        lines_with_comments_valid, lines_with_comments_illegal = validate_pgn_lines(puzzle_fen, trace.final_lines_pgn)
 
         # Join trace for verification using existing string-based verifier
         joined = join_reasoning_trace(trace, lines_pgn)

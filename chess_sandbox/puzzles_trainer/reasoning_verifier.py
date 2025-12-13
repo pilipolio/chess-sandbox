@@ -41,7 +41,8 @@ SECTION_PATTERNS = {
     "piece_positions": r"##\s*Step\s*2[:\s]*Piece\s*Positions",
     "position_summary": r"##\s*Step\s*3[:\s]*Position\s*Summary",
     "candidate_moves": r"##\s*Step\s*4[:\s]*Candidate\s*Moves",
-    "lines_exploration": r"##\s*Step\s*5[:\s]*Lines\s*Exploration",
+    "candidate_lines": r"##\s*Step\s*5[:\s]*Candidate\s*Lines\s*Analysis",
+    "solution": r"##\s*Step\s*6[:\s]*Solution",
 }
 
 PIECE_NAME_MAP = {
@@ -70,9 +71,9 @@ def extract_piece_positions_section(reasoning: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def extract_lines_exploration_section(reasoning: str) -> str | None:
-    """Extract the lines exploration content from Step 5 section."""
-    pattern = r"##\s*Step\s*5[:\s]*Lines\s*Exploration\s*\n(.*?)(?=</think>|$)"
+def extract_solution_lines_section(reasoning: str) -> str | None:
+    """Extract the solution content from Step 6 section."""
+    pattern = r"##\s*Step\s*6[:\s]*Solution\s*\n(.*?)(?=</think>|$)"
     match = re.search(pattern, reasoning, re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else None
 
@@ -366,8 +367,8 @@ def verify_reasoning_trace(
     else:
         result.format_errors.append("No Solution section found")
 
-    # 3b. Extract and validate lines_exploration (PGN format with variations)
-    lines_section = extract_lines_exploration_section(reasoning)
+    # 3b. Extract and validate solution lines (Step 6 - PGN format with variations)
+    lines_section = extract_solution_lines_section(reasoning)
     if lines_section:
         result.lines_exploration_valid, result.lines_exploration_illegal = validate_pgn_lines(fen, lines_section)
     else:
@@ -382,7 +383,7 @@ def verify_reasoning_trace(
 
     # 5. Calculate score
     # Section completeness: 20%
-    sections_score = 0.2 * (sections_count / 5)
+    sections_score = 0.2 * (sections_count / 6)
 
     # Piece positions accuracy: 20%
     piece_accuracy_score = 0.2 * result.piece_positions_accuracy
