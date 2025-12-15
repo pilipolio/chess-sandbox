@@ -20,8 +20,9 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1"
 
 MODELS: dict[str, str] = {
     "chess-reasoning": MODAL_VLLM_URL,
+    # "openai/gpt-oss-20b:free": OPENROUTER_URL,
     "qwen/qwen3-32b": OPENROUTER_URL,
-    "openai/gpt-4o-mini": OPENROUTER_URL,
+    "openai/gpt-5-mini": OPENROUTER_URL,
 }
 
 BENCHMARK_MODELS = list(MODELS.keys())
@@ -77,13 +78,16 @@ class StructuredReasoningModel(weave.Model):
         client = create_client(self.base_url)
 
         try:
-            response = client.beta.chat.completions.parse(
-                model=self.model_name,
-                messages=[{"role": "user", "content": question}],
-                response_format=ChessReasoningOutput,
-                max_tokens=1024,
-                temperature=0.7,
-            )
+            kwargs: dict[str, object] = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": question}],
+                "response_format": ChessReasoningOutput,
+                "max_tokens": 2048,
+                "temperature": 0.7,
+            }
+            if "gpt-5" in self.model_name:
+                kwargs["extra_body"] = {"reasoning": {"effort": "low"}}
+            response = client.beta.chat.completions.parse(**kwargs)  # pyright: ignore[reportArgumentType]
             return response.choices[0].message.parsed
         except Exception as e:
             print(f"\nError evaluating example with {self.model_name}: {e}")
@@ -315,6 +319,7 @@ def print_benchmark_comparison(all_results: dict[str, dict[str, object]]) -> Non
 @click.option("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE, help="Number of examples")
 @click.option("--split", default="test", help="Dataset split to evaluate")
 @click.option("--weave-project", default="chess-reasoning", help="Weave project name")
+@click.option("--parallelism", type=int, default=3, help="Number of parallel Weave workers")
 def main(
     dataset_id: str,
     model: str | None,
@@ -323,8 +328,10 @@ def main(
     sample_size: int,
     split: str,
     weave_project: str,
+    parallelism: int,
 ) -> None:
     """Evaluate chess reasoning puzzle models with structured outputs."""
+    os.environ["WEAVE_PARALLELISM"] = str(parallelism)
     weave.init(weave_project)
 
     print(f"Loading dataset: {dataset_id} (split: {split})")

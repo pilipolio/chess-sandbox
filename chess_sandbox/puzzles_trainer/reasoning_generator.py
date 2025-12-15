@@ -31,21 +31,53 @@ from chess_sandbox.engine.analyse import EngineConfig
 from chess_sandbox.engine.maia import HumanMove, MaiaConfig, analyze_human_moves
 from chess_sandbox.puzzles_trainer.reasoning_verifier import VerificationResult, verify_reasoning_trace
 
+load_dotenv()
+logfire.configure()
+logfire.instrument_openai()
+logfire.instrument_httpx()
 
-class RefutedLine(BaseModel):
-    """A refuted human-likely move with Stockfish's response."""
 
-    human_move: str  # SAN notation (e.g., "Qxb6")
-    human_policy: float  # Maia policy % (e.g., 62.0)
-    refutation_line: list[str]  # SAN moves showing refutation (2-ply)
-    score: float | None  # Evaluation in pawns (None for mate)
-    mate_in: int | None  # Mate-in-N if applicable
-    explanation: str  # Short description of why it fails
+REASONING_PROMPT_TEMPLATE = """\
+You are a chess instructor explaining your thought process when solving puzzles for your students.
+Break down step by step how you analyze this position and arrive at your answer.
+
+Position (FEN): {puzzle_fen}
+Pieces: {piece_positions}
+Candidate moves: {candidate_moves}
+Last move: {last_move}
+To move: {side_to_move}
+Themes: {themes}
+
+Lines PGN (solution + refuted alternatives):
+{lines_pgn}
+
+IMPORTANT INSTRUCTIONS:
+1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves and Lines),
+   do NOT quote the final solution.
+
+2. For candidate_moves_reasoning: Focus ONLY on piece movement MECHANICS.
+   - Describe HOW pieces can move: squares, files, diagonals, piece coordination
+   - Do NOT evaluate tactical consequences (recaptures, material gain) - save that for lines
+   - Example: "The queen on c2 can reach h7 along the open b1-h7 diagonal"
+
+3. For candidate_lines_reasoning: Calculate concrete lines for promising candidates.
+   - Trace 2-3 moves ahead with opponent responses
+   - Show why some lines fail and others succeed
+   - This analysis should lead to the solution
+
+4. For final_lines_pgn: Copy the PGN exactly, replacing each {{COMMENT}} with a short comment.
+   - Do NOT modify, add, or remove any chess moves
+   - Each comment should explain that specific move:
+     * For solution moves: "threatens...", "forces...", "exploits the pin"
+     * For refuted moves: "but this allows...", "loses to..."
+     * Keep comments concise (3-10 words)
+
+5. For solution_moves_sans: Extract just the solution moves (marked with !) as a list.
+
+Your task is to explain WHY the solution works and why alternatives fail."""
 
 
 class ReasoningTrace(BaseModel):
-    """Structured reasoning for a chess puzzle."""
-
     fen_parsing: str = Field(
         description="Breaking down FEN into each rank (starting from Rank8 to Rank1) to extract piece positions, "
         "e.g., 'Rank8: r6k -> a8 rook, h8 king. Rank7: pp2r2p -> a7 pawn, b7 pawn, e7 rook, h7 pawn.'"
@@ -61,19 +93,48 @@ class ReasoningTrace(BaseModel):
         description="Candidate moves using comma separated SAN notations: Qxh7, Rxe7, ..."
     )
     candidate_moves_reasoning: str = Field(
-        description="Explain candidate moves based on piece positions and relevant tactical themes, "
-        "unbiased by the solution and using short sentences, e.g., 'White queen on c2 can deliver "
-        "a check and capture the pawn on h7 along the open b1-h7 diagonal c2-d3-e4-f5-g6-h7'"
+        description="Describe the MECHANICS of how candidate moves work based on piece geometry. "
+        "Focus on squares, files, diagonals, and piece coordination - NOT tactical implications. "
+        "Example: 'The queen on c2 can capture the pawn on h7 along the open b1-h7 diagonal c2-d3-e4-f5-g6-h7. "
+        "The rook on e1 can deliver check on e8 along the open e-file.' "
+        "Do NOT evaluate consequences like recaptures or material gain - save that for lines exploration."
     )
-    lines_pgn_with_comments: str = Field(
-        description="Copy the provided PGN exactly, ONLY adding {comments} after key moves. "
-        "Do NOT modify, add, or remove any moves."
+    candidate_lines_reasoning: str = Field(
+        description="Explore candidate moves by calculating concrete lines. "
+        "For each promising candidate, trace 2-3 moves ahead showing opponent responses. "
+        "Example: 'If Qxh7+ Kxh7, then Rh1+ forces Kg8, and Rh8# is mate. "
+        "If Rxe7 instead, Qxe7 recaptures and Black keeps material.' "
+        "This analysis leads to identifying the correct solution."
+    )
+
+    themes_reasoning: str = Field(
+        description="Explain how the position's themes (fork, pin, hanging piece, back-rank mate) "
+        "relate to the solution's main line. "
+        "Example: 'This is a typical mate-in-two, initiated by Qxh7+ followed by Qxg7#.'"
+    )
+
+    final_lines_pgn: str = Field(
+        description="Copy the provided PGN exactly, replacing each {COMMENT} placeholder with a short comment. "
+        "Do NOT modify, add, or remove any moves. Comments tie together prior reasoning, "
+        "reference themes (fork, pin, back-rank mate), translate evaluations ('+3 = winning a piece'), "
+        "explain tactical ideas ('threatens mate on h7'). Keep comments concise (3-10 words)."
+    )
+    solution_sans: list[str] = Field(
+        description="The solution moves extracted from the PGN main line, as a list of SAN strings. "
+        "Example: ['Rxe7', 'Qb1+', 'Nc1']"
     )
 
 
-load_dotenv()
-logfire.configure()
-logfire.instrument_openai()
+class RefutedLine(BaseModel):
+    """A refuted human-likely move with Stockfish's response."""
+
+    human_move: str  # SAN notation (e.g., "Qxb6")
+    human_policy: float  # Maia policy % (e.g., 62.0)
+    refutation_line: list[str]  # SAN moves showing refutation (2-ply)
+    score: float | None  # Evaluation in pawns (None for mate)
+    mate_in: int | None  # Mate-in-N if applicable
+    explanation: str  # Short description of why it fails
+
 
 DATASET_ID = "Lichess/chess-puzzles"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -91,6 +152,8 @@ THEME_QUOTAS: dict[str, float] = {
     "attraction": 0.05,
     "other": 0.05,  # Catch-all for puzzles not matching above themes
 }
+
+FILTERED_OUT_THEMES = ["advantage", "crushing", "short", "long"]
 
 
 def extract_puzzle_position_and_solution(fen: str, uci_moves: str) -> tuple[str, str, list[str]] | None:
@@ -189,14 +252,6 @@ def get_maia_predictions(
         return []
 
 
-def format_maia_predictions(maia_moves: list[HumanMove]) -> str:
-    """Format Maia predictions as a string for the prompt."""
-    if not maia_moves:
-        return "None"
-    parts = [f"{m.san_move} ({m.policy:.0f}%)" for m in maia_moves]
-    return ", ".join(parts)
-
-
 def format_score_for_prompt(score: float | None, mate_in: int | None, is_white_to_move: bool) -> str:
     """Format engine score for prompt display using standard chess notation.
 
@@ -221,28 +276,6 @@ def format_score_for_prompt(score: float | None, mate_in: int | None, is_white_t
         return f"{adjusted_score:+.1f}"
 
     return "N/A"
-
-
-def build_refutation_explanation(score: float | None, mate_in: int | None, is_white_to_move: bool) -> str:
-    """Generate human-readable explanation for why a move fails."""
-    if mate_in is not None:
-        # Getting mated
-        return "leads to forced mate"
-
-    if score is None:
-        return "unclear"
-
-    # Score is in centipawns from white's perspective; adjust for side to move
-    relative_score = score if is_white_to_move else -score
-
-    if relative_score < -300:
-        return "loses significant material"
-    if relative_score < -100:
-        return "loses material"
-    if relative_score < -30:
-        return "gives opponent advantage"
-
-    return "inferior to the solution"
 
 
 def generate_refuted_lines(
@@ -306,8 +339,6 @@ def generate_refuted_lines(
             score = pov_score.score()
             mate_in = pov_score.mate()
 
-        explanation = build_refutation_explanation(score, mate_in, is_white_to_move)
-
         refuted_lines.append(
             RefutedLine(
                 human_move=maia_move.san_move,
@@ -315,7 +346,7 @@ def generate_refuted_lines(
                 refutation_line=refutation_moves,
                 score=score,
                 mate_in=mate_in,
-                explanation=explanation,
+                explanation=format_score_for_prompt(score, mate_in, is_white_to_move),
             )
         )
 
@@ -346,13 +377,13 @@ def build_lines_exploration_pgn(
     is_white = board.turn == chess.WHITE
     parts: list[str] = []
 
-    # First move with ! annotation
+    # First move with ! annotation and {COMMENT} placeholder
     if solution_san:
         first_move = solution_san[0]
         if is_white:
-            parts.append(f"{move_number}. {first_move}!")
+            parts.append(f"{move_number}. {first_move}! {{COMMENT}}")
         else:
-            parts.append(f"{move_number}... {first_move}!")
+            parts.append(f"{move_number}... {first_move}! {{COMMENT}}")
 
     # Insert variations immediately after first move (they are alternatives to it)
     if refuted_lines:
@@ -360,13 +391,15 @@ def build_lines_exploration_pgn(
             var_parts: list[str] = []
 
             if is_white:
-                var_parts.append(f"{move_number}. {rl.human_move}?")
+                var_parts.append(f"{move_number}. {rl.human_move}? {{COMMENT}}")
             else:
-                var_parts.append(f"{move_number}... {rl.human_move}?")
+                var_parts.append(f"{move_number}... {rl.human_move}? {{COMMENT}}")
 
             if rl.refutation_line:
-                var_parts.extend(rl.refutation_line)
+                for refut_move in rl.refutation_line:
+                    var_parts.append(f"{refut_move} {{COMMENT}}")
 
+            # Add engine eval at the end of refuted line
             var_parts.append(f"{{{rl.explanation}}}")
             parts.append(f"({' '.join(var_parts)})")
 
@@ -383,9 +416,9 @@ def build_lines_exploration_pgn(
         for san in solution_san[1:]:
             if temp_board.turn == chess.WHITE:
                 current_move_num = temp_board.fullmove_number
-                parts.append(f"{current_move_num}. {san}")
+                parts.append(f"{current_move_num}. {san} {{COMMENT}}")
             else:
-                parts.append(san)
+                parts.append(f"{san} {{COMMENT}}")
 
             try:
                 move = temp_board.parse_san(san)
@@ -396,49 +429,34 @@ def build_lines_exploration_pgn(
     return " ".join(parts)
 
 
-def identify_candidate_moves(board: chess.Board) -> tuple[str, str]:
-    """Identify forcing moves: checks and captures.
+def build_candidate_moves_context(
+    board: chess.Board,
+    maia_moves: list[HumanMove] | None = None,
+    policy_threshold: float = 10.0,
+) -> str:
+    """Build unified candidate moves context from checks, captures, and human-likely moves.
+
+    Args:
+        board: Current position
+        maia_moves: Optional Maia predictions with policy %
+        policy_threshold: Minimum policy % to include Maia moves (default 10%)
 
     Returns:
-        Tuple of (checks_str, captures_str)
+        Comma-separated string of candidate moves (deduplicated)
     """
-    checks: list[str] = []
-    captures: list[str] = []
+    candidates: set[str] = set()
 
     for move in board.legal_moves:
         san = board.san(move)
-        if board.gives_check(move):
-            checks.append(san)
-        elif board.is_capture(move):
-            captures.append(san)
+        if board.gives_check(move) or board.is_capture(move):
+            candidates.add(san)
 
-    checks_str = ", ".join(checks) if checks else "None"
-    captures_str = ", ".join(captures) if captures else "None"
-    return checks_str, captures_str
+    if maia_moves:
+        for m in maia_moves:
+            if m.policy >= policy_threshold:
+                candidates.add(m.san_move)
 
-
-REASONING_PROMPT_TEMPLATE = """\
-You are a chess instructor explaining your thought process when solving puzzles for your students.
-Break down step by step how you analyze this position and arrive at your answer.
-
-Position (FEN): {puzzle_fen}
-Pieces: {piece_positions}
-Candidate checks: {candidate_checks}
-Candidate captures: {candidate_captures}
-Most likely human moves: {human_moves}
-Last move: {last_move}
-To move: {side_to_move}
-Themes: {themes}
-
-Lines PGN (solution + refuted alternatives):
-{lines_pgn}
-
-IMPORTANT INSTRUCTIONS:
-1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves), do NOT quote the final solution.
-2. For lines_pgn_with_comments: copy the Lines PGN above exactly, ONLY adding {{comments}} after key moves.
-   Do NOT modify, add, or remove any chess moves - the PGN structure must remain identical.
-
-Your task is to explain WHY the solution works and why alternatives fail."""
+    return ", ".join(sorted(candidates)) if candidates else "None"
 
 
 def build_reasoning_prompt(
@@ -456,8 +474,7 @@ def build_reasoning_prompt(
     """
     board = chess.Board(puzzle_fen)
     side_to_move = "White" if board.turn == chess.WHITE else "Black"
-    checks_str, captures_str = identify_candidate_moves(board)
-    human_moves_str = format_maia_predictions(maia_moves) if maia_moves else "None"
+    candidate_moves = build_candidate_moves_context(board, maia_moves)
 
     # Build valid PGN from solution + refuted lines
     lines_pgn = build_lines_exploration_pgn(board, solution_san, refuted_lines)
@@ -465,13 +482,11 @@ def build_reasoning_prompt(
     prompt = REASONING_PROMPT_TEMPLATE.format(
         puzzle_fen=puzzle_fen,
         piece_positions=build_piece_placement_summary(board),
-        candidate_checks=checks_str,
-        candidate_captures=captures_str,
-        human_moves=human_moves_str,
+        candidate_moves=candidate_moves,
         lines_pgn=lines_pgn,
         last_move=last_move_san,
         side_to_move=side_to_move,
-        themes=", ".join(themes) if themes else "none",
+        themes=", ".join([f for f in themes if f not in FILTERED_OUT_THEMES]) if themes else "none",
     )
     return prompt, lines_pgn
 
@@ -513,8 +528,11 @@ def join_reasoning_trace(trace: ReasoningTrace, lines_pgn: str) -> str:
 {trace.candidate_moves_reasoning}
 {trace.candidate_moves_csv}
 
-## Step 5: Lines Exploration
-{trace.lines_pgn_with_comments}
+## Step 5: Candidate Lines Analysis
+{trace.candidate_lines_reasoning}
+
+## Step 6: Solution
+{trace.final_lines_pgn}
 
 </think>
 {lines_pgn}"""
@@ -551,8 +569,10 @@ def format_reasoning_example(
         "position_summary": trace.position_summary,
         "candidate_moves_reasoning": trace.candidate_moves_reasoning,
         "candidate_moves_csv": trace.candidate_moves_csv,
+        "candidate_lines_reasoning": trace.candidate_lines_reasoning,
         "lines_exploration": lines_pgn,
-        "lines_pgn_with_comments": trace.lines_pgn_with_comments,
+        "final_lines_pgn": trace.final_lines_pgn,
+        "solution_moves_sans": trace.solution_sans,
         "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
@@ -625,9 +645,7 @@ async def process_puzzle(
             return None
 
         # Validate the LLM's commented version
-        lines_with_comments_valid, lines_with_comments_illegal = validate_pgn_lines(
-            puzzle_fen, trace.lines_pgn_with_comments
-        )
+        lines_with_comments_valid, lines_with_comments_illegal = validate_pgn_lines(puzzle_fen, trace.final_lines_pgn)
 
         # Join trace for verification using existing string-based verifier
         joined = join_reasoning_trace(trace, lines_pgn)
@@ -765,8 +783,8 @@ async def generate_reasoning_dataset(
 @click.option(
     "--model",
     type=str,
-    default="openai/gpt-5-nano",
-    help="OpenRouter model ID (e.g., openai/gpt-5-nano, openai/gpt-4o-mini)",
+    default="openai/gpt-5-mini",
+    help="OpenRouter model ID (e.g., openai/gpt-5-mini, openai/gpt-5-nano)",
 )
 @click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity")
 @click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating")
@@ -804,10 +822,10 @@ async def generate_reasoning_dataset(
     help="Include Maia human move predictions in candidate moves",
 )
 @click.option(
-    "--maia-top-n",
-    type=int,
-    default=3,
-    help="Number of top Maia predictions to include (default: 3)",
+    "--export-local-path",
+    type=str,
+    default="data/datasets/chess-reasoning-traces",
+    help="Export results to local path",
 )
 @click.option(
     "--export-lichess-study-id",
@@ -831,7 +849,7 @@ def main(
     include_failed: bool,
     balanced: bool,
     use_maia: bool,
-    maia_top_n: int,
+    export_local_path: str,
     export_lichess_study_id: str | None,
 ) -> None:
     """Generate chess puzzle reasoning traces using LLMs."""
@@ -849,7 +867,6 @@ def main(
             api_key=api_key,
             balanced=balanced,
             use_maia=use_maia,
-            maia_top_n=maia_top_n,
         )
     )
 
@@ -891,19 +908,24 @@ def main(
     if push_to_hub:
         dataset_dict.push_to_hub(dataset_id)  # pyright: ignore[reportUnknownMemberType]
         click.echo(f"Pushed to: https://huggingface.co/datasets/{dataset_id}")
-    elif not export_lichess_study_id:
-        import json
-
-        click.echo(json.dumps(results, indent=2))
 
     if export_lichess_study_id:
         from chess_sandbox.lichess_export import export_traces_to_lichess
 
-        click.echo(f"\nExporting {len(results)} traces to Lichess study: {export_lichess_study_id}")
-        export_result = export_traces_to_lichess(results, export_lichess_study_id, model)
+        exported_results = results[:64]
+        click.echo(f"\nExporting {len(exported_results)} traces to Lichess study: {export_lichess_study_id}")
+        export_result = export_traces_to_lichess(exported_results, export_lichess_study_id, model)
         click.echo(f"Exported: {export_result['exported_count']}, Skipped: {export_result['skipped_count']}")
         if export_result["response"]:
             click.echo(f"Study URL: https://lichess.org/study/{export_lichess_study_id}")
+
+    if export_local_path:
+        dataset_dict.save_to_disk(dataset_dict_path=export_local_path)  # pyright: ignore[reportUnknownMemberType]
+
+    if not export_lichess_study_id and not push_to_hub:
+        import json
+
+        click.echo(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":

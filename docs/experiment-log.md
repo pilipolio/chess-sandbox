@@ -440,3 +440,54 @@ Kf1# (no mate available)
 ### Note on Debug Files
 The `modal_grpo_debug.py` file is a temporary debug utility. Consider removing after GRPO training is stable.
 
+---
+
+## 2024-12-13: GRPO Pipeline Status Update
+
+### Current State
+
+| Model | Status | Notes |
+|-------|--------|-------|
+| Qwen3-4B SFT | Ready for GRPO | Proper termination, ~20% first move accuracy |
+| Qwen3-0.6B SFT | Not viable | Generation loops, broken FEN parsing |
+
+**Key findings from debug:**
+- `max_completion_length=1024` sufficient for 4/5 samples
+- 4B model emits EOS and `</think>` tags correctly
+- Wrong moves indicate positional understanding gaps, not format issues
+
+### Next Steps for GRPO Training
+
+1. **Run full GRPO training with 4B SFT checkpoint**
+   ```bash
+   modal run chess_sandbox/puzzles_trainer/modal_grpo.py -- \
+       --model-id pilipolio/chess-reasoning-sft-qwen3-4b \
+       --num-generations 8 \
+       --max-completion-length 1024 \
+       --kl-coef 0.04
+   ```
+
+2. **Reward function refinement**
+   - Current: 4-component (legality 40%, correctness 40%, format 15%, pieces 5%)
+   - Consider: PGN validation of ALL moves in solution, not just first move
+   - Consider: Engine eval of final position (continuous signal)
+
+3. **Curriculum options to explore**
+   - Start with higher-legality puzzles (mate-in-1, clear forcing moves)
+   - Balanced theme sampling (use `THEME_QUOTAS` from `reasoning_generator.py`)
+
+4. **Monitoring metrics**
+   - `completions/clipped_ratio` < 100% (model terminating properly)
+   - `reward/mean` improvement over baseline
+   - `first_move_accuracy` on held-out test set
+
+### Documentation Updates
+
+Updated `docs/chess-llm-finetuning.md`:
+- Added "Reasoning Trace Pipeline" section explaining:
+  - PGN format as bridge to RLVR
+  - Theme injection for domain grounding
+  - 5-step reasoning structure
+  - Contrastive learning via Maia + Stockfish refutations
+- Condensed Experiment Log to summary table with pointer to this file
+- Updated GRPO reward design to reference PGN validation

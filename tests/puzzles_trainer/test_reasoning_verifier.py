@@ -30,15 +30,19 @@ class TestParseSections:
         ## Step 4: Candidate Moves
         e5, d5, Nf6...
 
-        ## Step 5: Lines Exploration
+        ## Step 5: Candidate Lines Analysis
         1...e5 2. Nf3 Nc6...
+
+        ## Step 6: Solution
+        e5
         """
         sections = parse_sections(reasoning)
         assert sections["fen_parsing"] is True
         assert sections["piece_positions"] is True
         assert sections["position_summary"] is True
         assert sections["candidate_moves"] is True
-        assert sections["lines_exploration"] is True
+        assert sections["candidate_lines"] is True
+        assert sections["solution"] is True
 
     def test_missing_sections(self):
         reasoning = """
@@ -52,7 +56,8 @@ class TestParseSections:
         assert sections["piece_positions"] is False
         assert sections["position_summary"] is False
         assert sections["candidate_moves"] is False
-        assert sections["lines_exploration"] is False
+        assert sections["candidate_lines"] is False
+        assert sections["solution"] is False
 
     def test_case_insensitive(self):
         reasoning = """
@@ -68,8 +73,11 @@ class TestParseSections:
         ## Step 4: Candidate Moves
         Moves here.
 
-        ## Step 5: Lines Exploration
+        ## Step 5: Candidate Lines Analysis
         Exploration.
+
+        ## Step 6: Solution
+        e5
         """
         sections = parse_sections(reasoning)
         assert all(sections.values())
@@ -311,8 +319,11 @@ class TestVerifyReasoningTrace:
         ## Step 4: Candidate Moves
         e5, d5, c5, Nf6 are all playable.
 
-        ## Step 5: Lines Exploration
+        ## Step 5: Candidate Lines Analysis
         1...e5 {mirroring White's center control} 2. Nf3 Nc6
+
+        ## Step 6: Solution
+        e5
         </think>
         e5
         """
