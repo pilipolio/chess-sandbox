@@ -491,3 +491,122 @@ Updated `docs/chess-llm-finetuning.md`:
   - Contrastive learning via Maia + Stockfish refutations
 - Condensed Experiment Log to summary table with pointer to this file
 - Updated GRPO reward design to reference PGN validation
+
+---
+
+## 2024-12-15: Reasoning Trace Generation - 1.5k Balanced Dataset
+
+### Setup
+- **Model**: openai/gpt-5-mini via OpenRouter
+- **Sample size**: 1500 (balanced theme sampling)
+- **Flags**: `--balanced --use-maia --min-score 0.6`
+- **Concurrency**: 5 parallel requests
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Generated | 1500/1500 |
+| Passed verification | 1493 (99.5%) |
+| Avg verification score | 0.68 |
+| Score range | 0.60 - 0.98 |
+| Train/Test split | 1343/150 |
+| Duration | 1h 29min |
+
+### Dataset
+- **URL**: [pilipolio/chess-reasoning-traces](https://huggingface.co/datasets/pilipolio/chess-reasoning-traces)
+- **Commit**: [048396883cb](https://huggingface.co/datasets/pilipolio/chess-reasoning-traces/commit/048396883cb08701335091c3b19f9e0bac5e28c2)
+
+### PR
+- [#83](https://github.com/pilipolio/chess-sandbox/pull/83)
+
+### Notes
+- Balanced sampling filled theme quotas (fork, pin, skewer, etc.) to avoid mate-puzzle overfit
+- Maia + Stockfish enabled for human-likely move predictions and refutation lines
+- 7 traces filtered below min_score threshold
+
+### Next: Continue SFT Training
+
+Continue training from existing checkpoint with fresh optimizer/LR schedule:
+
+```bash
+modal run chess_sandbox/puzzles_trainer/modal_pipeline.py::train_reasoning -- \
+    --model-id pilipolio/chess-reasoning-sft-qwen3-4b \
+    --output-model-id pilipolio/chess-reasoning-sft-qwen3-4b-v2 \
+    --wandb-project chess-reasoning-sft \
+    --wandb-run-name qwen3-4b-v2-3ep
+```
+
+**Rationale**: Load pre-trained LoRA weights but start fresh optimizer/scheduler. Original checkpoint was trained on ~895 examples; new dataset has 1343 train examples. Fresh schedule ensures proper LR warmup and decay for the larger dataset.
+
+---
+
+## 2024-12-15: SFT Training v2 - Observations
+
+### Setup
+- **Base**: `pilipolio/chess-reasoning-sft-qwen3-4b` (fresh optimizer/scheduler)
+- **Dataset**: 1343 train / 150 test
+- **Target**: `pilipolio/chess-reasoning-sft-qwen3-4b-v2`
+
+### Anecdotal Failure (Step 300)
+
+**Puzzle**: [05FNp](https://lichess.org/training/05FNp) (Rating: 1183)
+**FEN**: `8/p5pk/1p3r1p/3BRbq1/2P5/5QP1/P4P1P/6K1 b - - 2 26`
+
+**Issue**: Model describes queen movement as L-shaped (knight pattern):
+> "The queen on g5 can capture the queen on f3 by moving one square diagonally to f4 then to f3 (g5-f4-f3)"
+
+**Analysis**:
+- Piece positions: ✓ Correct
+- Candidate moves: ✗ Missed Qc1+ (the solution)
+- Movement mechanics: ✗ Hallucinated two-step L-shaped path for queen
+
+**Note**: GPT-5 via UI also fails this puzzle (finds Qxg3+ instead). Higher-rated puzzle (1183) but Qc1+ should at minimum appear in candidates as it's a check.
+
+This suggests the model learned piece positions but not movement rules. Queens move in straight lines (ranks, files, diagonals), not knight-like L-shapes.
+
+### Training Results
+
+| Metric | Value |
+|--------|-------|
+| Train loss | 0.846 |
+| Token accuracy | 79.8% |
+| Duration | ~2.2 hours |
+| Epochs | 3 |
+
+**Validation at Step 500:**
+| Metric | Value |
+|--------|-------|
+| First move accuracy | 0% |
+| Legal move rate | 80% |
+| Avg sections found | 6.0/5 |
+
+### Anecdotal Failure #2 (Step 500)
+
+**Puzzle**: [00k4u](https://lichess.org/training/00k4u) - Easy mate-in-1
+
+**Issue**: Correct move Qxg2# found as candidate but not selected. Model chose Qxd8 instead.
+
+**Root causes**:
+1. **Missed piece**: Black f6 pawn not in piece positions → Qxd8 would be illegal (blocked)
+2. **Missed battery**: Rg8 forms battery with Qg5, so Kxg2 is impossible after Qxg2#
+3. **Movement hallucination**: Still describes diagonal as hop path: "g5-f4-e3-d2 then to d8"
+
+**W&B artifacts**: [validation examples](https://wandb.ai/guillaumeallain-test/chess-reasoning-sft/artifacts/run_table/run-juqjsu4a-validateexamples-7IDAMw/v4/files/validate/examples.table.json)
+
+### Analysis
+
+Despite high token accuracy (79.8%), the model fails at chess reasoning:
+- **Format learned**: Produces correct structure (6/5 sections)
+- **Positions partially learned**: Most pieces correct, but misses some
+- **Movement rules not learned**: Queen described as moving in hops
+- **Tactical patterns not learned**: Misses batteries, doesn't prioritize checks/mates
+
+### Next Steps
+
+1. **Fix answer format glitch** in training data (model outputs wrong move despite identifying correct one)
+2. **GRPO training** - Use legality + correctness rewards to reinforce actual chess understanding
+3. **Explore alternatives**:
+   - Larger model (8B+)
+   - Higher LoRA rank (64 vs 32)
+   - Add legal move examples to SFT data
