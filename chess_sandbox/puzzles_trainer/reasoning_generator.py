@@ -31,21 +31,53 @@ from chess_sandbox.engine.analyse import EngineConfig
 from chess_sandbox.engine.maia import HumanMove, MaiaConfig, analyze_human_moves
 from chess_sandbox.puzzles_trainer.reasoning_verifier import VerificationResult, verify_reasoning_trace
 
+load_dotenv()
+logfire.configure()
+logfire.instrument_openai()
+logfire.instrument_httpx()
 
-class RefutedLine(BaseModel):
-    """A refuted human-likely move with Stockfish's response."""
 
-    human_move: str  # SAN notation (e.g., "Qxb6")
-    human_policy: float  # Maia policy % (e.g., 62.0)
-    refutation_line: list[str]  # SAN moves showing refutation (2-ply)
-    score: float | None  # Evaluation in pawns (None for mate)
-    mate_in: int | None  # Mate-in-N if applicable
-    explanation: str  # Short description of why it fails
+REASONING_PROMPT_TEMPLATE = """\
+You are a chess instructor explaining your thought process when solving puzzles for your students.
+Break down step by step how you analyze this position and arrive at your answer.
+
+Position (FEN): {puzzle_fen}
+Pieces: {piece_positions}
+Candidate moves: {candidate_moves}
+Last move: {last_move}
+To move: {side_to_move}
+Themes: {themes}
+
+Lines PGN (solution + refuted alternatives):
+{lines_pgn}
+
+IMPORTANT INSTRUCTIONS:
+1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves and Lines),
+   do NOT quote the final solution.
+
+2. For candidate_moves_reasoning: Focus ONLY on piece movement MECHANICS.
+   - Describe HOW pieces can move: squares, files, diagonals, piece coordination
+   - Do NOT evaluate tactical consequences (recaptures, material gain) - save that for lines
+   - Example: "The queen on c2 can reach h7 along the open b1-h7 diagonal"
+
+3. For candidate_lines_reasoning: Calculate concrete lines for promising candidates.
+   - Trace 2-3 moves ahead with opponent responses
+   - Show why some lines fail and others succeed
+   - This analysis should lead to the solution
+
+4. For final_lines_pgn: Copy the PGN exactly, replacing each {{COMMENT}} with a short comment.
+   - Do NOT modify, add, or remove any chess moves
+   - Each comment should explain that specific move:
+     * For solution moves: "threatens...", "forces...", "exploits the pin"
+     * For refuted moves: "but this allows...", "loses to..."
+     * Keep comments concise (3-10 words)
+
+5. For solution_moves_sans: Extract just the solution moves (marked with !) as a list.
+
+Your task is to explain WHY the solution works and why alternatives fail."""
 
 
 class ReasoningTrace(BaseModel):
-    """Structured reasoning for a chess puzzle."""
-
     fen_parsing: str = Field(
         description="Breaking down FEN into each rank (starting from Rank8 to Rank1) to extract piece positions, "
         "e.g., 'Rank8: r6k -> a8 rook, h8 king. Rank7: pp2r2p -> a7 pawn, b7 pawn, e7 rook, h7 pawn.'"
@@ -74,21 +106,35 @@ class ReasoningTrace(BaseModel):
         "If Rxe7 instead, Qxe7 recaptures and Black keeps material.' "
         "This analysis leads to identifying the correct solution."
     )
+
+    themes_reasoning: str = Field(
+        description="Explain how the position's themes (fork, pin, hanging piece, back-rank mate) "
+        "relate to the solution's main line. "
+        "Example: 'This is a typical mate-in-two, initiated by Qxh7+ followed by Qxg7#.'"
+    )
+
     final_lines_pgn: str = Field(
         description="Copy the provided PGN exactly, replacing each {COMMENT} placeholder with a short comment. "
-        "Do NOT modify, add, or remove any moves. Comments should be specific to the move played: "
+        "Do NOT modify, add, or remove any moves. Comments tie together prior reasoning, "
         "reference themes (fork, pin, back-rank mate), translate evaluations ('+3 = winning a piece'), "
         "explain tactical ideas ('threatens mate on h7'). Keep comments concise (3-10 words)."
     )
-    solution_moves_sans: list[str] = Field(
-        description="The solution moves extracted from the PGN, as a list of SAN strings. "
+    solution_sans: list[str] = Field(
+        description="The solution moves extracted from the PGN main line, as a list of SAN strings. "
         "Example: ['Rxe7', 'Qb1+', 'Nc1']"
     )
 
 
-load_dotenv()
-logfire.configure()
-logfire.instrument_openai()
+class RefutedLine(BaseModel):
+    """A refuted human-likely move with Stockfish's response."""
+
+    human_move: str  # SAN notation (e.g., "Qxb6")
+    human_policy: float  # Maia policy % (e.g., 62.0)
+    refutation_line: list[str]  # SAN moves showing refutation (2-ply)
+    score: float | None  # Evaluation in pawns (None for mate)
+    mate_in: int | None  # Mate-in-N if applicable
+    explanation: str  # Short description of why it fails
+
 
 DATASET_ID = "Lichess/chess-puzzles"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -413,45 +459,6 @@ def build_candidate_moves_context(
     return ", ".join(sorted(candidates)) if candidates else "None"
 
 
-REASONING_PROMPT_TEMPLATE = """\
-You are a chess instructor explaining your thought process when solving puzzles for your students.
-Break down step by step how you analyze this position and arrive at your answer.
-
-Position (FEN): {puzzle_fen}
-Pieces: {piece_positions}
-Candidate moves: {candidate_moves}
-Last move: {last_move}
-To move: {side_to_move}
-Themes: {themes}
-
-Lines PGN (solution + refuted alternatives):
-{lines_pgn}
-
-IMPORTANT INSTRUCTIONS:
-1. In your analysis sections (FEN parsing, Position Summary, Candidate Moves), do NOT quote the final solution.
-
-2. For candidate_moves_reasoning: Focus ONLY on piece movement MECHANICS.
-   - Describe HOW pieces can move: squares, files, diagonals, piece coordination
-   - Do NOT evaluate tactical consequences (recaptures, material gain) - save that for lines
-   - Example: "The queen on c2 can reach h7 along the open b1-h7 diagonal"
-
-3. For candidate_lines_reasoning: Calculate concrete lines for promising candidates.
-   - Trace 2-3 moves ahead with opponent responses
-   - Show why some lines fail and others succeed
-   - This analysis should lead to the solution
-
-4. For final_lines_pgn: Copy the PGN exactly, replacing each {{COMMENT}} with a short comment.
-   - Do NOT modify, add, or remove any chess moves
-   - Each comment should explain that specific move:
-     * For solution moves: "threatens...", "forces...", "exploits the pin"
-     * For refuted moves: "but this allows...", "loses to..."
-     * Keep comments concise (3-10 words)
-
-5. For solution_moves_sans: Extract just the solution moves (marked with !) as a list.
-
-Your task is to explain WHY the solution works and why alternatives fail."""
-
-
 def build_reasoning_prompt(
     puzzle_fen: str,
     last_move_san: str,
@@ -565,7 +572,7 @@ def format_reasoning_example(
         "candidate_lines_reasoning": trace.candidate_lines_reasoning,
         "lines_exploration": lines_pgn,
         "final_lines_pgn": trace.final_lines_pgn,
-        "solution_moves_sans": trace.solution_moves_sans,
+        "solution_moves_sans": trace.solution_sans,
         "source_url": f"https://lichess.org/training/{puzzle_id}",
     }
 
@@ -776,8 +783,8 @@ async def generate_reasoning_dataset(
 @click.option(
     "--model",
     type=str,
-    default="openai/gpt-5-nano",
-    help="OpenRouter model ID (e.g., openai/gpt-5-nano, openai/gpt-4o-mini)",
+    default="openai/gpt-5-mini",
+    help="OpenRouter model ID (e.g., openai/gpt-5-mini, openai/gpt-5-nano)",
 )
 @click.option("--min-popularity", type=int, default=80, help="Minimum puzzle popularity")
 @click.option("--max-rating", type=int, default=None, help="Maximum puzzle rating")

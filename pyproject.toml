@@ -67,7 +67,7 @@ agents = [
     "pydantic-ai>=0.4.3",
     "pydantic-ai-slim[logfire]>=0.4.3",
     "weave>=0.51.0",
-    "logfire==4.16.0"
+    "logfire[httpx]==4.16.0"
 ]
 
 # Infra: serverless deployment and caching

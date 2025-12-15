@@ -24,7 +24,7 @@ def build_annotated_pgn(
     themes: list[str],
     position_summary: str,
     candidate_moves_reasoning: str,
-    lines_exploration: str,
+    pgn_lines: str,
     source_url: str,
     model_name: str,
 ) -> tuple[str, list[str]]:
@@ -35,7 +35,7 @@ def build_annotated_pgn(
         themes: List of puzzle themes for Event header
         position_summary: Position summary for initial comment
         candidate_moves_reasoning: Candidate analysis for initial comment
-        lines_exploration: PGN-formatted lines with variations and comments
+        pgn_lines: PGN-formatted lines with variations and comments
         source_url: Puzzle source URL for Site header
         model_name: Model name for Annotator header
 
@@ -48,7 +48,7 @@ def build_annotated_pgn(
     ...     themes=["opening"],
     ...     position_summary="White played e4",
     ...     candidate_moves_reasoning="e5 is solid",
-    ...     lines_exploration="1... e5 2. Nf3",
+    ...     pgn_lines="1... e5 2. Nf3",
     ...     source_url="https://lichess.org/training/test",
     ...     model_name="test-model",
     ... )
@@ -59,7 +59,7 @@ def build_annotated_pgn(
     >>> len(illegal)
     0
     """
-    is_valid, illegal_moves = validate_pgn_lines(fen, lines_exploration)
+    is_valid, illegal_moves = validate_pgn_lines(fen, pgn_lines)
 
     game = chess.pgn.Game()
     game.headers["Event"] = ", ".join(themes) if themes else "Chess Puzzle"
@@ -76,7 +76,7 @@ def build_annotated_pgn(
     game.comment = header_comment
 
     if is_valid:
-        pgn_with_fen = f'[FEN "{fen}"]\n\n{lines_exploration}'
+        pgn_with_fen = f'[FEN "{fen}"]\n\n{pgn_lines}'
         parsed = chess.pgn.read_game(io.StringIO(pgn_with_fen))
         if parsed is not None:
             node = game
@@ -159,7 +159,7 @@ def export_traces_to_lichess(
             themes=trace.get("themes", []),
             position_summary=trace.get("position_summary", ""),
             candidate_moves_reasoning=trace.get("candidate_moves_reasoning", ""),
-            lines_exploration=trace.get("lines_exploration", ""),
+            pgn_lines=trace.get("final_lines_pgn", ""),
             source_url=trace.get("source_url", ""),
             model_name=model_name,
         )
