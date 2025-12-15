@@ -512,8 +512,9 @@ async def generate_reasoning_trace(
     return response.choices[0].message.parsed
 
 
-def join_reasoning_trace(trace: ReasoningTrace, lines_pgn: str) -> str:
+def join_reasoning_trace(trace: ReasoningTrace) -> str:
     """Join structured trace into <think> format for SFT training."""
+    first_move = trace.solution_sans[0] if trace.solution_sans else ""
     return f"""<think>
 ## Step 1: FEN parsing
 {trace.fen_parsing}
@@ -535,7 +536,7 @@ def join_reasoning_trace(trace: ReasoningTrace, lines_pgn: str) -> str:
 {trace.final_lines_pgn}
 
 </think>
-{lines_pgn}"""
+{first_move}"""
 
 
 def format_reasoning_example(
@@ -544,7 +545,6 @@ def format_reasoning_example(
     themes: list[str],
     solution_san: list[str],
     trace: ReasoningTrace,
-    lines_pgn: str,
     puzzle_id: str,
     rating: int,
     verification: VerificationResult | None = None,
@@ -552,7 +552,7 @@ def format_reasoning_example(
     """Format puzzle with structured reasoning for SFT training."""
     first_move = solution_san[0]
     question = f"Position: {puzzle_fen}\nOpponent's last move: {last_move_san}\nFind the best move."
-    answer = join_reasoning_trace(trace, lines_pgn)
+    answer = join_reasoning_trace(trace)
 
     result: dict[str, Any] = {
         "question": question,
@@ -570,7 +570,7 @@ def format_reasoning_example(
         "candidate_moves_reasoning": trace.candidate_moves_reasoning,
         "candidate_moves_csv": trace.candidate_moves_csv,
         "candidate_lines_reasoning": trace.candidate_lines_reasoning,
-        "lines_exploration": lines_pgn,
+        "lines_exploration": trace.final_lines_pgn,
         "final_lines_pgn": trace.final_lines_pgn,
         "solution_moves_sans": trace.solution_sans,
         "source_url": f"https://lichess.org/training/{puzzle_id}",
@@ -648,7 +648,7 @@ async def process_puzzle(
         lines_with_comments_valid, lines_with_comments_illegal = validate_pgn_lines(puzzle_fen, trace.final_lines_pgn)
 
         # Join trace for verification using existing string-based verifier
-        joined = join_reasoning_trace(trace, lines_pgn)
+        joined = join_reasoning_trace(trace)
         verification = verify_reasoning_trace(puzzle_fen, joined, solution_san)
 
         # Add lines validation to verification result
@@ -656,7 +656,7 @@ async def process_puzzle(
         verification.lines_exploration_illegal = lines_with_comments_illegal
 
         return format_reasoning_example(
-            puzzle_fen, last_move_san, themes, solution_san, trace, lines_pgn, puzzle_id, rating, verification
+            puzzle_fen, last_move_san, themes, solution_san, trace, puzzle_id, rating, verification
         )
 
 
