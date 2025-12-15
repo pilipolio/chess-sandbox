@@ -822,10 +822,10 @@ async def generate_reasoning_dataset(
     help="Include Maia human move predictions in candidate moves",
 )
 @click.option(
-    "--maia-top-n",
-    type=int,
-    default=3,
-    help="Number of top Maia predictions to include (default: 3)",
+    "--export-local-path",
+    type=str,
+    default="data/datasets/chess-reasoning-traces",
+    help="Export results to local path",
 )
 @click.option(
     "--export-lichess-study-id",
@@ -849,7 +849,7 @@ def main(
     include_failed: bool,
     balanced: bool,
     use_maia: bool,
-    maia_top_n: int,
+    export_local_path: str,
     export_lichess_study_id: str | None,
 ) -> None:
     """Generate chess puzzle reasoning traces using LLMs."""
@@ -867,7 +867,6 @@ def main(
             api_key=api_key,
             balanced=balanced,
             use_maia=use_maia,
-            maia_top_n=maia_top_n,
         )
     )
 
@@ -913,12 +912,17 @@ def main(
     if export_lichess_study_id:
         from chess_sandbox.lichess_export import export_traces_to_lichess
 
-        click.echo(f"\nExporting {len(results)} traces to Lichess study: {export_lichess_study_id}")
-        export_result = export_traces_to_lichess(results, export_lichess_study_id, model)
+        exported_results = results[:64]
+        click.echo(f"\nExporting {len(exported_results)} traces to Lichess study: {export_lichess_study_id}")
+        export_result = export_traces_to_lichess(exported_results, export_lichess_study_id, model)
         click.echo(f"Exported: {export_result['exported_count']}, Skipped: {export_result['skipped_count']}")
         if export_result["response"]:
             click.echo(f"Study URL: https://lichess.org/study/{export_lichess_study_id}")
-    else:
+
+    if export_local_path:
+        dataset_dict.save_to_disk(dataset_dict_path=export_local_path)  # pyright: ignore[reportUnknownMemberType]
+
+    if not export_lichess_study_id and not push_to_hub:
         import json
 
         click.echo(json.dumps(results, indent=2))

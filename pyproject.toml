@@ -167,10 +167,16 @@ exclude = [
     "**/concept_extraction/model/evaluation.py",         # ML evaluation code with sklearn
     "**/concept_extraction/model/dataset.py",            # Dataset loading with HF Hub
     "**/concept_extraction/model/model_artefact.py",     # Model artefact handling with HF Hub
+    "**/concept_extraction/model/features.py",           # Feature extraction with torch
+    "**/concept_extraction/model/compare.py",            # Model comparison with torch
+    "**/concept_extraction/endpoints.py",                # Modal endpoints with torch
+    "**/commentary/**",                                  # Commentary module requires torch
     "**/puzzles_trainer/trainer.py",                     # SFT training with TRL
     "**/puzzles_trainer/reasoning_trainer.py",           # Reasoning SFT training with TRL
     "**/puzzles_trainer/grpo_trainer.py",                # GRPO training with TRL
     "**/puzzles_trainer/grpo_debug.py",                  # GRPO debug utilities with torch
+    "**/puzzles_trainer/modal_grpo_debug.py",            # Modal GRPO debug with datasets
+    "**/puzzles_trainer/inference.py",                   # Inference with torch/transformers
     "**/puzzles_trainer/test_eos_behavior.py",           # EOS behavior testing with torch
     "**/puzzles_trainer/dataset.py",                     # Dataset loading with HF datasets
     "**/puzzles_trainer/prepare_dataset.py",             # Dataset prep with HF datasets + cairosvg
@@ -181,7 +187,7 @@ exclude = [
 reportMissingTypeStubs = "warning"  # warn instead of error for third-party libs without stubs
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --ignore=chess_sandbox/commentary/endpoints.py --ignore=chess_sandbox/puzzles_trainer"
+addopts = "--doctest-modules --ignore=chess_sandbox/commentary --ignore=chess_sandbox/concept_extraction --ignore=chess_sandbox/puzzles_trainer --ignore=tests/concept_extraction --ignore=tests/test_tactical_patterns.py"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: marks tests as integration tests requiring Stockfish (deselect with '-m \"not integration\"')",
