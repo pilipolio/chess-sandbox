@@ -441,5 +441,7 @@ See [docs/experiment-log.md](experiment-log.md) for detailed experiment entries.
 | 2024-12-09 | Reasoning SFT pipeline setup | 5-step format with PGN output |
 | 2024-12-11 | gpt-4.1-nano vs gpt-5-nano | gpt-5-nano produces accurate reasoning |
 | 2024-12-12 | GRPO debug with 4B SFT | Proper termination, ~20% first move accuracy |
+| 2024-12-15 | 1.5k balanced dataset generation | 99.5% pass verification, Maia+Stockfish refutations |
+| 2024-12-15 | SFT v2 on larger dataset | 0% first move, 80% legal, movement hallucinations |
 
-**Current status:** 4B SFT model ready for GRPO training. See experiment-log.md for next steps.
+**Current status:** SFT learns format (80% token acc) but not chess rules. Model hallucinates piece movements. Next: GRPO with legality rewards.
